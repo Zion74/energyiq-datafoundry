@@ -10,10 +10,17 @@ export type EnergyAiSqlEvidence = {
   rows: readonly unknown[];
 };
 
+type NumericClaimRelation = {
+  denominator: string[];
+  numerator: string[];
+};
+
 type NumericClaim = {
+  absoluteTolerance?: number;
   context: string;
   entityContext: string;
   precision: number;
+  relation?: NumericClaimRelation;
   value: number;
 };
 
@@ -121,7 +128,7 @@ function collectSqlNumericEvidence(columns: readonly string[], rows: readonly un
 
 function numericClaims(value: string): NumericClaim[] {
   const nonBusinessRanges = dateTimeRanges(value);
-  return [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?:(?=[xX]\b)|(?=×)|(?![A-Za-z0-9]))/gu)].flatMap((match) => {
+  const digitClaims = [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?:(?=[xX]\b)|(?=×)|(?![A-Za-z0-9]))/gu)].flatMap((match) => {
     const token = match[0];
     const normalized = token.replaceAll(",", "");
     const parsed = Number(normalized);
@@ -135,6 +142,101 @@ function numericClaims(value: string): NumericClaim[] {
       value: parsed,
     }] : [];
   });
+  const lexicalFractionClaims = [...value.matchAll(
+    /\b(?:(about|roughly|approximately|nearly|almost)\s+)?(a[\s\-‐‑‒–—]+quarter|one[\s\-‐‑‒–—]+quarter|a[\s\-‐‑‒–—]+half|one[\s\-‐‑‒–—]+half|half|a[\s\-‐‑‒–—]+third|one[\s\-‐‑‒–—]+third|two[\s\-‐‑‒–—]+thirds|three[\s\-‐‑‒–—]+quarters)\s+of\b/giu,
+  )].map<NumericClaim>((match) => {
+    const fraction = match[2]!.toLowerCase().replaceAll(/[\s\-‐‑‒–—]+/gu, " ");
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const isDuration = /^\s+(?:an?\s+)?hour\b/iu.test(value.slice(end));
+    const fractionValue = lexicalFractionPercent(fraction);
+    const claim: NumericClaim = {
+      context: isDuration
+        ? `${numericUnitContext(value, start, end)} minutes duration`
+        : `${numericUnitContext(value, start, end)} percent share ratio`,
+      entityContext: entityClauseAround(value, start, end),
+      precision: 0,
+      value: isDuration ? fractionValue * 0.6 : fractionValue,
+    };
+    if (match[1]) claim.absoluteTolerance = 2.5;
+    if (!isDuration) claim.relation = lexicalFractionRelation(value, start, end);
+    return claim;
+  });
+  const lexicalDurationClaims = [...value.matchAll(
+    /\b(?:(about|roughly|approximately|nearly|almost)\s+)?(a[\s\-‐‑‒–—]+quarter|one[\s\-‐‑‒–—]+quarter|a[\s\-‐‑‒–—]+half|one[\s\-‐‑‒–—]+half|half|a[\s\-‐‑‒–—]+third|one[\s\-‐‑‒–—]+third|two[\s\-‐‑‒–—]+thirds|three[\s\-‐‑‒–—]+quarters)\s+(?:an?\s+)?hours?\b/giu,
+  )].map<NumericClaim>((match) => {
+    const fraction = match[2]!.toLowerCase().replaceAll(/[\s\-‐‑‒–—]+/gu, " ");
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const claim: NumericClaim = {
+      context: `${numericUnitContext(value, start, end)} minutes duration`,
+      entityContext: entityClauseAround(value, start, end),
+      precision: 0,
+      value: lexicalFractionPercent(fraction) * 0.6,
+    };
+    if (match[1]) claim.absoluteTolerance = 2.5;
+    return claim;
+  });
+  return [...digitClaims, ...lexicalFractionClaims, ...lexicalDurationClaims];
+}
+
+function lexicalFractionPercent(fraction: string): number {
+  const valueByFraction: Record<string, number> = {
+    "a quarter": 25,
+    "one quarter": 25,
+    "a half": 50,
+    "one half": 50,
+    half: 50,
+    "a third": 33.333333,
+    "one third": 33.333333,
+    "two thirds": 66.666667,
+    "three quarters": 75,
+  };
+  return valueByFraction[fraction]!;
+}
+
+function lexicalFractionRelation(
+  value: string,
+  start: number,
+  end: number,
+): NumericClaimRelation {
+  const before = value.slice(Math.max(0, start - 96), start)
+    .split(/[,;.\n]|\b(?:and|but|however|while|whereas)\b/giu).at(-1) ?? "";
+  const after = value.slice(end, Math.min(value.length, end + 96))
+    .split(/[;.\n]|\b(?:but|however|while|whereas)\b/giu)[0] ?? "";
+  const reversed = /^\s*(.+?)\b(?:occurs?|occurred|happens?|happened|is|was)\s+(?:mainly\s+)?during\s+(.+)$/iu.exec(after);
+  if (reversed && semanticRelationTokens(before).length === 0) {
+    return {
+      numerator: semanticRelationTokens(reversed[2]!).slice(0, 3),
+      denominator: semanticRelationTokens(reversed[1]!).slice(0, 3),
+    };
+  }
+  return {
+    numerator: semanticRelationTokens(before).slice(-3),
+    denominator: semanticRelationTokens(after).slice(0, 3),
+  };
+}
+
+function semanticRelationTokens(value: string): string[] {
+  const stopWords = new Set([
+    "a", "about", "account", "accounted", "accounts", "add", "adds", "almost", "an", "and", "approximately",
+    "are", "as", "at", "be", "been", "being", "by", "comprise", "comprises", "dominate", "dominates",
+    "center", "centre", "during", "for", "from", "in", "is", "it", "nearly", "occur", "occurred", "occurs",
+    "of", "on", "overall", "portfolio", "represent",
+    "represents", "roughly", "that", "the", "them", "this", "to", "total", "usage", "use", "was",
+    "were", "with", "energy",
+  ]);
+  return semanticTokens(value).filter((token) => token.length > 2 && !stopWords.has(token));
+}
+
+function semanticTokens(value: string): string[] {
+  return (value
+    .replace(/([a-z0-9])([A-Z])/gu, "$1 $2")
+    .toLowerCase()
+    .match(/[a-z0-9]+/gu) ?? [])
+    .map((token) => token.length > 3 && token.endsWith("s") && !token.endsWith("ss")
+      ? token.slice(0, -1)
+      : token);
 }
 
 function dateTimeRanges(value: string): Array<{ start: number; end: number }> {
@@ -168,7 +270,8 @@ function entityClauseAround(value: string, numberStart: number, numberEnd: numbe
 }
 
 function numericMatches(claim: NumericClaim, evidence: number): boolean {
-  return Math.abs(claim.value - evidence) <= (0.5 * (10 ** -claim.precision)) + Number.EPSILON;
+  const tolerance = claim.absoluteTolerance ?? (0.5 * (10 ** -claim.precision));
+  return Math.abs(claim.value - evidence) <= tolerance + Number.EPSILON;
 }
 
 function deterministicCellSupportsClaim(
@@ -178,6 +281,7 @@ function deterministicCellSupportsClaim(
   fallbackCentreReference: string | null,
   knownCentreCodes: ReadonlySet<string>,
 ): boolean {
+  if (!sourceSupportsRelation([item.id, item.label, cell.field ?? ""], claim)) return false;
   const metricContext = `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`;
   if (!fieldSupportsClaim(cell.field, metricContext, item.unit)) return false;
   const centreReference = explicitCentreReference(claim.entityContext, knownCentreCodes) ?? fallbackCentreReference;
@@ -193,6 +297,7 @@ function sqlCellSupportsClaim(
   fallbackCentreReference: string | null,
   knownCentreCodes: ReadonlySet<string>,
 ): boolean {
+  if (!sourceSupportsRelation(sqlRelationSources(cell), claim)) return false;
   if (!fieldSupportsClaim(cell.column, `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`, null)) return false;
   const centreReference = explicitCentreReference(claim.entityContext, knownCentreCodes) ?? fallbackCentreReference;
   if (!centreReference) return true;
@@ -215,6 +320,10 @@ function fieldSupportsClaim(field: string | null, context: string, itemUnit: str
   if (/\bkwh\s*(?:\/|per)\s*(?:pax|people|persons?)\b|\bper[-_ ]?pax\b/u.test(context)) {
     return /per_?pax|pax|kwh.*person|person.*kwh/u.test(normalizedField);
   }
+  if (/\b(?:minutes?|duration)\b/u.test(context)) {
+    return /duration|minutes?|mins?/u.test(normalizedField)
+      || /^(?:minutes?|mins?)$/u.test(itemUnit?.toLowerCase() ?? "");
+  }
   const energyUnit = context.match(/\b(kwh|mwh|gwh|wh|kw|mw|gw|kilowatt[- ]?hours?)\b/u)?.[1];
   if (energyUnit) {
     const expected = energyUnit === "kwh" || energyUnit.startsWith("kilowatt") ? "kwh" : energyUnit;
@@ -226,6 +335,39 @@ function fieldSupportsClaim(field: string | null, context: string, itemUnit: str
   if (/\b(?:spikes?|events?)\b/u.test(context)) return /spike.*count|event.*count|count.*spike|count.*event/u.test(normalizedField);
   if (/\b(?:people|persons?|pax)\b/u.test(context)) return /pax|people|person|headcount/u.test(normalizedField);
   return true;
+}
+
+function sourceSupportsRelation(sources: readonly string[], claim: NumericClaim): boolean {
+  if (!claim.relation) return true;
+  if (claim.relation.numerator.length === 0 || claim.relation.denominator.length === 0) return false;
+  return sources.some((source) => {
+    const tokens = semanticTokens(source);
+    const numeratorEnd = orderedTokenGroupEnd(tokens, claim.relation!.numerator, 0);
+    return numeratorEnd !== -1
+      && orderedTokenGroupEnd(tokens, claim.relation!.denominator, numeratorEnd) !== -1;
+  });
+}
+
+function orderedTokenGroupEnd(source: readonly string[], expected: readonly string[], start: number): number {
+  let cursor = start;
+  for (const token of expected) {
+    const index = source.indexOf(token, cursor);
+    if (index === -1) return -1;
+    cursor = index + 1;
+  }
+  return cursor;
+}
+
+function sqlRelationSources(cell: SqlNumericCell): string[] {
+  const numeratorDimensions = cell.dimensions.filter(({ column }) =>
+    /(?:period|state|schedule|time|hour|operating)/u.test(column?.toLowerCase() ?? ""));
+  const denominatorDimensions = cell.dimensions.filter(({ column }) =>
+    /(?:category|component|circuit|resource|load)/u.test(column?.toLowerCase() ?? ""));
+  return [
+    cell.column ?? "",
+    ...numeratorDimensions.flatMap((numerator) => denominatorDimensions.map((denominator) =>
+      `${numerator.value} share of ${denominator.value}`)),
+  ];
 }
 
 function semanticMetricContext(entityContext: string): string {

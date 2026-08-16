@@ -2499,6 +2499,74 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
+  it("repairs an unsupported lexical ratio title without dropping the useful speculative angle", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.categories.load.share_pct", "confirmed", 60.81),
+          metricId: "energy.category_share_pct",
+        },
+        {
+          ...fact("analysis.off_hours.share_pct", "confirmed", 11.25),
+          metricId: "energy.off_hours_share_pct",
+        },
+      );
+      const novelConclusion = "Test whether off-hours Load departs from the portfolio baseline";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate(
+            "candidate-lexical-ratio-title",
+            "analysis.categories.load.share_pct",
+            {
+              title: "Load dominates the portfolio, and closed hours add about a quarter of it",
+              observation: "Load represents 60.81% of portfolio energy, while off-hours use is 11.25%.",
+              angle: `${novelConclusion}; compare the two shares by Centre before treating lunchtime spikes as a portfolio-wide load pattern.`,
+              epistemicStatus: "speculative",
+              evidenceRefs: ["analysis.categories.load.share_pct", "analysis.off_hours.share_pct"],
+              incrementalContext: {
+                relatedPresentedClaimIds: [
+                  "deterministic-overview:analysis.categories.load.share_pct",
+                  "deterministic-overview:analysis.off_hours.share_pct",
+                ],
+                novelConclusion,
+              },
+            },
+          )] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "lexical-ratio-title-run",
+        sessionId: "lexical-ratio-title-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        findings: [{
+          id: "additional:candidate-lexical-ratio-title",
+          title: novelConclusion,
+          epistemicStatus: "speculative",
+          text: `**Evidence signal:** Load represents 60.81% of portfolio energy, while off-hours use is 11.25%.\n\n**AI angle:** ${novelConclusion}; compare the two shares by Centre before treating lunchtime spikes as a portfolio-wide load pattern.`,
+        }],
+        publication: {
+          acceptedCandidateIds: ["candidate-lexical-ratio-title"],
+          rejectedCandidateIds: [],
+        },
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("removes an unsupported cross-period fact while preserving the evidence-bound exploratory angle", async () => {
     const harness = createHarness();
     try {

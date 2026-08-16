@@ -231,7 +231,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 
-  it("keeps an awaiting-review v19 evaluation readable but blocks every new review mutation", () => {
+  it("keeps an awaiting-review v20 evaluation readable but blocks every new review mutation", () => {
     const harness = createHarness();
     try {
       reserveAndComplete(harness);
@@ -243,7 +243,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       const historical = rewriteEvaluationTargetForTest(
         harness,
         current.evaluationId,
-        historicalV19Target(current.target),
+        historicalV20Target(current.target),
       );
       const entry = historical.reviewPack.entries[0]!;
 
@@ -2010,10 +2010,10 @@ const evaluationTarget = (
     analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
     modelProfileId: "workspace-default",
     modelProfileRevision: 7,
-    artifactIdentityRevision: "additional-insights-v20",
+    artifactIdentityRevision: "additional-insights-v21",
     artifactIdentityHash: `sha256:${createHash("sha256").update(`${dataSnapshotId}:${projectReleaseId}`).digest("hex")}`,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v16",
+    validatorRevision: "additional-insights-acceptance-v17",
     workflowRevision: "additional-insights-discover-accept-publish-v20",
     promptRevision: "additional-insights-discovery-v10",
     capabilityRevision: "scoped-read-only-v1",
@@ -2247,13 +2247,13 @@ const historicalV16Target = (
   promptRevision: "additional-insights-discovery-v10",
 });
 
-const historicalV19Target = (
+const historicalV20Target = (
   target: AdditionalAiInsightEvaluationTarget,
 ): AdditionalAiInsightEvaluationTarget => ({
   ...target,
-  artifactIdentityRevision: "additional-insights-v19",
+  artifactIdentityRevision: "additional-insights-v20",
   validatorRevision: "additional-insights-acceptance-v16",
-  workflowRevision: "additional-insights-discover-accept-publish-v19",
+  workflowRevision: "additional-insights-discover-accept-publish-v20",
   promptRevision: "additional-insights-discovery-v10",
 });
 

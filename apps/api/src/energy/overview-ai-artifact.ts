@@ -46,7 +46,7 @@ export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifac
 
 export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v20";
+  identityContractRevision: "additional-insights-v21";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -136,11 +136,11 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v20",
+    identityContractRevision: "additional-insights-v21",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v16",
+    validatorRevision: "additional-insights-acceptance-v17",
     workflowRevision: "additional-insights-discover-accept-publish-v20",
     investigatorPromptRevision: "additional-insights-discovery-v10",
     editorPromptRevision: "additional-insights-publication-v2",
@@ -160,11 +160,11 @@ export const isCurrentPreschoolAdditionalAiInsightArtifactIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): identity is PreschoolAdditionalAiInsightArtifactIdentity =>
   identity.artifactKind === "autonomous-insights"
-  && identity.identityContractRevision === "additional-insights-v20"
+  && identity.identityContractRevision === "additional-insights-v21"
   && identity.analysisPackId === "preschool-additional-insights-pack"
   && identity.analysisPackRevision === "v1"
   && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
-  && identity.validatorRevision === "additional-insights-acceptance-v16"
+  && identity.validatorRevision === "additional-insights-acceptance-v17"
   && identity.workflowRevision === "additional-insights-discover-accept-publish-v20"
   && identity.investigatorPromptRevision === "additional-insights-discovery-v10"
   && identity.editorPromptRevision === "additional-insights-publication-v2"

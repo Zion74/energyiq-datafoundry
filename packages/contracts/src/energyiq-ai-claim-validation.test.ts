@@ -236,4 +236,149 @@ describe("EnergyIQ AI claim validation", () => {
       sqlEvidence: [{ columns: ["centre_code", "usage_kwh"], rows: [["G", 15]] }],
     })).toBe(false);
   });
+
+  it("requires lexical fraction claims to be present in cited ratio Evidence", () => {
+    const componentShares = [
+      {
+        id: "category:load:share",
+        label: "Load share of portfolio energy",
+        unit: "%",
+        values: { loadSharePct: 60.81 },
+      },
+      {
+        id: "off-hours:share",
+        label: "Off-hours share of portfolio energy",
+        unit: "%",
+        values: { offHoursSharePct: 11.25 },
+      },
+    ];
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Load dominates the portfolio, and closed hours add about a quarter of it.",
+      evidence: componentShares,
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for a quarter of Load energy.",
+      evidence: [{
+        id: "load:closed-hours:share",
+        label: "Closed-hours share of Load energy",
+        unit: "%",
+        values: { closedHoursShareOfLoadPct: 25 },
+      }],
+      sqlEvidence: [],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for a quarter of Load energy.",
+      evidence: [{
+        id: "solar:share",
+        label: "Solar share of portfolio energy",
+        unit: "%",
+        values: { solarSharePct: 25 },
+      }],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for a quarter of Load energy.",
+      evidence: [{
+        id: "load:share-of-closed-hours",
+        label: "Load share of closed-hours energy",
+        unit: "%",
+        values: { loadShareOfClosedHoursPct: 25 },
+      }],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centre L closed hours accounted for a quarter of Load energy.",
+      evidence: [{
+        id: "centre-l:load:closed-hours:share",
+        label: "Centre L closed-hours share of Load energy",
+        unit: "%",
+        values: { centreCode: "L", closedHoursShareOfLoadPct: 25 },
+      }],
+      sqlEvidence: [],
+      knownCentreCodes: ["L"],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "A quarter of Load energy occurs during closed hours.",
+      evidence: [{
+        id: "load:closed-hours:share",
+        label: "Closed-hours share of Load energy",
+        unit: "%",
+        values: { closedHoursShareOfLoadPct: 25 },
+      }],
+      sqlEvidence: [],
+    })).toBe(true);
+  });
+
+  it("recognizes dashed and approximate lexical fractions without confusing unrelated percentages", () => {
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for one-quarter of Load energy.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for two‑thirds of Load energy.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for nearly half of Load energy.",
+      evidence: [{
+        id: "load:closed-hours:share",
+        label: "Closed-hours share of Load energy",
+        unit: "%",
+        values: { closedHoursShareOfLoadPct: 49 },
+      }],
+      sqlEvidence: [],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for nearly half of Load energy.",
+      evidence: [{
+        id: "load:closed-hours:share",
+        label: "Closed-hours share of Load energy",
+        unit: "%",
+        values: { closedHoursShareOfLoadPct: 44 },
+      }],
+      sqlEvidence: [],
+    })).toBe(false);
+  });
+
+  it("interprets a lexical fraction of an hour as duration rather than a percentage", () => {
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "The spike persisted for a quarter of an hour.",
+      evidence: [{
+        id: "spike:duration",
+        label: "Spike duration",
+        unit: "minutes",
+        values: { durationMinutes: 15 },
+      }],
+      sqlEvidence: [],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "The spike persisted for half an hour.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "The spike persisted for one-quarter hour.",
+      evidence: [{
+        id: "spike:duration",
+        label: "Spike duration",
+        unit: "minutes",
+        values: { durationMinutes: 15 },
+      }],
+      sqlEvidence: [],
+    })).toBe(true);
+  });
+
+  it("accepts a directional ratio encoded by typed SQL dimensions", () => {
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Closed hours account for a quarter of Load energy.",
+      evidence: [],
+      sqlEvidence: [{
+        columns: ["period", "category", "share_pct"],
+        rows: [["closed_hours", "load", 25]],
+      }],
+    })).toBe(true);
+  });
 });

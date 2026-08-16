@@ -542,6 +542,9 @@ export class EnergyIqInsightMethodGovernanceStore {
     apply: (proposal: InsightMethodProposal, now: string) => InsightMethodProposal,
   ): EnergyIqInsightMethodProposalRecord {
     const current = this.getProposal(input);
+    if (current.artifactIdentityRevision !== "additional-insights-v21") {
+      throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+    }
     if (current.revision !== input.expectedRevision) {
       throw new Error("ENERGYIQ_INSIGHT_METHOD_PROPOSAL_REVISION_CONFLICT");
     }
@@ -624,9 +627,9 @@ export class EnergyIqInsightMethodGovernanceStore {
     const projectReleaseId = requiredString(row, "project_release_id");
     if (!isRecord(identity)
       || identity.artifactKind !== "autonomous-insights"
-      || identity.identityContractRevision !== "additional-insights-v20"
+      || identity.identityContractRevision !== "additional-insights-v21"
       || identity.outputContractRevision !== "energyiq-additional-ai-insights-v2"
-      || identity.validatorRevision !== "additional-insights-acceptance-v16"
+      || identity.validatorRevision !== "additional-insights-acceptance-v17"
       || identity.workflowRevision !== "additional-insights-discover-accept-publish-v20"
       || identity.investigatorPromptRevision !== "additional-insights-discovery-v10"
       || identity.workspaceId !== workspaceId

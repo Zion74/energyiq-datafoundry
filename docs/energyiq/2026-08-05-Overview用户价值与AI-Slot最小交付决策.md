@@ -1055,3 +1055,22 @@ current Workflow 采用有限 Option 3+ transport recovery：
 - repair 不改变任何字符串或事实内容，只恢复可解析的 proposal envelope；坏候选不能借 repair 洗白，也不能吞掉有效 sibling。
 
 这改变了当前可接受的 transport envelope，因此 identity 旋转为 `additional-insights-v20`，workflow 为 `additional-insights-discover-accept-publish-v20`，validator 仍为 `additional-insights-acceptance-v16`，prompt 仍为 `additional-insights-discovery-v10`。v19 terminal 保持历史只读，v19 running/mutation fail closed。长期可评估 gross-only submission tool，避免 Tools 与 assistant JSON 混用，但不得在本次热修中扩大协议范围。
+
+## 21. 2026-08-16 Additional 量化表达与发散角度边界
+
+真实 B Artifact 暴露了一个比 JSON 外壳更细的质量缺口：候选标题写成“closed hours add about a quarter of it”，但本卡只引用了
+`60.81%` 的 Load 占比与 `11.25%` 的闭店占比，并没有证明“闭店时段占 Load 的四分之一”。这不是应当自由保留的机制猜想，而是一个可被用户
+理解为约 `25%` 的量化关系；它必须像阿拉伯数字一样由候选自己的 current Evidence 支持。
+
+边界固定为：
+
+- `a quarter / half / a third / two thirds / three quarters of ...` 等词语分数属于量化 claim，进入与百分比相同的候选级 Evidence 校验；
+- 没有直接比例 Evidence 时，只拒绝或修订该量化表达，不删除同卡中仍有事实底座、且以 `inferred` / `speculative` 诚实标注的 AI angle；
+- 机制假设、反例、情景和低风险实验不要求被 Evidence 直接证明，但不得借推测状态写入未被支持的精确比例、Centre、日期或节省结果；
+- 校验是候选本地边界，不把一个坏标题升级成整个 Additional Artifact 或兄弟候选失败。
+
+该 acceptance 行为变化会使既有 v20 Artifact 的同一文本得到不同结论，因此 current identity 旋转为 `additional-insights-v21`，validator 为
+`additional-insights-acceptance-v17`；workflow 仍为 `additional-insights-discover-accept-publish-v20`，prompt 仍为
+`additional-insights-discovery-v10`，output/publication/capability/canvas/Method set 均不变。v20 terminal Artifact 与评估保持历史可读，所有 v20
+mutation、评分与发布入口 fail closed。此 checkpoint 只证明本地自动化和构建门；部署后仍须为 exact current Snapshot 重新生成 v21 Additional
+Artifact，并单独完成人工价值、浏览器、多账户与普通刷新零 Provider 验收。
