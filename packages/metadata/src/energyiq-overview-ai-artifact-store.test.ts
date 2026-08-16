@@ -358,6 +358,85 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
+  it("keeps the immediately previous Section v12 and Executive v10 identities writable for historical completion", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-previous-current-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+
+      const previousSectionIdentity: SectionV4Identity = {
+        ...sectionV4Identity("snapshot-section-v12-history", "planning-outlook"),
+        validatorRevision: "acceptance-validator-v12",
+        workflowRevision: "discover-tools-accept-publish-v2",
+      };
+      expect(completeSectionV4(
+        store,
+        previousSectionIdentity,
+        sectionV4Result(previousSectionIdentity, "empty"),
+      )).toMatchObject({ status: "available" });
+
+      const previousExecutiveIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...identity("snapshot-executive-v10-history"),
+        artifactKind: "executive-synthesis",
+        targetId: "sections:history-v10",
+        identityContractRevision: "v4",
+        analysisPackId: "preschool-executive-section-artifacts",
+        analysisPackRevision: "section-interpretation-v4",
+        outputContractRevision: "preschool-executive-synthesis-v4",
+        validatorRevision: "preschool-executive-synthesis-validator-v19",
+        workflowRevision: "preschool-executive-synthesis-v10",
+        investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
+        editorPromptRevision: "not-applicable-v1",
+        methodSkillId: "none",
+        methodSkillRevision: "not-applicable-v1",
+        capabilityRevision: "section-artifacts-and-overview-evidence-v2",
+        publicationRevision: "key-findings-v2",
+      };
+      store.energyIq.overviewAiArtifacts.queue({ identity: previousExecutiveIdentity, triggeredBy: "dev-user" });
+      store.energyIq.overviewAiArtifacts.claim({
+        identity: previousExecutiveIdentity,
+        workerId: "worker:executive:v10",
+        leaseMs: 60_000,
+      });
+      expect(store.energyIq.overviewAiArtifacts.complete({
+        identity: previousExecutiveIdentity,
+        workerId: "worker:executive:v10",
+        sessionId: "session:executive:v10",
+        runId: "run:executive:v10",
+        resultJson: JSON.stringify({
+          artifactKind: "executive-synthesis",
+          status: "empty",
+          providerProfileId: previousExecutiveIdentity.modelProfileId,
+          runId: "run:executive:v10",
+          contract: {
+            id: "preschool-executive-synthesis",
+            revision: "preschool-executive-synthesis-v4",
+          },
+          binding: {
+            workspaceId: previousExecutiveIdentity.workspaceId,
+            projectId: previousExecutiveIdentity.projectId,
+            scopeId: previousExecutiveIdentity.scopeId,
+            dataSnapshotId: previousExecutiveIdentity.dataSnapshotId,
+            projectReleaseId: previousExecutiveIdentity.projectReleaseId,
+            analysisPeriod: {
+              from: previousExecutiveIdentity.analysisPeriodFrom,
+              to: previousExecutiveIdentity.analysisPeriodTo,
+            },
+            modelProfileId: previousExecutiveIdentity.modelProfileId,
+            modelProfileRevision: previousExecutiveIdentity.modelProfileRevision,
+          },
+          sourceSectionArtifactIds: [],
+          findings: [],
+        }),
+      })).toMatchObject({ status: "available" });
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects malformed v4 capability, Evidence, insight budget, and publication accounting", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v4-strict-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;
@@ -763,8 +842,8 @@ const sectionV4Identity = (
   analysisPackId: "preschool-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "preschool-section-interpretation-v4",
-  validatorRevision: "acceptance-validator-v12",
-  workflowRevision: "discover-tools-accept-publish-v2",
+  validatorRevision: "acceptance-validator-v13",
+  workflowRevision: "discover-tools-accept-publish-v3",
   investigatorPromptRevision: "discovery-prompt-v11",
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",

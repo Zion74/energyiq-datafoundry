@@ -736,7 +736,7 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
       validatorRevision: "preschool-executive-synthesis-validator-v19",
-      workflowRevision: "preschool-executive-synthesis-v10",
+      workflowRevision: "preschool-executive-synthesis-v11",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",

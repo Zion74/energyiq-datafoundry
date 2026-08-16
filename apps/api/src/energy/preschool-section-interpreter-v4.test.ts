@@ -883,6 +883,84 @@ describe("Preschool Section Interpreter v4", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("publishes an honest empty planning result when the current Pack has no Section Evidence", async () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-no-evidence-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    metadata.users.upsertDevUser({ id: "dev-user", email: "dev@example.test", display_name: "Dev", dev_token: "dev" });
+    metadata.workspaces.upsert({ id: "preschool-workspace", owner_user_id: "dev-user", name: "Preschool", kind: "customer" });
+    metadata.energyIq.upsertProject({
+      id: "preschool-demo",
+      workspace_id: "preschool-workspace",
+      name: "Preschool",
+      status: "published",
+      root_scope_id: "preschool-project",
+    });
+    const user = metadata.users.getById({ user_id: "dev-user" });
+    const sectionPacks = PRESCHOOL_SECTION_IDS.map((sectionId) => packV2(sectionId, 1));
+    const planningPack = sectionPacks.find(({ sectionId }) => sectionId === "planning-outlook")!;
+    planningPack.evidence = [];
+    planningPack.missingEvidence = ["Verified planning-outlook Evidence is unavailable for this Snapshot."];
+    let planningRunId = "";
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: metadata,
+      runSection: async ({ identity: runIdentity, runId, sessionId }) => {
+        if (runIdentity.targetId === "planning-outlook") planningRunId = runId;
+        return {
+          answer: JSON.stringify(runIdentity.targetId === "planning-outlook"
+            ? {
+                sectionId: "planning-outlook",
+                status: "available",
+                summary: {
+                  text: "No planning-outlook Evidence is available, so there is no comparison to report.",
+                  evidenceRefs: ["scope_summary_v1"],
+                },
+                candidates: [],
+                limitation: "Verified planning-outlook Evidence is unavailable for this Snapshot.",
+              }
+            : { sectionId: runIdentity.targetId, status: "empty", candidates: [] }),
+          runId,
+          sessionId,
+        };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: identity("centre-benchmark"),
+      packs: sectionPacks,
+      user,
+    });
+
+    expect(result["planning-outlook"]).toMatchObject({ status: "available" });
+    const planningResult = JSON.parse(result["planning-outlook"].result_json!);
+    expect(planningResult).toMatchObject({
+      status: "empty",
+      runId: planningRunId,
+      insights: [],
+    });
+    expect(result["planning-outlook"].run_id).toBe(planningRunId);
+    expect(planningResult).not.toHaveProperty("summary");
+    metadata.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("does not parse malformed Provider text when the authoritative planning Pack has no Evidence", () => {
+    const planningPack = packV2("planning-outlook", 0);
+    planningPack.missingEvidence = ["Verified planning-outlook Evidence is unavailable for this Snapshot."];
+
+    const result = materializePreschoolSectionResultV4({
+      answer: "not-json",
+      pack: planningPack,
+      identity: identity("planning-outlook"),
+      runId: "run:planning:no-evidence",
+    });
+
+    expect(result).toMatchObject({
+      status: "empty",
+      runId: "run:planning:no-evidence",
+      insights: [],
+    });
+  });
+
   it("constructs scoped tools from the server-owned Section Pack and exposes only a controlled invocation callback", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-tools-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

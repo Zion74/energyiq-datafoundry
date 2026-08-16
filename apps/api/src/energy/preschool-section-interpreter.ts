@@ -457,21 +457,32 @@ export const materializePreschoolSectionResultV4 = (input: {
   toolAudits?: PreschoolSectionToolAuditV4[];
 }): PreschoolSectionInterpretationResultV4 => {
   const binding = preschoolOverviewAiBindingFromIdentity(input.identity);
-  const parsedDiscovery = parsePreschoolSectionDiscoveryV4({
-    answer: input.answer,
-    expectedSectionId: input.pack.sectionId,
-    binding,
-  });
-  const discovery = recoverUsefulSupportedSummary(
-    keepSupportedSummarySentences(
-      preserveUsefulCandidateAfterUnsupportedNumericSentence(
-        calibrateCandidateEpistemicStatus(parsedDiscovery),
+  const hasAuthoritativeEmptyEvidence = input.pack.evidence.length === 0
+    && input.pack.missingEvidence.length > 0;
+  const parsedDiscovery: PreschoolSectionDiscoveryV4 = hasAuthoritativeEmptyEvidence
+    ? {
+        sectionId: input.pack.sectionId,
+        binding,
+        status: "empty",
+        candidates: [],
+      }
+    : parsePreschoolSectionDiscoveryV4({
+        answer: input.answer,
+        expectedSectionId: input.pack.sectionId,
+        binding,
+      });
+  const discovery: PreschoolSectionDiscoveryV4 = hasAuthoritativeEmptyEvidence
+    ? parsedDiscovery
+    : recoverUsefulSupportedSummary(
+        keepSupportedSummarySentences(
+          preserveUsefulCandidateAfterUnsupportedNumericSentence(
+            calibrateCandidateEpistemicStatus(parsedDiscovery),
+            input.pack,
+          ),
+          input.pack,
+        ),
         input.pack,
-      ),
-      input.pack,
-    ),
-    input.pack,
-  );
+      );
   if (discovery.status === "available" && discovery.limitation
     && (discovery.limitation.length > PRESCHOOL_SECTION_LIMITATION_MAX_CHARS
       || !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence))) {

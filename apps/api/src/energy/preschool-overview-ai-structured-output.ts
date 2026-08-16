@@ -175,7 +175,7 @@ const executiveSummaryV4: JsonSchema = {
 
 /** Current bounded Key Findings proposal contract. Identity and Evidence lineage stay server-owned. */
 export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 = {
-  errorStrategy: "strict",
+  errorStrategy: "warn",
   schema: {
     type: "object",
     additionalProperties: false,

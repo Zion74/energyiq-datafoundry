@@ -273,6 +273,7 @@ describe("Preschool Overview AI structured output", () => {
       .toBe(PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4);
     expect(resolveOverviewAiStageStructuredOutputV4("executive-synthesis"))
       .toBe(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4);
+    expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.errorStrategy).toBe("warn");
     expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema).toMatchObject({
       required: ["status", "findings"],
       properties: {
