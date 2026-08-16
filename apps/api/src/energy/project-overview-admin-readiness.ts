@@ -182,7 +182,11 @@ export const createProjectOverviewAdminReadinessService = (input: {
     const analysisStatus = aggregateAnalysisStatus(items);
     const canGenerateMissing = items.some((item) => item.status === "not-generated");
     const canRetryFailedCore = items.some((item) => retryTargetForItem(item) !== null);
-    const canGenerateOrRetry = canGenerateMissing || canRetryFailedCore;
+    const canRetryFailedAdditional = items.some((item) =>
+      item.status === "needs-attention"
+      && item.id === "additional-insights"
+      && Boolean(item.artifactId));
+    const canGenerateOrRetry = canGenerateMissing || canRetryFailedCore || canRetryFailedAdditional;
     const lastGeneratedAt = latestTimestamp(items.flatMap((item) =>
       item.completedAt && (item.status === "ready" || item.status === "no-new-insight")
         ? [item.completedAt]
@@ -220,7 +224,7 @@ export const createProjectOverviewAdminReadinessService = (input: {
             label: canGenerateMissing ? "Generate missing analysis" : "Retry failed analysis",
             detail: canGenerateMissing
               ? "Create only the current analysis results that have not been saved yet."
-              : "Retry only the current Key Findings or Section results that failed.",
+              : "Retry only the current analysis results that failed.",
           }
         : null,
       explainability: readExplainability({
@@ -251,6 +255,8 @@ export const createProjectOverviewAdminReadinessService = (input: {
         item.status === "not-generated" && (item.id === "key-findings" || item.id.startsWith("section:")));
       const missingAdditional = before.analysis.items.some((item) =>
         item.status === "not-generated" && item.id === "additional-insights");
+      const failedAdditional = before.analysis.items.some((item) =>
+        item.status === "needs-attention" && item.id === "additional-insights");
       const failedCoreTargets = before.analysis.items.flatMap((item) => {
         const target = retryTargetForItem(item);
         return target ? [target] : [];
@@ -263,7 +269,7 @@ export const createProjectOverviewAdminReadinessService = (input: {
         }
       }
       const additionalAiInsightsWorkflow = input.additionalAiInsightsWorkflow;
-      if (missingAdditional) {
+      if (missingAdditional || failedAdditional) {
         if (!additionalAiInsightsWorkflow) {
           throw new Error("ENERGYIQ_ADDITIONAL_AI_SERVER_WORKFLOW_REQUIRED");
         }

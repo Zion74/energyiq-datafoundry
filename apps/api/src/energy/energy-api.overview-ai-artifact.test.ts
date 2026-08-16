@@ -1035,6 +1035,51 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("lets an admin retry failed Additional Insights without rerunning ready core analysis", async () => {
+    const harness = await createHarness();
+    try {
+      const ready = readyAggregateResultFor(harness.identity);
+      const failedAdditional = {
+        ...ready,
+        additional: {
+          status: "unavailable" as const,
+          artifactId: "additional-current-failed",
+          reason: "PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID",
+        },
+      };
+      const read = vi.fn()
+        .mockResolvedValueOnce(failedAdditional)
+        .mockResolvedValue(ready);
+      const execute = vi.fn();
+      const executeAdditional = vi.fn().mockResolvedValue({ status: "available" });
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { analysis: { status: "ready" }, allowedActions: [] } },
+      });
+      expect(execute).not.toHaveBeenCalled();
+      expect(executeAdditional).toHaveBeenCalledOnce();
+      expect(executeAdditional).toHaveBeenCalledWith({
+        baseIdentity: harness.identity,
+        user: expect.objectContaining({ id: "dev-user" }),
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("does not start Provider work when every current analysis result is already ready", async () => {
     const harness = await createHarness();
     try {
