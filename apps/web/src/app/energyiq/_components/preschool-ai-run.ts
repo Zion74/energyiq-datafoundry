@@ -355,6 +355,10 @@ export async function retryPreschoolAiRun(
   );
 }
 
+export function invalidatePreschoolAiRun(input: PreschoolAiRunInput | null): void {
+  if (input) currentRuns.delete(input.identityKey);
+}
+
 function cacheSettledPreschoolAiRun(identityKey: string, result: PreschoolAiRunResult): PreschoolAiRunResult {
   if (isRefreshableUnavailable(result)) {
     currentRuns.delete(identityKey);

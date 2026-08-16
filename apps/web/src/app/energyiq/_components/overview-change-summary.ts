@@ -16,6 +16,12 @@ export type OverviewChangeMetric = {
   unit: "kWh" | "kW" | "%";
 };
 
+export type OverviewConclusionChange = {
+  state: "retained" | "updated" | "new" | "removed";
+  previousTitle?: string;
+  currentTitle?: string;
+};
+
 export type OverviewChangeSummary = {
   previous: OverviewVersionIdentity & { analysisId: string; sequence: number };
   current: OverviewVersionIdentity;
@@ -28,14 +34,17 @@ export type OverviewChangeSummary = {
     keyFindingEvidenceChanged: boolean | null;
     previousKeyFindings: string[];
     currentKeyFindings: string[];
+    keyFindingChanges: OverviewConclusionChange[];
     sectionChanges: Array<{
       sectionId: PreschoolOverviewAiSectionIdDto;
       previousStatus: string;
       currentStatus: string;
       contentChanged: boolean;
+      state: OverviewConclusionChange["state"];
     }>;
     additionalChanged: boolean | null;
     additionalBasisChanged: boolean | null;
+    additionalFindingChanges: OverviewConclusionChange[];
   };
 };
 
@@ -140,14 +149,20 @@ export const buildOverviewChangeSummary = (input: {
         : null,
       previousKeyFindings: previousAi?.keyFindings ?? [],
       currentKeyFindings: currentAi?.keyFindings ?? [],
+      keyFindingChanges: previousAi && currentAi
+        ? classifyNarrativeChanges(previousAi.keyFindingEntries, currentAi.keyFindingEntries)
+        : [],
       sectionChanges: previousAi && currentAi
         ? SECTION_IDS.flatMap((sectionId) => {
             const previousStatus = previousAi.sectionStatuses.get(sectionId);
             const currentStatus = currentAi.sectionStatuses.get(sectionId);
             const contentChanged = previousAi.sectionFingerprints.get(sectionId)
               !== currentAi.sectionFingerprints.get(sectionId);
-            return previousStatus && currentStatus && (previousStatus !== currentStatus || contentChanged)
-              ? [{ sectionId, previousStatus, currentStatus, contentChanged }]
+            const state = previousStatus && currentStatus
+              ? classifySectionChange(previousStatus, currentStatus, contentChanged)
+              : null;
+            return previousStatus && currentStatus && state
+              ? [{ sectionId, previousStatus, currentStatus, contentChanged, state }]
               : [];
           })
         : [],
@@ -157,6 +172,9 @@ export const buildOverviewChangeSummary = (input: {
       additionalBasisChanged: previousAi && currentAi
         ? previousAi.additionalBasisFingerprint !== currentAi.additionalBasisFingerprint
         : null,
+      additionalFindingChanges: previousAi && currentAi
+        ? classifyNarrativeChanges(previousAi.additionalFindingEntries, currentAi.additionalFindingEntries)
+        : [],
     },
   };
 };
@@ -205,11 +223,13 @@ const extractAiState = (
   expected: EnergyProjectAnalysisSnapshotDto,
 ): {
   keyFindings: string[];
+  keyFindingEntries: NarrativeFinding[];
   keyFindingFingerprints: string[];
   keyFindingEvidenceFingerprints: string[];
   sectionStatuses: Map<PreschoolOverviewAiSectionIdDto, string>;
   sectionFingerprints: Map<PreschoolOverviewAiSectionIdDto, string>;
   additionalStatus: string;
+  additionalFindingEntries: NarrativeFinding[];
   additionalFingerprint: string;
   additionalBasisFingerprint: string;
   generationBasisFingerprint: string;
@@ -217,9 +237,16 @@ const extractAiState = (
 } | null => {
   if (!artifact || !matchesArtifactIdentity(artifact, expected)) return null;
   if (artifact.contract === "energyiq-saved-ai-result@1") {
-    const findings = artifact.result.findings.flatMap((finding) => readableFinding(finding));
+    const findingEntries: NarrativeFinding[] = artifact.result.findings.flatMap((finding) => {
+      const title = readableFinding(finding)[0];
+      if (!title) return [];
+      const text = [finding.what, finding.text, finding.takeaway]
+        .find((value): value is string => typeof value === "string" && Boolean(value.trim())) ?? title;
+      return [{ title, text, sectionIds: [] }];
+    });
     return {
-      keyFindings: findings,
+      keyFindings: findingEntries.map(({ title }) => title),
+      keyFindingEntries: findingEntries,
       keyFindingFingerprints: artifact.result.findings.map((finding) =>
         stableSerialize(semanticNarrative(finding))),
       keyFindingEvidenceFingerprints: artifact.result.findings.map((finding) => stableSerialize(
@@ -228,6 +255,7 @@ const extractAiState = (
       sectionStatuses: new Map(),
       sectionFingerprints: new Map(),
       additionalStatus: "not-applicable",
+      additionalFindingEntries: [],
       additionalFingerprint: "not-applicable",
       additionalBasisFingerprint: "not-applicable",
       generationBasisFingerprint: stableSerialize({
@@ -239,11 +267,20 @@ const extractAiState = (
     };
   }
   const executive = artifact.result.executive;
-  const keyFindings = executive.status === "available"
+  const keyFindingEntries: NarrativeFinding[] = executive.status === "available"
     ? "findings" in executive.result
-      ? executive.result.findings.map(({ title }) => title)
-      : executive.result.keyFindings.map(({ takeaway }) => takeaway)
+      ? executive.result.findings.map((finding) => ({
+          title: finding.title,
+          text: finding.text,
+          sectionIds: [...finding.sectionIds].sort(),
+        }))
+      : executive.result.keyFindings.map((finding) => ({
+          title: finding.takeaway,
+          text: finding.takeaway,
+          sectionIds: [...finding.sectionIds].sort(),
+        }))
     : [];
+  const keyFindings = keyFindingEntries.map(({ title }) => title);
   const keyFindingFingerprints = executive.status === "available"
     ? "findings" in executive.result
       ? executive.result.findings.map((finding) => stableSerialize({
@@ -268,11 +305,10 @@ const extractAiState = (
       : executive.result.keyFindings.map((finding) => stableSerialize([...finding.evidenceRefs].sort()))
     : [];
   const additional = artifact.result.additional;
-  const executiveContract = executive.status === "available" || executive.status === "empty"
-    ? "findings" in executive.result ? "executive-v4" : "executive-v3"
-    : "terminal-unavailable";
+  const generationBasis = versionedGenerationBasis(artifact.result);
   return {
     keyFindings,
+    keyFindingEntries,
     keyFindingFingerprints,
     keyFindingEvidenceFingerprints,
     sectionStatuses: new Map(SECTION_IDS.map((sectionId) => [sectionId, artifact.result.sections[sectionId].status])),
@@ -281,6 +317,7 @@ const extractAiState = (
       sectionSemanticFingerprint(artifact.result.sections[sectionId]),
     ])),
     additionalStatus: additional?.status ?? "not-generated",
+    additionalFindingEntries: narrativeFindingsFromAdditional(additional),
     additionalFingerprint: additional ? additionalSemanticFingerprint(additional) : "not-generated",
     additionalBasisFingerprint: additional && (additional.status === "available" || additional.status === "empty")
       ? stableSerialize({
@@ -290,13 +327,173 @@ const extractAiState = (
           contractRevision: additional.result.contract.revision,
         })
       : "not-generated",
-    generationBasisFingerprint: stableSerialize({
-      contract: artifact.contract,
-      modelProfileId: artifact.result.binding.modelProfileId,
-      modelProfileRevision: artifact.result.binding.modelProfileRevision,
-      executiveContract,
-    }),
-    generationBasisExact: false,
+    generationBasisFingerprint: stableSerialize(generationBasis.value),
+    generationBasisExact: generationBasis.exact,
+  };
+};
+
+type NarrativeFinding = {
+  title: string;
+  text: string;
+  sectionIds: string[];
+};
+
+const classifySectionChange = (
+  previousStatus: string,
+  currentStatus: string,
+  contentChanged: boolean,
+): OverviewConclusionChange["state"] | null => {
+  const previousHasContent = previousStatus === "available";
+  const currentHasContent = currentStatus === "available";
+  if (!previousHasContent && !currentHasContent) return null;
+  if (!previousHasContent && currentHasContent) return "new";
+  if (previousHasContent && !currentHasContent) return "removed";
+  return contentChanged ? "updated" : "retained";
+};
+
+const narrativeFindingsFromAdditional = (unit: unknown): NarrativeFinding[] => {
+  if (!unit || typeof unit !== "object" || !("status" in unit)) return [];
+  const value = unit as { status: unknown; result?: unknown };
+  if (value.status !== "available" || !value.result || typeof value.result !== "object") return [];
+  const findings = (value.result as { findings?: unknown }).findings;
+  if (!Array.isArray(findings)) return [];
+  return findings.flatMap((finding) => {
+    if (!finding || typeof finding !== "object") return [];
+    const record = finding as Record<string, unknown>;
+    if (typeof record.title !== "string" || !record.title.trim()
+      || typeof record.text !== "string" || !record.text.trim()) return [];
+    return [{ title: record.title.trim(), text: record.text.trim(), sectionIds: [] }];
+  });
+};
+
+const classifyNarrativeChanges = (
+  previous: readonly NarrativeFinding[],
+  current: readonly NarrativeFinding[],
+): OverviewConclusionChange[] => {
+  const remainingPrevious = new Set(previous.map((_, index) => index));
+  const remainingCurrent = new Set(current.map((_, index) => index));
+  const retained: OverviewConclusionChange[] = [];
+  const updated: OverviewConclusionChange[] = [];
+
+  for (const [previousIndex, previousFinding] of previous.entries()) {
+    const currentIndex = [...remainingCurrent].find((index) =>
+      narrativeFingerprint(previousFinding) === narrativeFingerprint(current[index]!));
+    if (currentIndex === undefined) continue;
+    remainingPrevious.delete(previousIndex);
+    remainingCurrent.delete(currentIndex);
+    retained.push({
+      state: "retained",
+      previousTitle: previousFinding.title,
+      currentTitle: current[currentIndex]!.title,
+    });
+  }
+
+  for (const previousIndex of [...remainingPrevious]) {
+    const previousFinding = previous[previousIndex]!;
+    const currentIndex = [...remainingCurrent].find((index) =>
+      isSameNarrativeIdentity(previousFinding, current[index]!));
+    if (currentIndex === undefined) continue;
+    remainingPrevious.delete(previousIndex);
+    remainingCurrent.delete(currentIndex);
+    updated.push({
+      state: "updated",
+      previousTitle: previousFinding.title,
+      currentTitle: current[currentIndex]!.title,
+    });
+  }
+
+  return [
+    ...retained,
+    ...updated,
+    ...[...remainingCurrent].map((index): OverviewConclusionChange => ({
+      state: "new",
+      currentTitle: current[index]!.title,
+    })),
+    ...[...remainingPrevious].map((index): OverviewConclusionChange => ({
+      state: "removed",
+      previousTitle: previous[index]!.title,
+    })),
+  ];
+};
+
+const narrativeFingerprint = (finding: NarrativeFinding): string => stableSerialize({
+  title: normalize(finding.title),
+  text: normalize(finding.text),
+  sectionIds: [...finding.sectionIds].sort(),
+});
+
+const isSameNarrativeIdentity = (previous: NarrativeFinding, current: NarrativeFinding): boolean =>
+  normalize(previous.title) === normalize(current.title)
+  && (previous.sectionIds.length === 0 && current.sectionIds.length === 0
+    || sameNonEmptySectionLineage(previous.sectionIds, current.sectionIds));
+
+const sameNonEmptySectionLineage = (previous: readonly string[], current: readonly string[]): boolean => {
+  if (previous.length === 0 || current.length === 0) return false;
+  return stableSerialize([...new Set(previous)].sort()) === stableSerialize([...new Set(current)].sort());
+};
+
+const versionedGenerationBasis = (result: Extract<EnergySavedAnalysisAiArtifactInputDto, {
+  contract: "energyiq-saved-ai-result@2";
+}>["result"]): { value: unknown; exact: boolean } => {
+  const sectionBases = SECTION_IDS.map((sectionId) => ({
+    sectionId,
+    basis: versionedUnitBasis(result.sections[sectionId]),
+  }));
+  const executiveBasis = versionedUnitBasis(result.executive);
+  const additionalBasis = result.additional
+    ? versionedUnitBasis(result.additional)
+    : { value: "not-generated", exact: true };
+  return {
+    value: {
+      contract: "energyiq-saved-ai-result@2",
+      modelProfileId: result.binding.modelProfileId,
+      modelProfileRevision: result.binding.modelProfileRevision,
+      sections: Object.fromEntries(sectionBases.map(({ sectionId, basis }) => [sectionId, basis.value])),
+      executive: executiveBasis.value,
+      additional: additionalBasis.value,
+    },
+    // Saved analysis @2 does not yet persist the complete Artifact identity
+    // (workflow, prompt, validator, and identity revisions). The known fields
+    // still detect an obvious basis change, but equality is not exact enough to
+    // attribute narrative changes to data alone.
+    exact: false,
+  };
+};
+
+const versionedUnitBasis = (unit: unknown): { value: unknown; exact: boolean } => {
+  if (!unit || typeof unit !== "object" || !("status" in unit)) return { value: "invalid", exact: false };
+  const status = String((unit as { status: unknown }).status);
+  if (status !== "available" && status !== "empty") return { value: { status }, exact: true };
+  const result = (unit as { result?: unknown }).result;
+  if (!result || typeof result !== "object") return { value: { status, result: "missing" }, exact: false };
+  const record = result as Record<string, unknown>;
+  const contract = record.contract && typeof record.contract === "object"
+    ? record.contract as Record<string, unknown>
+    : null;
+  const revision = typeof contract?.revision === "string" ? contract.revision : null;
+  const capability = record.capability && typeof record.capability === "object"
+    ? record.capability as Record<string, unknown>
+    : null;
+  const methodExecution = record.methodExecution && typeof record.methodExecution === "object"
+    ? record.methodExecution as Record<string, unknown>
+    : null;
+  const publication = record.publication && typeof record.publication === "object"
+    ? record.publication as Record<string, unknown>
+    : null;
+  return {
+    value: {
+      status,
+      contractRevision: revision,
+      packRevision: typeof record.packRevision === "string" ? record.packRevision : null,
+      capabilityRevision: typeof capability?.revision === "string" ? capability.revision : null,
+      methodSetId: typeof methodExecution?.methodSetId === "string" ? methodExecution.methodSetId : null,
+      methodSetRevision: typeof methodExecution?.methodSetRevision === "string" ? methodExecution.methodSetRevision : null,
+      methodSetFingerprint: typeof methodExecution?.methodSetFingerprint === "string"
+        ? methodExecution.methodSetFingerprint
+        : null,
+      publicationRevision: typeof publication?.policyRevision === "string" ? publication.policyRevision : null,
+    },
+    exact: revision !== null,
   };
 };
 

@@ -500,6 +500,19 @@ describe("published Overview URL reload", () => {
       await Promise.resolve();
     });
 
+    readSpy.mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: snapshot.context.dataSnapshotId,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Refresh current overview");
+    await act(async () => {
+      refresh?.click();
+      await Promise.resolve();
+    });
+    expect(readSpy).toHaveBeenCalledTimes(2);
+
     await act(async () => root.unmount());
     root = createRoot(container);
     resetPreschoolAiRunsForTests();
@@ -515,7 +528,7 @@ describe("published Overview URL reload", () => {
 
     expect(container.textContent).toContain("Overall metrics");
     expect(container.textContent).toContain("At a glance");
-    expect(readSpy).toHaveBeenCalledTimes(2);
+    expect(readSpy).toHaveBeenCalledTimes(3);
     expect(ensureSpy).not.toHaveBeenCalled();
     expect(retrySpy).not.toHaveBeenCalled();
   });

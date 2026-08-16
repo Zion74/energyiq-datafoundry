@@ -12,6 +12,7 @@ import {
   buildOverviewChangeSummary,
   isCompatiblePreviousOverview,
   orderPreviousOverviewCandidates,
+  type OverviewConclusionChange,
   type OverviewChangeMetric,
   type OverviewChangeSummary,
 } from "./overview-change-summary";
@@ -284,45 +285,85 @@ function AiConclusionComparison({ summary }: { summary: OverviewChangeSummary["a
       {!summary.keyFindingsChanged && summary.keyFindingEvidenceChanged ? (
         <p className="text-sm text-muted">The conclusion wording is unchanged, but its supporting Evidence lineage changed.</p>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2">
-        <FindingList label="Previous Key Findings" findings={summary.previousKeyFindings} />
-        <FindingList label="Current Key Findings" findings={summary.currentKeyFindings} />
-      </div>
+      <ConclusionChangeList changes={summary.keyFindingChanges} ariaLabel="Key Finding change counts" />
       {summary.sectionChanges.length > 0 ? (
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Section analysis status changes</p>
-          <ul className="mt-2 space-y-1 text-sm text-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Section interpretation changes</p>
+          <ul className="mt-2 grid gap-2 sm:grid-cols-2">
             {summary.sectionChanges.map((item) => (
-              <li key={item.sectionId}>
-                <span className="font-semibold text-foreground">{SECTION_LABELS[item.sectionId]}</span>:{" "}
-                {item.previousStatus === item.currentStatus && item.contentChanged
-                  ? "interpretation changed"
-                  : `${item.previousStatus} → ${item.currentStatus}`}
+              <li key={item.sectionId} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm">
+                <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.05em] ${CHANGE_STYLES[item.state]}`}>
+                  {CHANGE_LABELS[item.state]}
+                </span>
+                <span className="font-semibold text-foreground">{SECTION_LABELS[item.sectionId]}</span>
               </li>
             ))}
           </ul>
         </div>
       ) : null}
       {summary.additionalChanged !== null ? (
-        <p className="text-sm text-muted">
-          <span className="font-semibold text-foreground">Additional AI Insights:</span>{" "}
-          {summary.additionalChanged ? "published insight content changed." : "no published content change."}
-          {summary.additionalBasisChanged ? " The Method set also changed, so this is not a data-only comparison." : ""}
-        </p>
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Additional AI Insights</p>
+          {summary.additionalFindingChanges.length > 0 ? (
+            <div className="mt-2">
+              <ConclusionChangeList changes={summary.additionalFindingChanges} ariaLabel="Additional Insight change counts" />
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-muted">
+              {summary.additionalChanged ? "Published insight content changed." : "No published content change."}
+            </p>
+          )}
+          {summary.additionalBasisChanged ? (
+            <p className="mt-2 text-sm text-muted">The Method set also changed, so this is not a data-only comparison.</p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
 }
 
-function FindingList({ label, findings }: { label: string; findings: string[] }) {
+function ConclusionChangeList({
+  changes,
+  ariaLabel,
+}: {
+  changes: OverviewConclusionChange[];
+  ariaLabel: string;
+}) {
+  const counts = CHANGE_STATES.map((state) => ({
+    state,
+    count: changes.filter((change) => change.state === state).length,
+  }));
   return (
-    <div className="rounded-lg bg-surface-subtle p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">{label}</p>
-      {findings.length > 0 ? (
-        <ol className="mt-3 space-y-2 text-sm leading-6">
-          {findings.slice(0, 3).map((finding, index) => <li key={`${index}:${finding}`}><span className="mr-2 font-semibold text-primary">{index + 1}.</span>{finding}</li>)}
-        </ol>
-      ) : <p className="mt-3 text-sm text-muted">No Key Findings were saved.</p>}
+    <div className="rounded-xl bg-surface-subtle p-4">
+      <div className="flex flex-wrap gap-2" aria-label={ariaLabel}>
+        {counts.map(({ state, count }) => (
+          <span key={state} className={`rounded-full border px-2.5 py-1 text-xs font-semibold ${CHANGE_STYLES[state]}`}>
+            {CHANGE_LABELS[state]} {count}
+          </span>
+        ))}
+      </div>
+      {changes.length > 0 ? (
+        <ul className="mt-4 space-y-2">
+          {changes.map((change, index) => (
+            <li key={`${change.state}:${change.previousTitle ?? ""}:${change.currentTitle ?? ""}:${index}`} className="rounded-lg border border-border bg-surface px-3.5 py-3">
+              <div className="flex items-start gap-3">
+                <span className={`mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em] ${CHANGE_STYLES[change.state]}`}>
+                  {CHANGE_LABELS[change.state]}
+                </span>
+                <p className="text-sm leading-6">
+                  {change.state === "updated" && change.previousTitle !== change.currentTitle ? (
+                    <><span className="text-muted line-through">{change.previousTitle}</span><span className="mx-2 text-muted">→</span><strong>{change.currentTitle}</strong></>
+                  ) : change.state === "updated" ? (
+                    <><strong>{change.currentTitle}</strong><span className="text-muted"> · explanation updated</span></>
+                  ) : (
+                    <strong>{change.currentTitle ?? change.previousTitle}</strong>
+                  )}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="mt-3 text-sm text-muted">No comparable Key Findings were saved.</p>}
     </div>
   );
 }
@@ -337,6 +378,20 @@ const formatDelta = (value: number, unit: OverviewChangeMetric["unit"]): string 
 const formatSigned = (value: number): string => `${value > 0 ? "+" : ""}${formatNumber(value)}`;
 const formatNumber = (value: number): string => new Intl.NumberFormat("en-SG", { maximumFractionDigits: 2 }).format(value);
 const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error && reason.message ? reason.message : fallback;
+
+const CHANGE_STATES = ["retained", "updated", "new", "removed"] as const;
+const CHANGE_LABELS: Record<OverviewConclusionChange["state"], string> = {
+  retained: "Retained",
+  updated: "Updated",
+  new: "New",
+  removed: "Removed",
+};
+const CHANGE_STYLES: Record<OverviewConclusionChange["state"], string> = {
+  retained: "border-step-success/25 bg-step-success/10 text-step-success",
+  updated: "border-step-warning/30 bg-step-warning/10 text-step-warning",
+  new: "border-primary/25 bg-primary/10 text-primary",
+  removed: "border-border bg-surface-subtle text-muted",
+};
 
 const findLatestCompatibleOverview = async (input: {
   client: OverviewChangeDialogClient;

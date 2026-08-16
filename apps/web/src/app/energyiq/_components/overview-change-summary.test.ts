@@ -57,6 +57,123 @@ describe("Overview change summary", () => {
       "G, M and J remain high after normalisation",
       "Closed-hours lighting remains the first priority",
     ]);
+    expect(result.ai.keyFindingChanges).toEqual([
+      expect.objectContaining({
+        state: "new",
+        currentTitle: "G, M and J remain high after normalisation",
+      }),
+      expect.objectContaining({
+        state: "new",
+        currentTitle: "Closed-hours lighting remains the first priority",
+      }),
+      expect.objectContaining({ state: "removed", previousTitle: "Closed-hours lighting is the first priority" }),
+    ]);
+  });
+
+  it("classifies retained, updated, new, and removed Key Findings without matching unrelated conclusions", () => {
+    const previous = savedDetail({
+      id: "saved-a",
+      sequence: 1,
+      snapshotId: "snapshot-a",
+      keyFindings: [
+        "Closed-hours lighting remains the first priority",
+        "Centre H has the highest per-person intensity",
+        "Old planning assumption",
+      ],
+      keyFindingTexts: [
+        "Lighting remains the largest supported closed-hours signal.",
+        "Centre H ranks first per person under the current metadata.",
+        "The old plan was based on May only.",
+      ],
+    });
+    const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-b" });
+    const currentAi = aiArtifact(
+      "snapshot-b",
+      "release-b",
+      [
+        "Closed-hours lighting remains the first priority",
+        "Centre H has the highest per-person intensity",
+        "Load mix is not represented in Centre priority flags",
+      ],
+      [
+        "Lighting remains the largest supported closed-hours signal.",
+        "Centre H still ranks first per person, but the headcount remains provisional.",
+        "Load contributes most energy while Centre flags use normalised intensity.",
+      ],
+    );
+
+    const result = buildOverviewChangeSummary({ previous, current, currentAiArtifact: currentAi });
+
+    expect(result?.ai.generationBasisStatus).toBe("unversioned");
+    expect(result?.ai.keyFindingChanges).toEqual([
+      expect.objectContaining({
+        state: "retained",
+        previousTitle: "Closed-hours lighting remains the first priority",
+        currentTitle: "Closed-hours lighting remains the first priority",
+      }),
+      expect.objectContaining({
+        state: "updated",
+        previousTitle: "Centre H has the highest per-person intensity",
+        currentTitle: "Centre H has the highest per-person intensity",
+      }),
+      expect.objectContaining({ state: "new", currentTitle: "Load mix is not represented in Centre priority flags" }),
+      expect.objectContaining({ state: "removed", previousTitle: "Old planning assumption" }),
+    ]);
+  });
+
+  it("does not call similar conclusions an update when they come from different Sections", () => {
+    const previous = savedDetail({
+      id: "saved-a",
+      sequence: 1,
+      snapshotId: "snapshot-a",
+      keyFindings: ["Centre L closed-hours spike needs review"],
+      keyFindingTexts: ["The closed-hours event is the supported signal."],
+    });
+    const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-b" });
+    const currentAi = aiArtifact(
+      "snapshot-b",
+      "release-b",
+      ["Centre L operating-hours spike needs review"],
+      ["The operating-hours event is the supported signal."],
+    );
+    setKeyFindingSection(previous.aiArtifact!, 0, "standby-wastage");
+    setKeyFindingSection(currentAi, 0, "operating-behaviour");
+
+    const result = buildOverviewChangeSummary({ previous, current, currentAiArtifact: currentAi });
+
+    expect(result?.ai.keyFindingChanges).toEqual([
+      expect.objectContaining({ state: "new", currentTitle: "Centre L operating-hours spike needs review" }),
+      expect.objectContaining({ state: "removed", previousTitle: "Centre L closed-hours spike needs review" }),
+    ]);
+  });
+
+  it("classifies Section interpretations and Additional Insights across the two exact Snapshots", () => {
+    const previous = savedDetail({ id: "saved-a", sequence: 1, snapshotId: "snapshot-a" });
+    const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-b" });
+    const currentAi = aiArtifact("snapshot-b", "release-b", []);
+    setSectionResult(previous.aiArtifact!, "centre-benchmark", "Previous benchmark summary");
+    setSectionResult(currentAi, "centre-benchmark", "Updated benchmark summary");
+    setSectionResult(previous.aiArtifact!, "standby-wastage", "Previous closed-hours summary");
+    setAdditionalFindings(previous.aiArtifact!, [
+      ["Load mix is missing from priority flags", "The load category dominates energy."],
+      ["Old exploratory angle", "This angle did not persist."],
+    ]);
+    setAdditionalFindings(currentAi, [
+      ["Load mix is missing from priority flags", "The load category dominates energy."],
+      ["New controllability angle", "A different operational angle is now supported."],
+    ]);
+
+    const result = buildOverviewChangeSummary({ previous, current, currentAiArtifact: currentAi });
+
+    expect(result?.ai.sectionChanges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sectionId: "centre-benchmark", state: "updated" }),
+      expect.objectContaining({ sectionId: "standby-wastage", state: "removed" }),
+    ]));
+    expect(result?.ai.additionalFindingChanges).toEqual([
+      expect.objectContaining({ state: "retained", currentTitle: "Load mix is missing from priority flags" }),
+      expect.objectContaining({ state: "new", currentTitle: "New controllability angle" }),
+      expect.objectContaining({ state: "removed", previousTitle: "Old exploratory angle" }),
+    ]);
   });
 
   it("orders only earlier same-project/scope/resource snapshots and verifies renderer compatibility on detail", () => {
@@ -377,6 +494,10 @@ function aiArtifact(
           status: "available",
           providerProfileId: "workspace-default",
           runId: `run-${snapshotId}`,
+          contract: {
+            id: "preschool-executive-synthesis",
+            revision: "preschool-executive-synthesis-v4",
+          },
           binding: {
             workspaceId: "preschool-demo-org",
             projectId: "preschool-demo",
@@ -419,6 +540,105 @@ function legacyAiArtifact(
       providerProfileId: "workspace-default",
       runId: `run-${snapshotId}`,
       findings: [{ title, what, evidenceRefs: [evidenceRef], binding: { dataSnapshotId: snapshotId } }],
+    },
+  };
+}
+
+function setKeyFindingSection(
+  artifact: EnergySavedAnalysisAiArtifactInputDto,
+  index: number,
+  sectionId: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook",
+): void {
+  if (artifact.contract !== "energyiq-saved-ai-result@2") throw new Error("sectioned artifact required");
+  const executive = artifact.result.executive;
+  if (executive.status !== "available" || !("findings" in executive.result)) {
+    throw new Error("v4 executive finding required");
+  }
+  const finding = executive.result.findings[index];
+  if (!finding) throw new Error("key finding required");
+  finding.sectionIds = [sectionId];
+}
+
+function setSectionResult(
+  artifact: EnergySavedAnalysisAiArtifactInputDto,
+  sectionId: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook",
+  summaryText: string,
+): void {
+  if (artifact.contract !== "energyiq-saved-ai-result@2") throw new Error("sectioned artifact required");
+  const binding = artifact.result.binding;
+  artifact.result.sections[sectionId] = {
+    status: "available",
+    artifactId: `${sectionId}-${artifact.snapshotId}`,
+    result: {
+      artifactKind: "section-interpretation",
+      providerProfileId: binding.modelProfileId,
+      runId: `run-${sectionId}-${artifact.snapshotId}`,
+      contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v4" },
+      binding,
+      sectionId,
+      packRevision: "v2",
+      capability: { revision: "scoped-read-only-v1", mode: "scoped-read-only", tools: [] },
+      toolAudits: [],
+      status: "available",
+      summary: { text: summaryText, evidenceRefs: [`evidence:${sectionId}`] },
+      insights: [],
+      publication: {
+        policyId: "preschool-section-publication",
+        policyRevision: "v1",
+        discoveredCount: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        publishedCount: 0,
+        suppressedCandidateIds: [],
+      },
+    },
+  };
+}
+
+function setAdditionalFindings(
+  artifact: EnergySavedAnalysisAiArtifactInputDto,
+  findings: Array<[title: string, text: string]>,
+): void {
+  if (artifact.contract !== "energyiq-saved-ai-result@2") throw new Error("sectioned artifact required");
+  (artifact.result as unknown as { additional: unknown }).additional = {
+    status: "available",
+    artifactId: `additional-${artifact.snapshotId}`,
+    result: {
+      artifactKind: "autonomous-insights",
+      status: "available",
+      providerProfileId: artifact.result.binding.modelProfileId,
+      runId: `run-additional-${artifact.snapshotId}`,
+      contract: { id: "energyiq-additional-ai-insights", revision: "additional-insights-output-v3" },
+      binding: artifact.result.binding,
+      methodExecution: {
+        methodSetId: "method-set",
+        methodSetRevision: "1",
+        methodSetFingerprint: "method-set-fingerprint",
+        loadedMethods: [],
+      },
+      capability: { revision: "v1", mode: "scoped-read-only", allowedTools: [], usedTools: [] },
+      toolAudits: [],
+      evidenceLineage: { contract: "additional-ai-insights-evidence@1", catalog: [] },
+      publication: {
+        policyId: "energyiq-additional-ai-insights",
+        policyRevision: "v2",
+        discoveredCount: findings.length,
+        acceptedCount: findings.length,
+        rejectedCount: 0,
+        publishedCount: findings.length,
+        sourceOrderCandidateIds: findings.map((_, index) => `candidate-${index}`),
+        acceptedCandidateIds: findings.map((_, index) => `candidate-${index}`),
+        rejectedCandidateIds: [],
+        publishedCandidateIds: findings.map((_, index) => `candidate-${index}`),
+        suppressedCandidateIds: [],
+      },
+      findings: findings.map(([title, text], index) => ({
+        id: `additional-${index}`,
+        title,
+        text,
+        epistemicStatus: "inferred",
+        evidenceRefs: [`evidence:additional:${index}`],
+      })),
     },
   };
 }

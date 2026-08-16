@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   EnergyProjectAnalysisSnapshotDto,
+  EnergySavedAnalysisAiArtifactInputDto,
   EnergySavedAnalysisDetailDto,
   EnergySavedAnalysisSummaryDto,
 } from "../../../lib/config-api";
@@ -68,6 +69,46 @@ describe("OverviewChangeDialog", () => {
       .find((button) => button.textContent?.includes("Open previous Overview"));
     await act(async () => openPrevious?.click());
     expect(onOpenPrevious).toHaveBeenCalledWith("saved-a");
+  });
+
+  it("shows which Key Findings were retained, updated, added, or removed", async () => {
+    const current = snapshot("snapshot-b", "release-b", 1_100);
+    const previousSummary = summary("saved-a", "snapshot-a", 1);
+    const previous = detail(previousSummary, snapshot("snapshot-a", "release-a", 1_000));
+    previous.aiArtifact = aiArtifact("snapshot-a", "release-a", [
+      ["Lighting remains the first priority", "Lighting is the largest closed-hours signal."],
+      ["Centre H has the highest per-person intensity", "Centre H ranks first per person."],
+      ["Old planning assumption", "The plan used May only."],
+    ]);
+    const currentAi = aiArtifact("snapshot-b", "release-b", [
+      ["Lighting remains the first priority", "Lighting is the largest closed-hours signal."],
+      ["Centre H has the highest per-person intensity", "Centre H still ranks first, with provisional headcount."],
+      ["Load mix is missing from priority flags", "Load dominates energy but is not part of the normalised flag."],
+    ]);
+    const client = {
+      listEnergySavedAnalyses: vi.fn().mockResolvedValue({ items: [previousSummary] }),
+      getEnergySavedAnalysis: vi.fn().mockResolvedValue(previous),
+    };
+
+    await act(async () => {
+      root.render(
+        <OverviewChangeDialog
+          projectId="preschool-demo"
+          currentSnapshot={current}
+          currentAiArtifact={currentAi}
+          client={client}
+          onClose={vi.fn()}
+          onOpenPrevious={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Retained");
+    expect(container.textContent).toContain("Updated");
+    expect(container.textContent).toContain("New");
+    expect(container.textContent).toContain("Removed");
+    expect(container.textContent).toContain("Load mix is missing from priority flags");
+    expect(container.textContent).toContain("Old planning assumption");
   });
 
   it("explains when no compatible previous saved Overview exists", async () => {
@@ -365,4 +406,72 @@ function snapshot(
       },
     },
   } as unknown as EnergyProjectAnalysisSnapshotDto;
+}
+
+function aiArtifact(
+  snapshotId: string,
+  projectReleaseId: string,
+  findings: Array<[title: string, text: string]>,
+): EnergySavedAnalysisAiArtifactInputDto {
+  const from = "2026-05-08T00:00:00.000Z";
+  const to = "2026-06-05T00:00:00.000Z";
+  return {
+    contract: "energyiq-saved-ai-result@2",
+    rendererKey: "preschool-overview",
+    snapshotId,
+    projectReleaseId,
+    result: {
+      artifactKind: "preschool-overview-ai-read-model",
+      status: "available",
+      binding: {
+        workspaceId: "preschool-demo-org",
+        projectId: "preschool-demo",
+        scopeId: "project",
+        dataSnapshotId: snapshotId,
+        projectReleaseId,
+        analysisPeriod: { from, to },
+        modelProfileId: "workspace-default",
+        modelProfileRevision: 8,
+      },
+      sections: {
+        "centre-benchmark": { status: "unavailable", reason: "Not generated." },
+        "standby-wastage": { status: "unavailable", reason: "Not generated." },
+        "operating-behaviour": { status: "unavailable", reason: "Not generated." },
+        "planning-outlook": { status: "unavailable", reason: "Not generated." },
+      },
+      executive: {
+        status: "available",
+        artifactId: `executive-${snapshotId}`,
+        result: {
+          artifactKind: "executive-synthesis",
+          status: "available",
+          providerProfileId: "workspace-default",
+          runId: `run-${snapshotId}`,
+          contract: {
+            id: "preschool-executive-synthesis",
+            revision: "preschool-executive-synthesis-v4",
+          },
+          binding: {
+            workspaceId: "preschool-demo-org",
+            projectId: "preschool-demo",
+            scopeId: "project",
+            dataSnapshotId: snapshotId,
+            projectReleaseId,
+            analysisPeriod: { from, to },
+            modelProfileId: "workspace-default",
+            modelProfileRevision: 8,
+          },
+          sourceSectionArtifactIds: [],
+          summary: { text: "Summary", evidenceRefs: ["evidence:summary"] },
+          findings: findings.map(([title, text], index) => ({
+            id: `finding-${index}`,
+            title,
+            text,
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: [`evidence:${index}`],
+          })),
+        },
+      },
+    },
+  };
 }

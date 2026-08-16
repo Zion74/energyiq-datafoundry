@@ -5,6 +5,7 @@ import type { PreschoolOverviewAiReadModelDto } from "../../../lib/config-api";
 import {
   buildPreschoolAiRunInput,
   getOrStartPreschoolAiRun,
+  invalidatePreschoolAiRun,
   retryPreschoolAiRun,
   resetPreschoolAiRunsForTests,
   resolvePreschoolAiEventStream,
@@ -1355,8 +1356,10 @@ describe("Preschool AI Run", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({ status: "unavailable" });
+    invalidatePreschoolAiRun(input);
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({ status: "unavailable" });
 
-    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(readSpy).toHaveBeenCalledTimes(2);
     expect(ensureSpy).not.toHaveBeenCalled();
     expect(retrySpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();

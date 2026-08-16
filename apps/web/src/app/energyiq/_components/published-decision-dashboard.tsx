@@ -34,6 +34,7 @@ import {
 import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { OverviewChangeDialog } from "./overview-change-dialog";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
+import { buildPreschoolAiRunInput, invalidatePreschoolAiRun } from "./preschool-ai-run";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
   applyProjectAnalysisQualityPolicy,
@@ -229,6 +230,9 @@ function PublishedDecisionDashboardView({
   };
 
   const refreshOverview = () => {
+    if (currentSnapshot?.renderer.key === "preschool-overview") {
+      invalidatePreschoolAiRun(buildPreschoolAiRunInput(currentSnapshot));
+    }
     const nextRevision = refreshRevision + 1;
     refreshRequestRevisionRef.current = nextRevision;
     refreshBypassPendingRef.current = true;
@@ -716,6 +720,7 @@ function PublishedDecisionDashboardView({
           <div className="min-w-0">
             {isDedicatedOverviewRenderer && rendererRequest && projectRendererState ? (
               <ProjectRenderer
+                key={`dedicated-overview:${projectId}:${refreshRevision}`}
                 request={rendererRequest}
                 state={projectRendererState}
                 showContextHeader={false}
