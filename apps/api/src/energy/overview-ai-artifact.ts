@@ -101,7 +101,9 @@ export const createNgeeAnnOverviewAiSectionArtifactIdentity = (input: {
     outputContractRevision: "energyiq-project-section-interpretation-v1",
     validatorRevision: "energyiq-project-section-acceptance-v2",
     workflowRevision: "energyiq-project-section-discover-publish-v1",
-    investigatorPromptRevision: "energyiq-project-section-discovery-v2",
+    investigatorPromptRevision: input.targetId === "time-behaviour"
+      ? "energyiq-project-section-discovery-v3"
+      : "energyiq-project-section-discovery-v2",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",

@@ -51,7 +51,7 @@ describe("Ngee Ann current Overview AI identities", () => {
       outputContractRevision: "energyiq-project-section-interpretation-v1",
       validatorRevision: "energyiq-project-section-acceptance-v2",
       workflowRevision: "energyiq-project-section-discover-publish-v1",
-      investigatorPromptRevision: "energyiq-project-section-discovery-v2",
+      investigatorPromptRevision: "energyiq-project-section-discovery-v3",
       capabilityRevision: "pack-only-v1",
       publicationRevision: "energyiq-project-section-publication-v1",
     });
@@ -71,6 +71,11 @@ describe("Ngee Ann current Overview AI identities", () => {
       targetId: "time-behaviour",
     });
     expect(snapshotB).not.toEqual(section);
+
+    expect(createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: base,
+      targetId: "trend-and-demand",
+    }).investigatorPromptRevision).toBe("energyiq-project-section-discovery-v2");
   });
 });
 

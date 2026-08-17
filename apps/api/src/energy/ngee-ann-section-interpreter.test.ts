@@ -156,6 +156,37 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("keeps an exploratory angle but lowers an observed label when the narrative contains a hypothesis", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "time-behaviour",
+        status: "available",
+        summary: { text: "The current hourly pattern is available for review.", evidenceRefs: [evidenceRef] },
+        candidates: [{
+          id: "candidate:honest-hypothesis",
+          title: "The flat base may indicate an always-on load",
+          text: "The observed shape suggests that one or more systems remain active outside occupied hours.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:honest-hypothesis",
+    });
+
+    expect(result.insights).toEqual([expect.objectContaining({
+      id: "candidate:honest-hypothesis",
+      epistemicStatus: "inferred",
+    })]);
+  });
+
   it("keeps a useful summary and insight within the readable Ngee Ann card budget", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
@@ -244,6 +275,38 @@ describe("buildNgeeAnnSectionPrompt", () => {
     expect(prompt).toContain("2671.125");
     expect(prompt).toContain("projectedRowCount");
     expect(prompt).toContain("2016");
+    expect(prompt).not.toContain('"hourlyProfile"');
+    expect(prompt).toContain("mean energy per complete classified day");
+    expect(prompt).toContain("never label it kWh/h");
+  });
+
+  it("does not validate a number from a raw field that was intentionally omitted from the prompt", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    pack.facts.hourlyProfile = [{
+      hour: 14,
+      usageKwh: 360.2,
+      averageKw: 12.86,
+      peakKw: 22.5,
+      observationCount: 28,
+    }];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    expect(() => materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "time-behaviour",
+        status: "available",
+        summary: {
+          text: "The hourly profile reaches 360.2 kWh/h.",
+          evidenceRefs: [pack.evidence[0]!.id],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:omitted-raw-field",
+    })).toThrow("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
   });
 });
 

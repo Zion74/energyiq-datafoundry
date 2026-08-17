@@ -575,11 +575,7 @@ const requireProjectSectionInterpretationResultV1 = (
       ? identity.validatorRevision !== "energyiq-project-section-acceptance-v2"
       : identity.validatorRevision !== "energyiq-project-section-acceptance-v1")
     || identity.workflowRevision !== "energyiq-project-section-discover-publish-v1"
-    || (identity.identityContractRevision === "ngee-ann-section-v1"
-      ? identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v1"
-      : identity.identityContractRevision !== "ngee-ann-section-v2"
-        && identity.identityContractRevision !== "ngee-ann-section-v3"
-        || identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v2")
+    || !validProjectSectionPromptRevision(identity)
     || identity.capabilityRevision !== "pack-only-v1"
     || identity.publicationRevision !== "energyiq-project-section-publication-v1"
     || !identity.targetId
@@ -617,6 +613,23 @@ const requireProjectSectionInterpretationResultV1 = (
     || (typeof parsed.limitation === "string" && parsed.limitation.length > 320)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
+};
+
+const validProjectSectionPromptRevision = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => {
+  if (identity.identityContractRevision === "ngee-ann-section-v1") {
+    return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v1";
+  }
+  if (identity.identityContractRevision === "ngee-ann-section-v2") {
+    return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2";
+  }
+  if (identity.identityContractRevision !== "ngee-ann-section-v3") return false;
+  if (identity.targetId === "time-behaviour") {
+    return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2"
+      || identity.investigatorPromptRevision === "energyiq-project-section-discovery-v3";
+  }
+  return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2";
 };
 
 const validProjectSectionSummaryV1 = (value: unknown): boolean => isRecord(value)

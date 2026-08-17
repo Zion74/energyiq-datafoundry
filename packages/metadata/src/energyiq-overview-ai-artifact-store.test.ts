@@ -387,6 +387,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnSectionIdentity("snapshot-ngee-previous", "time-behaviour"),
         identityContractRevision: "ngee-ann-section-v2",
         validatorRevision: "energyiq-project-section-acceptance-v1",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v2",
       };
       expect(completeSectionV4(store, previousIdentity, ngeeAnnSectionResult(previousIdentity, "available")))
         .toMatchObject({ status: "available", result_json: expect.any(String) });
@@ -983,7 +984,9 @@ const ngeeAnnSectionIdentity = (
   outputContractRevision: "energyiq-project-section-interpretation-v1",
   validatorRevision: "energyiq-project-section-acceptance-v2",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
-  investigatorPromptRevision: "energyiq-project-section-discovery-v2",
+  investigatorPromptRevision: targetId === "time-behaviour"
+    ? "energyiq-project-section-discovery-v3"
+    : "energyiq-project-section-discovery-v2",
   capabilityRevision: "pack-only-v1",
   publicationRevision: "energyiq-project-section-publication-v1",
 });

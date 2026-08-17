@@ -184,9 +184,10 @@ export const buildNgeeAnnSectionPrompt = (
     "The projection preserves every Section-level row in a compact field-order representation while omitting repeated low-level detail owned by another Section. Do not infer omitted detail.",
     "Write a concise Summary of what matters in this Section, then propose only genuinely useful Insights. Do not restate every visible metric.",
     "Insights may be observed, inferred, or speculative. Inference and speculation are encouraged when they offer a relevant new angle, but label them honestly and never present a possible cause as confirmed.",
+    "The epistemicStatus applies to the whole title and text. If any sentence proposes a cause, possibility or action that is not directly observed, use inferred or speculative rather than observed.",
     "Evidence refs anchor the observation beneath an Insight; they do not claim that a hypothesis has been proven.",
     "A speculative Insight may suggest a relationship, counterexample, question, or low-risk line of inquiry without inventing measurements.",
-    "Each candidate must cite one or more exact Evidence IDs from the Pack. Keep the Summary under 480 characters, titles under 96, text under 480, and deep-dive questions under 220.",
+    "Each candidate must cite one or more exact Evidence IDs from the Pack. Aim for Summary under 480 characters, titles under 96, text under 480, and deep-dive questions under 220; preserve a useful explanation when it needs a little more room.",
     "Return status=empty only when the Pack supports no useful Summary or angle. One malformed candidate must not prevent other candidates from being useful.",
     `Required sectionId: ${JSON.stringify(pack.sectionId)}.`,
     "Return only one JSON object with no Markdown fence, preface or afterword: {\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:{\"text\":string,\"evidenceRefs\":string[]},\"candidates\":[{\"id\":string,\"title\":string,\"text\":string,\"epistemicStatus\":\"observed\"|\"inferred\"|\"speculative\",\"evidenceRefs\":string[],\"deepDiveQuestion\"?:string}],\"limitation\"?:string}",
@@ -207,7 +208,7 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
   requirePackIdentity(input.pack, input.identity);
   const proposal = parseProposal(input.answer, input.pack.sectionId);
   const evidenceIds = new Set(input.pack.evidence.map(({ id }) => id));
-  const packText = JSON.stringify(input.pack);
+  const packText = JSON.stringify(projectSectionPackForPrompt(input.pack));
 
   if (proposal.status === "empty") {
     if (proposal.summary !== undefined || proposal.candidates.length !== 0) {
@@ -373,13 +374,21 @@ const parseInsight = (
     id: value.id,
     title: value.title,
     text: value.text,
-    epistemicStatus: value.epistemicStatus,
+    epistemicStatus: lowerSectionEpistemicStatus(value.epistemicStatus, `${value.title} ${value.text}`),
     evidenceRefs: [...value.evidenceRefs],
     ...(typeof value.deepDiveQuestion === "string"
       ? { deepDiveQuestion: value.deepDiveQuestion }
       : {}),
   };
 };
+
+const lowerSectionEpistemicStatus = (
+  proposed: NgeeAnnSectionInsight["epistemicStatus"],
+  narrative: string,
+): NgeeAnnSectionInsight["epistemicStatus"] => proposed === "observed"
+  && /\b(?:may|might|could|likely|possibly|suggests?|indicates?|points?\s+to)\b/iu.test(narrative)
+  ? "inferred"
+  : proposed;
 
 const validEvidenceRefs = (
   value: unknown,
@@ -452,9 +461,14 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
         revision: "ngee-ann-section-prompt-projection-v1",
         rowPolicy: "all-section-rows",
         projectedRowCount,
+        valueSemantics: {
+          cellUsageKwh: "energy in one local-date/hour bucket, expressed in kWh; never label it kWh/h",
+          dayProfileUsageKwh: "mean energy per complete classified day for that local-hour bucket, expressed in kWh",
+          componentProfileUsageKwh: "mean component energy per complete classified day for that local-hour bucket, expressed in kWh",
+          publicHoliday: "unavailable unless the supplied profile status is available; do not infer public-holiday behaviour",
+        },
       },
       facts: {
-        hourlyProfile: facts.hourlyProfile,
         timeBehaviour: projectTimeBehaviour(facts.timeBehaviour),
         componentHourlyProfiles: projectComponentHourlyProfiles(facts.componentHourlyProfiles),
         offHours: facts.offHours,
@@ -593,6 +607,9 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
+  const expectedPromptRevision = pack.sectionId === "time-behaviour"
+    ? "energyiq-project-section-discovery-v3"
+    : "energyiq-project-section-discovery-v2";
   if (identity.identityContractRevision !== "ngee-ann-section-v3"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
@@ -602,6 +619,7 @@ const requirePackIdentity = (
     || identity.projectReleaseId !== pack.binding.projectReleaseId
     || identity.analysisPeriodFrom !== pack.binding.analysisPeriod.from
     || identity.analysisPeriodTo !== pack.binding.analysisPeriod.to
+    || identity.investigatorPromptRevision !== expectedPromptRevision
     || identity.analysisPackRevision !== "v1") {
     throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_IDENTITY_MISMATCH");
   }
