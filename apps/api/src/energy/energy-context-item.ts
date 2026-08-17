@@ -246,6 +246,16 @@ const compactPreschoolAppliances = (
   };
 };
 
+const compactOperationalApplianceComposition = <T extends {
+  appliances: Array<{ sourceCircuitIds: string[] }>;
+}>(composition: T) => ({
+  ...composition,
+  appliances: composition.appliances.map(({ sourceCircuitIds, ...appliance }) => ({
+    ...appliance,
+    sourceCircuitCount: sourceCircuitIds.length,
+  })),
+});
+
 const compactPreschoolOperational = (
   projection: ProjectAnalysisSnapshot["preschoolOperational"],
 ): unknown => {
@@ -253,6 +263,8 @@ const compactPreschoolOperational = (
   const { analysisReady, ...boundedProjection } = projection;
   return {
     ...boundedProjection,
+    standbyAppliances: compactOperationalApplianceComposition(projection.standbyAppliances),
+    operatingAppliances: compactOperationalApplianceComposition(projection.operatingAppliances),
     ...(analysisReady ? {
       analysisReady: {
         contract: analysisReady.contract,
@@ -318,10 +330,18 @@ export const createEnergyAuthoritativeContextItems = (input: {
   ];
 };
 
+const efficientInvestigationPolicy = [
+  "Before the first SQL call, form the minimum sufficient Evidence plan for the user's decision question.",
+  "Batch independent aggregates from the same governed relation and grain into one focused query when that preserves clear Evidence lineage.",
+  "Each additional query must resolve a named uncertainty that could change the conclusion, recommendation or verification step; do not re-query a released value merely to make the answer feel more complete.",
+  "Stop querying once the question is answered with sufficient current Evidence. A useful concise answer is better than extra tool rounds that do not change the decision.",
+];
+
 const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "ngee-ann-polytechnic"
     ? [
         "Ngee Ann analysis policy:",
+        ...efficientInvestigationPolicy,
         "After the run's one schema inspection establishes its governed contract, use run_sql_readonly only against the run-scoped table when it adds Evidence; if Released Evidence already answers the question, use it directly. Cite the resulting Context Evidence, tool call or artifact for every reported number.",
         "The relation is already bound to the selected UI Scope. For a Project total, do not filter scope_id to the UI label 'project'; scope_id values are published hierarchy nodes. Sum quality_status='ok' rows on the Official Aggregation Route across those nodes.",
         "For Project or Level totals, filter quality_status='ok' and use only the published Official Aggregation Route. Meter role is descriptive evidence, not permission to alter the route.",
@@ -342,13 +362,15 @@ const preschoolAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "preschool-demo"
     ? [
         "Preschool analysis policy:",
+        ...efficientInvestigationPolicy,
         "After the run's one schema inspection establishes its governed contract, use run_sql_readonly only against the run-scoped table when it adds Evidence; if Released Evidence already answers the question, use it directly. Use aggregated queries and do not request raw Portfolio facts.",
         "For Centre totals, group official rows by parent_node_id. The scoped scope_id identifies the published navigation attachment and must not be treated as the Centre identity.",
         "For every energy aggregation, filter quality_status='ok' and official_aggregation_eligible=TRUE. Use Circuit and appliance rows only within the same published route and do not double-count them.",
         "Use the hierarchy-pinned Scope metadata relation for Centre counts, centre_code, facility_type, area_sqm, occupant_count and metadata_status. Do not infer those dimensions from fact labels.",
         "EUI and per-pax comparisons require the published Benchmark Evidence and its metadata status. The metadata relation supplies dimensions but does not replace the released Benchmark calculation.",
         "Standby, operating, Spike and SOP results are provisional Calendar-bound investigation signals. They do not prove waste, non-compliance, device state or root cause.",
-        "Forecast, tariff cost, savings, ROI, owner and commitment are unavailable unless separately supplied as authoritative Evidence. Do not infer them from May energy data.",
-        "Use only the current Project, May Period, Snapshot and Published Release. Cite the exact deterministic Evidence item or successful scoped query result for every displayed number.",
+        "Treat provisional Benchmark and Calendar signals as screening evidence, not proof that waste exists or is absent. When Centre-level evidence is incomplete, say that the available Evidence does not identify it as the primary driver; do not write categorical claims such as 'not an energy-waste problem'. Keep worthwhile hypotheses clearly labelled as possibilities and state what would verify them.",
+        "Forecast, tariff cost, savings, ROI, owner and commitment are unavailable unless separately supplied as authoritative Evidence. Do not infer them from energy data in the current Period.",
+        "Use only the current Project, current Period, Snapshot and Published Release. Cite the exact deterministic Evidence item or successful scoped query result for every displayed number.",
       ]
     : [];

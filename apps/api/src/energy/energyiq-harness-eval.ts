@@ -79,6 +79,8 @@ export type EnergyIqDecisionQualityBreakdown = {
   ratio: number;
 };
 
+export type EnergyIqSqlInvestigationPattern = "none" | "focused" | "extended" | "recovery-heavy";
+
 export type EnergyIqHarnessCaseReport = {
   caseId: string;
   title: string;
@@ -95,6 +97,7 @@ export type EnergyIqHarnessCaseReport = {
     failedToolCalls: number;
     recoveredToolFailures: number;
     sqlCalls: number;
+    sqlInvestigationPattern: EnergyIqSqlInvestigationPattern;
     reasoningRounds: number;
     inputTokens: number;
     outputTokens: number;
@@ -323,6 +326,7 @@ export const runEnergyIqHarnessEval = async (
             failedToolCalls: 0,
             recoveredToolFailures: 0,
             sqlCalls: 0,
+            sqlInvestigationPattern: "none",
             reasoningRounds: 0,
             inputTokens: 0,
             outputTokens: 0,
@@ -420,12 +424,14 @@ export const evaluateEnergyIqHarnessObservation = (
     .filter((result) => !result.failed)
     .map((result) => result.toolCallName);
   const failedTools = toolResults.filter((result) => result.failed);
+  const failedSqlCalls = failedTools.filter((result) => result.toolCallName === "run_sql_readonly").length;
   const recoveredToolFailures = failedTools.filter((failed) => toolResults.some((candidate) => (
     candidate.eventIndex > failed.eventIndex
     && candidate.toolCallName === failed.toolCallName
     && !candidate.failed
   ))).length;
   const sqlCalls = toolNames.filter((name) => name === "run_sql_readonly").length;
+  const sqlInvestigationPattern = classifySqlInvestigationPattern(sqlCalls, failedSqlCalls);
   const reasoningRounds = countReasoningRounds(events);
   const answer = extractFinalAnswer(events);
   const assertions: EnergyIqHarnessCaseReport["assertions"] = [];
@@ -566,6 +572,7 @@ export const evaluateEnergyIqHarnessObservation = (
       failedToolCalls: failedTools.length,
       recoveredToolFailures,
       sqlCalls,
+      sqlInvestigationPattern,
       reasoningRounds,
       inputTokens: tokenTotals.input,
       outputTokens: tokenTotals.output,
@@ -1120,6 +1127,16 @@ const countRepeatedSqlCalls = (events: EventRecord[]): number => {
     return canonical ? [canonical] : [];
   });
   return normalized.length - new Set(normalized).size;
+};
+
+const classifySqlInvestigationPattern = (
+  sqlCalls: number,
+  failedSqlCalls: number,
+): EnergyIqSqlInvestigationPattern => {
+  if (sqlCalls === 0) return "none";
+  if (failedSqlCalls >= 2) return "recovery-heavy";
+  if (sqlCalls > 4) return "extended";
+  return "focused";
 };
 
 const toolResultFailed = (event: EventRecord): boolean => {

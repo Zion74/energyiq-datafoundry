@@ -609,6 +609,37 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.metrics.repeatedSqlCalls).toBe(1);
     expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
   });
+
+  it("classifies a retry-heavy SQL investigation without turning telemetry into a correctness gate", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const events = successfulEvents(answer);
+    const answerIndex = events.findIndex((event) => event.type === "TEXT_MESSAGE_CONTENT");
+    events.splice(answerIndex, 0,
+      ...Array.from({ length: 8 }, (_, index) => [
+        {
+          type: "TOOL_CALL_START",
+          toolCallName: "run_sql_readonly",
+          toolCallId: `investigation-sql-${index + 1}`,
+          args: { sql: `SELECT ${index + 1} AS investigation_step` },
+        },
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallName: "run_sql_readonly",
+          toolCallId: `investigation-sql-${index + 1}`,
+          content: JSON.stringify(index < 2
+            ? { success: false, error: "query timed out" }
+            : { success: true }),
+        },
+      ]).flat(),
+    );
+
+    const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 176_000, events });
+
+    expect(report.status).toBe("passed");
+    expect(report.metrics.sqlCalls).toBe(9);
+    expect(report.metrics.sqlInvestigationPattern).toBe("recovery-heavy");
+  });
 });
 
 const successfulEvents = (answer: string, extraTools: string[] = []): Array<Record<string, unknown>> => {

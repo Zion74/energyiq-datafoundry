@@ -63,6 +63,10 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("Ngee Ann analysis policy");
     expect(content).toContain("one schema inspection establishes its governed contract");
     expect(content).toContain("Released Evidence already answers the question");
+    expect(content).toContain("minimum sufficient Evidence plan");
+    expect(content).toContain("Batch independent aggregates");
+    expect(content).toContain("Each additional query must resolve a named uncertainty");
+    expect(content).toContain("Stop querying once the question is answered");
     expect(content).not.toContain("Start with list_data_sources");
     expect(content).toContain("do not filter scope_id to the UI label 'project'");
     expect(content).toContain("group by local_interval_start");
@@ -124,7 +128,12 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("official_aggregation_eligible=TRUE");
     expect(content).toContain("EUI and per-pax");
     expect(content).toContain("provisional");
+    expect(content).toContain("available Evidence does not identify it as the primary driver");
+    expect(content).toContain("not an energy-waste problem");
     expect(content).toContain("Forecast, tariff cost, savings, ROI");
+    expect(content).toContain("current Period, Snapshot and Published Release");
+    expect(content).not.toContain("May Period");
+    expect(content).not.toContain("May energy data");
     expect(content).toContain("does not expose Calendar-derived operating or standby values");
     expect(content).toContain("deterministic Evidence pinned to business_calendar_version");
     expect(content).toContain('"relation":"energy_scope_123_metadata"');
@@ -221,6 +230,22 @@ describe("createEnergyQueryContextItem", () => {
         },
         preschoolOperational: {
           status: "available",
+          standbyAppliances: {
+            totalKwh: 100,
+            appliances: [{
+              name: "Living Area Plug Load",
+              centreCount: 30,
+              sourceCircuitIds: ["internal-standby-circuit-a", "internal-standby-circuit-b"],
+            }],
+          },
+          operatingAppliances: {
+            totalKwh: 200,
+            appliances: [{
+              name: "Living Room Lighting",
+              centreCount: 30,
+              sourceCircuitIds: ["internal-operating-circuit-a"],
+            }],
+          },
           analysisReady: {
             contract: {
               id: "preschool-operational-analysis-ready",
@@ -284,10 +309,14 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("preschool.benchmark.cohorts.active%20aging%20center.eui.p50");
     expect(content).toContain('"cohort":"Active Aging Center","sampleSize":"8"');
     expect(content).toContain('"sourceCircuitCount":2');
+    expect(content).toContain('"name":"Living Area Plug Load","centreCount":30,"sourceCircuitCount":2');
+    expect(content).toContain('"name":"Living Room Lighting","centreCount":30,"sourceCircuitCount":1');
     expect(content).toContain('"scoredCentreCount":2');
     expect(content).toContain('"centreCode":"E","standbySpikeCount":2');
     expect(content).not.toContain("do-not-copy-complete-metadata-evidence");
     expect(content).not.toContain("internal-source-circuit-a");
+    expect(content).not.toContain("internal-standby-circuit-a");
+    expect(content).not.toContain("internal-operating-circuit-a");
     expect(content).not.toContain('"centreCode":"A","standbySpikeCount":0');
     expect(content).not.toContain("must-not-inline-operational-event");
     expect(content).not.toContain("must-not-inline-operational-recurrence");
