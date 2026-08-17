@@ -686,6 +686,8 @@ describe("Preschool Section Interpreter v4", () => {
     "The concentration may warrant an on-site control check.",
     "The timing is worth confirming before a cause is assigned.",
     "This concentration makes the site the clearest closed-hours investigation target.",
+    "This makes it the standout screening target among the priority Centres.",
+    "If lights stay on after closing, this is the first area to verify on-site.",
   ])("downgrades observed wording that makes an inferred relationship: %s", (text) => {
     const pack = packV2("standby-wastage", 1);
     const result = materializePreschoolSectionResultV4({
