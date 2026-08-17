@@ -85,6 +85,27 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
         })}
       </div>
 
+      {view.holidayInsight.status === "available" ? (
+        <aside
+          className="mt-4 rounded-xl border border-step-warning/25 bg-step-warning/5 px-4 py-4"
+          aria-label="Public Holiday observed insight"
+          data-holiday-insight="true"
+        >
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-step-warning">Observed pattern</p>
+              <p className="mt-1.5 text-base font-semibold leading-6 text-foreground">{view.holidayInsight.headline}</p>
+              <p className="mt-1 text-sm leading-6 text-muted">{view.holidayInsight.detail}</p>
+            </div>
+            <div className="rounded-lg bg-surface px-3 py-3">
+              <p className="text-xs font-semibold text-foreground">Angle to investigate</p>
+              <p className="mt-1 text-sm leading-6 text-muted"><em>{view.holidayInsight.angle}</em></p>
+            </div>
+          </div>
+          <p className="mt-3 border-t border-step-warning/15 pt-2 text-xs leading-5 text-muted">{view.holidayInsight.caveat}</p>
+        </aside>
+      ) : null}
+
       <div className="mt-5 grid gap-3 rounded-xl border border-border bg-surface-subtle/45 p-3 lg:grid-cols-2">
         <fieldset className="min-w-0 rounded-lg bg-surface px-3 py-3">
           <legend className="mb-2 text-xs font-semibold text-muted">Day Profile type</legend>

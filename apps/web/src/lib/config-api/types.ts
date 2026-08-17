@@ -532,7 +532,7 @@ export type EnergyTimeBehaviourDto = {
     }>;
   }>;
   dayProfiles: Array<{
-    dayType: "weekday" | "weekend";
+    dayType: "weekday" | "weekend" | "public_holiday";
     scopeId: string;
     scopeName: string;
     status: "available";
@@ -565,7 +565,7 @@ export type EnergyComponentHourlyProfilesDto = {
     scopeName: string;
     scopeType: string;
     profiles: Array<{
-      dayType: "weekday" | "weekend";
+      dayType: "weekday" | "weekend" | "public_holiday";
       status: "available";
       sampleDayCount: number;
       categories: Array<{

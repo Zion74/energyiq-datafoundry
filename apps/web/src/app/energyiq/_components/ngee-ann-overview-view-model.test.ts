@@ -1279,6 +1279,42 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
+  it("turns an elevated Public Holiday profile into an observed, small-sample investigation angle", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const profiles = snapshot.analysis.timeBehaviour!.dayProfiles;
+    const weekend = profiles.find((profile) => (
+      profile.scopeId === "project" && profile.dayType === "weekend" && profile.status === "available"
+    ));
+    const holidayIndex = profiles.findIndex((profile) => (
+      profile.scopeId === "project" && profile.dayType === "public_holiday"
+    ));
+    if (!weekend || holidayIndex < 0) throw new Error("Expected Project Day Type profiles.");
+    const weekendTotal = weekend.values.reduce((sum, value) => sum + value.usageKwh, 0);
+    weekend.values = weekend.values.map((value) => ({
+      ...value,
+      usageKwh: value.usageKwh * 82.371 / weekendTotal,
+    }));
+    profiles[holidayIndex] = {
+      dayType: "public_holiday",
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      status: "available",
+      sampleDayCount: 2,
+      values: weekend.values.map((value) => ({
+        ...value,
+        usageKwh: value.usageKwh * 137.174 / 82.371,
+      })),
+    };
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).dayProfile.holidayInsight).toEqual({
+      status: "available",
+      headline: "Public Holiday use stayed above Weekend levels",
+      detail: "Public Holidays averaged 137.2 kWh/day, 66.5% above the Weekend average of 82.4 kWh/day.",
+      angle: "A useful follow-up is whether lighting, office loads or scheduled ventilation kept a weekday-like pattern.",
+      caveat: "Observed across 2 complete Public Holidays and 2 complete Weekend days. Treat this as a small-sample signal, not a proven cause.",
+    });
+  });
+
   it("keeps invalid Day Profile and hourly grid failures inside their owning modules", () => {
     const invalidProfile = ngeeAnnGoldenSnapshot();
     const weekday = invalidProfile.analysis.timeBehaviour!.dayProfiles.find((profile) => (

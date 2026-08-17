@@ -736,6 +736,46 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup.match(/29\.72¢\/kWh incl\. GST \(27\.27¢\/kWh ex GST\)/g)).toHaveLength(2);
   });
 
+  it("surfaces an elevated Public Holiday profile as an observed insight with a small-sample caveat", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const profiles = snapshot.analysis.timeBehaviour!.dayProfiles;
+    const weekend = profiles.find((profile) => (
+      profile.scopeId === "project" && profile.dayType === "weekend" && profile.status === "available"
+    ));
+    const holidayIndex = profiles.findIndex((profile) => (
+      profile.scopeId === "project" && profile.dayType === "public_holiday"
+    ));
+    if (!weekend || holidayIndex < 0) throw new Error("Expected Project Day Type profiles.");
+    const weekendTotal = weekend.values.reduce((sum, value) => sum + value.usageKwh, 0);
+    weekend.values = weekend.values.map((value) => ({
+      ...value,
+      usageKwh: value.usageKwh * 82.371 / weekendTotal,
+    }));
+    profiles[holidayIndex] = {
+      dayType: "public_holiday",
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      status: "available",
+      sampleDayCount: 2,
+      values: weekend.values.map((value) => ({
+        ...value,
+        usageKwh: value.usageKwh * 137.174 / 82.371,
+      })),
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Observed pattern");
+    expect(markup).toContain("Public Holiday baseline");
+    expect(markup).toContain("137.2");
+    expect(markup).toContain("Public Holiday use stayed above Weekend levels");
+    expect(markup).toContain("66.5% above the Weekend average");
+    expect(markup).toContain("Angle to investigate");
+    expect(markup).toContain("small-sample signal, not a proven cause");
+  });
+
   it("renders an honest unavailable Level module for a legacy Snapshot contract", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer

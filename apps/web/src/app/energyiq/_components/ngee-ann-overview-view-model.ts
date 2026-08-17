@@ -206,8 +206,20 @@ export type NgeeAnnDayProfileViewModel = {
       | {
         status: "unavailable";
         reason: string;
-      };
+    };
   }>;
+  holidayInsight:
+    | {
+      status: "available";
+      headline: string;
+      detail: string;
+      angle: string;
+      caveat: string;
+    }
+    | {
+      status: "unavailable";
+      reason: string;
+    };
   evidence: TimeBehaviourEvidence;
   componentEvidence: ComponentHourlyEvidence;
 };
@@ -3204,6 +3216,7 @@ function buildDayProfile(
     operatingPolicy,
     scopes: [],
     profiles: [],
+    holidayInsight: { status: "unavailable", reason },
     evidence,
     componentEvidence,
   });
@@ -3247,17 +3260,7 @@ function buildDayProfile(
     return unavailable("The server Day Profile contract is incomplete or invalid.");
   }
   const componentProjection = validComponentHourlyProfiles(snapshot);
-
-  return {
-    status: "available",
-    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
-    reason: null,
-    operatingPolicy,
-    scopes: grid.scopes.map((scope) => ({
-      id: scope.scopeId,
-      name: scope.scopeType === "project" ? "Project" : scope.scopeName,
-    })),
-    profiles: profiles.map((profile) => {
+  const projectedProfiles: NgeeAnnDayProfileViewModel["profiles"] = profiles.map((profile) => {
       const peak = profile.status === "available"
         ? profile.values.reduce((current, candidate) => (
           candidate.usageKwh > current.usageKwh ? candidate : current
@@ -3335,9 +3338,70 @@ function buildDayProfile(
           : [],
         componentStack,
       };
-    }),
+    });
+  const holidayInsight = buildHolidayInsight(projectedProfiles, snapshot.context.scopeId);
+
+  return {
+    status: "available",
+    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
+    reason: null,
+    operatingPolicy,
+    scopes: grid.scopes.map((scope) => ({
+      id: scope.scopeId,
+      name: scope.scopeType === "project" ? "Project" : scope.scopeName,
+    })),
+    profiles: projectedProfiles,
+    holidayInsight,
     evidence,
     componentEvidence,
+  };
+}
+
+function buildHolidayInsight(
+  profiles: NgeeAnnDayProfileViewModel["profiles"],
+  projectScopeId: string,
+): NgeeAnnDayProfileViewModel["holidayInsight"] {
+  const holiday = profiles.find((profile) => (
+    profile.scopeId === projectScopeId
+    && profile.dayType === "public_holiday"
+    && profile.status === "available"
+    && profile.summary.status === "available"
+  ));
+  const weekend = profiles.find((profile) => (
+    profile.scopeId === projectScopeId
+    && profile.dayType === "weekend"
+    && profile.status === "available"
+    && profile.summary.status === "available"
+  ));
+  if (!holiday || !weekend || holiday.summary.status !== "available" || weekend.summary.status !== "available") {
+    return {
+      status: "unavailable",
+      reason: "A complete Public Holiday and Weekend Project profile is required for this comparison.",
+    };
+  }
+  if (weekend.summary.dailyUsageKwh <= 0) {
+    return {
+      status: "unavailable",
+      reason: "The Weekend reference is zero, so a relative Public Holiday comparison is unavailable.",
+    };
+  }
+  const differencePct = (holiday.summary.dailyUsageKwh - weekend.summary.dailyUsageKwh)
+    / weekend.summary.dailyUsageKwh * 100;
+  const absoluteDifferencePct = Math.abs(differencePct);
+  const headline = absoluteDifferencePct < 0.05
+    ? "Public Holiday use was close to Weekend levels"
+    : differencePct > 0
+      ? "Public Holiday use stayed above Weekend levels"
+      : "Public Holiday use stayed below Weekend levels";
+  const relationship = absoluteDifferencePct < 0.05
+    ? "about the same as"
+    : `${formatFixedCustomerDecimal(absoluteDifferencePct, 1)}% ${differencePct > 0 ? "above" : "below"}`;
+  return {
+    status: "available",
+    headline,
+    detail: `Public Holidays averaged ${holiday.summary.dailyUsage} kWh/day, ${relationship} the Weekend average of ${weekend.summary.dailyUsage} kWh/day.`,
+    angle: "A useful follow-up is whether lighting, office loads or scheduled ventilation kept a weekday-like pattern.",
+    caveat: `Observed across ${holiday.summary.sampleDayCount} complete Public ${holiday.summary.sampleDayCount === 1 ? "Holiday" : "Holidays"} and ${weekend.summary.sampleDayCount} complete Weekend ${weekend.summary.sampleDayCount === 1 ? "day" : "days"}. Treat this as a small-sample signal, not a proven cause.`,
   };
 }
 
