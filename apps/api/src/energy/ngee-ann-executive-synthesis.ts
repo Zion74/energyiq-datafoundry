@@ -188,12 +188,18 @@ export const materializeNgeeAnnExecutiveResult = (input: {
     ...result.insights.flatMap(({ evidenceRefs }) => evidenceRefs),
   ]));
   const sourceText = JSON.stringify(input.sources);
-  const summary = parseSummary(proposal.summary, evidenceIds, sourceText);
-  if (!summary) throw new Error("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
   const findings = proposal.findings
     .map((candidate) => parseFinding(candidate, input.sources, sourceText))
     .filter((finding): finding is NgeeAnnExecutiveFinding => finding !== null)
     .slice(0, 3);
+  const proposedSummary = parseSummary(proposal.summary, evidenceIds, sourceText);
+  const summary = proposedSummary ?? (findings[0]
+    ? {
+        text: findings[0]!.text,
+        evidenceRefs: [...findings[0]!.evidenceRefs],
+      }
+    : null);
+  if (!summary) throw new Error("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
   return {
     ...resultBase(input.identity, input.runId, input.sources, "available", findings),
     summary,

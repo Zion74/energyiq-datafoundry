@@ -857,6 +857,95 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("passes the exact failed Ngee Ann unit to the Project adapter retry", async () => {
+    const harness = await createHarness();
+    try {
+      const ngeeAnnProject = harness.metadata.energyIq.getProject("ngee-ann-polytechnic");
+      const identity = {
+        ...harness.identity,
+        workspaceId: ngeeAnnProject.workspace_id,
+        projectId: ngeeAnnProject.id,
+        scopeId: ngeeAnnProject.root_scope_id,
+        rendererKey: "ngee-ann-overview",
+        dataSnapshotId: "ngee-snapshot-current",
+        projectReleaseId: "ngee-release-current",
+      };
+      const available = (id: string) => ({ status: "available" as const, artifactId: id, result: {} });
+      const binding = {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        scopeId: identity.scopeId,
+        dataSnapshotId: identity.dataSnapshotId,
+        projectReleaseId: identity.projectReleaseId,
+        analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+        modelProfileId: identity.modelProfileId,
+        modelProfileRevision: identity.modelProfileRevision,
+        generation: projectOverviewAiGenerationBinding(identity),
+      };
+      const failedModel = {
+        contract: "energyiq-project-overview-ai-read-model@1" as const,
+        rendererKey: "ngee-ann-overview" as const,
+        binding,
+        keyFindings: {
+          status: "failed" as const,
+          artifactId: "artifact:executive:failed",
+          reason: "ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID",
+        },
+        sections: {
+          "trend-and-demand": available("artifact:trend"),
+          "time-behaviour": available("artifact:time"),
+          "circuit-concentration": available("artifact:circuit"),
+          "decision-priorities": available("artifact:decision"),
+        },
+        additionalInsights: available("artifact:additional"),
+      };
+      const readyModel = {
+        ...failedModel,
+        keyFindings: available("artifact:executive:ready"),
+      };
+      const resolveIdentity = vi.fn().mockResolvedValue(identity);
+      const readExact = vi.fn()
+        .mockResolvedValueOnce(failedModel)
+        .mockResolvedValue(readyModel);
+      const generateMissing = vi.fn().mockResolvedValue(readyModel);
+      const context = {
+        ...harness.context,
+        workspaceId: ngeeAnnProject.workspace_id,
+        projectOverviewAiAdapters: [{
+          rendererKey: "ngee-ann-overview",
+          sections: [
+            { id: "trend-and-demand", label: "Trend and demand" },
+            { id: "time-behaviour", label: "Time behaviour" },
+            { id: "circuit-concentration", label: "Circuit concentration" },
+            { id: "decision-priorities", label: "Decision priorities" },
+          ],
+          resolveIdentity,
+          readExact,
+          generateMissing,
+        }],
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", "ngee-ann-polytechnic", "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { analysis: { status: "ready" }, allowedActions: [] } },
+      });
+      expect(generateMissing).toHaveBeenCalledOnce();
+      expect(generateMissing).toHaveBeenCalledWith({
+        identity,
+        user: expect.objectContaining({ id: "dev-user" }),
+        retryTarget: "executive-synthesis",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("treats a cross-Snapshot exact-read result as an integrity failure, not a historical result", async () => {
     const harness = await createHarness();
     try {

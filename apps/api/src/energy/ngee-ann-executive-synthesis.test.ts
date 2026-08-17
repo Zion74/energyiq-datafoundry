@@ -55,6 +55,74 @@ describe("Ngee Ann Executive Synthesis", () => {
     });
   });
 
+  it("keeps validated findings when an unsupported Executive summary cannot be published", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:summary-fallback",
+    });
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-summary-fallback",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "The unsupported combined impact is 999.9 kW.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:validated",
+          title: "Peak demand and hourly concentration deserve a joint reading",
+          text: "The 138.8 kW peak and the daytime pattern may share an operational boundary, but the current Evidence does not establish a cause.",
+          epistemicStatus: "speculative",
+          sectionIds: ["trend-and-demand", "time-behaviour"],
+          sourceInsightIds: ["insight:trend", "insight:time"],
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        }],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: {
+        text: "The 138.8 kW peak and the daytime pattern may share an operational boundary, but the current Evidence does not establish a cause.",
+        evidenceRefs: ["evidence:trend", "evidence:time"],
+      },
+      findings: [{ id: "finding:validated" }],
+    });
+  });
+
+  it("still rejects an unsupported summary when no validated finding survives", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:no-safe-fallback",
+    });
+
+    expect(() => materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-no-safe-fallback",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "The unsupported combined impact is 999.9 kW.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:unsupported",
+          title: "Unsupported number",
+          text: "The unexplained impact is 999.9 kW.",
+          epistemicStatus: "observed",
+          sectionIds: ["trend-and-demand"],
+          sourceInsightIds: ["insight:trend"],
+          evidenceRefs: ["evidence:trend"],
+        }],
+      }),
+    })).toThrow("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
+  });
+
   it("preserves a useful Executive finding while lowering it to the source uncertainty", () => {
     const sources = sourceSections();
     const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({

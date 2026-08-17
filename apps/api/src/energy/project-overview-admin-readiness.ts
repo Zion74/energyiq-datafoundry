@@ -292,7 +292,14 @@ export const createProjectOverviewAdminReadinessService = (input: {
           user,
           request: { kind: "current" },
         });
-        await projectAdapter.generateMissing({ identity, user });
+        const hasMissing = before.analysis.items.some((item) => item.status === "not-generated");
+        if (hasMissing) {
+          await projectAdapter.generateMissing({ identity, user });
+        } else {
+          for (const retryTarget of projectAdapterRetryTargets(before.analysis.items, projectAdapter)) {
+            await projectAdapter.generateMissing({ identity, user, retryTarget });
+          }
+        }
         return readProjectOverviewAdminState({ projectId, user });
       }
       if (!input.overviewAiWorkflow || !input.overviewAiExecutor) {
@@ -417,6 +424,18 @@ const retryTargetForItem = (
     ? sectionId as PreschoolSectionId
     : null;
 };
+
+const projectAdapterRetryTargets = (
+  items: readonly ProjectOverviewAdminReadinessItem[],
+  adapter: ProjectOverviewAiAdapter,
+): string[] => items.flatMap((item) => {
+  if (item.status !== "needs-attention" || !item.artifactId) return [];
+  if (item.id === "key-findings") return ["executive-synthesis"];
+  if (item.id === "additional-insights") return ["additional-insights"];
+  if (!item.id.startsWith("section:")) return [];
+  const sectionId = item.id.slice("section:".length);
+  return adapter.sections.some(({ id }) => id === sectionId) ? [sectionId] : [];
+});
 
 const unavailablePreschoolState = (input: {
   projectId: string;

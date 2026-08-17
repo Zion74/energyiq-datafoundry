@@ -1172,7 +1172,8 @@ const requireExecutiveSynthesisResult = (
 ): void => {
   if (identity.identityContractRevision === "ngee-ann-executive-v1"
     || identity.identityContractRevision === "ngee-ann-executive-v2"
-    || identity.identityContractRevision === "ngee-ann-executive-v3") {
+    || identity.identityContractRevision === "ngee-ann-executive-v3"
+    || identity.identityContractRevision === "ngee-ann-executive-v4") {
     requireProjectExecutiveSynthesisResultV1(parsed, identity);
     return;
   }
@@ -1195,7 +1196,9 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-artifacts"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
-    || !((identity.identityContractRevision === "ngee-ann-executive-v3"
+    || !((identity.identityContractRevision === "ngee-ann-executive-v4"
+      && identity.validatorRevision === "energyiq-project-executive-acceptance-v4")
+      || (identity.identityContractRevision === "ngee-ann-executive-v3"
       && identity.validatorRevision === "energyiq-project-executive-acceptance-v3")
       || (identity.identityContractRevision === "ngee-ann-executive-v2"
         && identity.validatorRevision === "energyiq-project-executive-acceptance-v2")
@@ -1229,7 +1232,8 @@ const requireProjectExecutiveSynthesisResultV1 = (
   }
   if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(
     summary,
-    identity.identityContractRevision === "ngee-ann-executive-v3" ? 720 : 600,
+    identity.identityContractRevision === "ngee-ann-executive-v3"
+      || identity.identityContractRevision === "ngee-ann-executive-v4" ? 720 : 600,
   )) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
