@@ -528,6 +528,7 @@ const containsInferenceLanguage = (text: string): boolean =>
     .test(text)
   || /\blooks?\s+like\b|\bconsistent\s+with\b|\bpoints?\s+to\b|\bpossib(?:le|ility)\b/iu.test(text)
   || /\bworth\s+(?:confirming|checking|reviewing|investigating|validating)\b/iu.test(text)
+  || /\bmakes?\b.{0,120}\b(?:investigation|review|action)\s+(?:target|priority)\b/iu.test(text)
   || /\bmay\s+(?:be|reflect|indicate|suggest|result|offer|mean|signal|help|need|show|point|support|capture)\b/iu
     .test(text)
   || /\bmay\s+warrant\b/iu.test(text);

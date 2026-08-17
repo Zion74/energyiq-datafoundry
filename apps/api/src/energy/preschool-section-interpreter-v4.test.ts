@@ -685,6 +685,7 @@ describe("Preschool Section Interpreter v4", () => {
     "The recurrence points to a possible behavioural pattern.",
     "The concentration may warrant an on-site control check.",
     "The timing is worth confirming before a cause is assigned.",
+    "This concentration makes the site the clearest closed-hours investigation target.",
   ])("downgrades observed wording that makes an inferred relationship: %s", (text) => {
     const pack = packV2("standby-wastage", 1);
     const result = materializePreschoolSectionResultV4({
@@ -696,7 +697,7 @@ describe("Preschool Section Interpreter v4", () => {
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [{
-          title: "Possible schedule relationship",
+          title: "Closed-hours concentration",
           epistemicStatus: "observed",
           text,
           evidenceRefs: ["evidence:standby-wastage:1"],

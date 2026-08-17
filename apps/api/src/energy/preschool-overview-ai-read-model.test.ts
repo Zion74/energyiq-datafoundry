@@ -91,7 +91,7 @@ describe("composePreschoolOverviewAiReadModel", () => {
       const baseIdentity = identity();
       const historicalIdentity: EnergyIqOverviewAiArtifactIdentity = {
         ...sectionIdentityV4(baseIdentity, "centre-benchmark"),
-        validatorRevision: "acceptance-validator-v13",
+        validatorRevision: "acceptance-validator-v14",
       };
       metadata.energyIq.overviewAiArtifacts.queue({
         identity: historicalIdentity,
