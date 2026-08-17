@@ -95,7 +95,12 @@ describe("EnergyIQ operational policy Admin interface", () => {
               saturday: [],
               sunday: [],
             },
-            exceptions: [{ date: "2026-08-10", operating: [], label: "Closure" }],
+            exceptions: [{
+              date: "2026-08-10",
+              operating: [],
+              label: "National Day observed",
+              classification: "public_holiday",
+            }],
           }],
         }),
         ["projects", projectId, "operational-policies", "calendar"],
@@ -109,12 +114,48 @@ describe("EnergyIQ operational policy Admin interface", () => {
             revision: {
               project_id: projectId,
               timezone: "Asia/Singapore",
-              entries: [{ owner: { kind: "scope", scope_id: "level-6" } }],
+              entries: [{
+                owner: { kind: "scope", scope_id: "level-6" },
+                exceptions: [{
+                  date: "2026-08-10",
+                  label: "National Day observed",
+                  classification: "public_holiday",
+                }],
+              }],
             },
           },
         },
       });
       const calendarVersion = requireVersionId(calendarResponse, "revision");
+
+      const invalidClassificationResponse = await handleEnergyApiRequest(
+        request("POST", {
+          entries: [{
+            owner: { kind: "project" },
+            effectiveFrom: "2026-07-01",
+            weekly: {
+              monday: [],
+              tuesday: [],
+              wednesday: [],
+              thursday: [],
+              friday: [],
+              saturday: [],
+              sunday: [],
+            },
+            exceptions: [{
+              date: "2026-08-10",
+              operating: [],
+              classification: "holiday-like-label",
+            }],
+          }],
+        }),
+        ["projects", projectId, "operational-policies", "calendar"],
+        context,
+      );
+      expect(invalidClassificationResponse).toMatchObject({
+        status: 400,
+        body: { success: false, error: { code: "BAD_REQUEST" } },
+      });
 
       const configuration = await handleEnergyApiRequest(
         request("GET"),

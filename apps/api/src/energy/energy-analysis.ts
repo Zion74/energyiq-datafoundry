@@ -353,7 +353,7 @@ export type EnergyScopeAnalysis = {
       }>;
     }>;
     dayProfiles: Array<{
-      dayType: "weekday" | "weekend";
+      dayType: "weekday" | "weekend" | "public_holiday";
       scopeId: string;
       scopeName: string;
       status: "available";
@@ -385,7 +385,7 @@ export type EnergyScopeAnalysis = {
       scopeName: string;
       scopeType: string;
       profiles: Array<{
-        dayType: "weekday" | "weekend";
+        dayType: "weekday" | "weekend" | "public_holiday";
         status: "available";
         sampleDayCount: number;
         categories: Array<{
@@ -673,7 +673,8 @@ export type EnergyLatestCompletePeriodSelection = {
 };
 
 export type EnergyCurrentOverviewPeriodSelection = {
-  periodDays: 28;
+  periodBasis: "calendar_month_to_date";
+  periodDays: number;
   cutoffLocalDate: string;
   intervalMinutes: number;
   period: {
@@ -833,7 +834,6 @@ const GOLDEN_SELECTION_POLICY =
   "highest current coverage, then previous-period coverage, then fewest quality events, then latest" as const;
 
 const LATEST_COMPLETE_PERIOD_DAYS = 7 as const;
-const CURRENT_OVERVIEW_PERIOD_DAYS = 28 as const;
 
 type EnergyPeriodSelectionInput = {
   metadataStore: MetadataStore;
@@ -986,7 +986,6 @@ export const selectEnergyCurrentOverviewPeriod = async (
     sql: currentOverviewPeriodSelectionSql(
       scoped.viewName,
       aggregateMeterNodeIds,
-      CURRENT_OVERVIEW_PERIOD_DAYS,
       input.context.timezone,
     ),
     limit: 1,
@@ -996,7 +995,8 @@ export const selectEnergyCurrentOverviewPeriod = async (
     throw new Error("ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND");
   }
   return {
-    periodDays: CURRENT_OVERVIEW_PERIOD_DAYS,
+    periodBasis: "calendar_month_to_date",
+    periodDays: numberAt(row, 6),
     cutoffLocalDate: stringAt(row, 0),
     intervalMinutes: numberAt(row, 5),
     period: {
@@ -1439,6 +1439,13 @@ export const executeEnergyScopeAnalysis = async (input: {
     selectedScopeId: input.context.scopeId,
     dailyTotals,
   });
+  const publicHolidayDatesByScopeId = resolvePublicHolidayDatesByScope({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    businessCalendarVersion: input.context.businessCalendarVersion,
+    period: { from: input.context.from, to: input.context.to },
+    scopes: dailyTotalScopes,
+  });
   const timeBehaviour = timeBucketGridResult
     ? buildTimeBehaviour({
         timezone: input.context.timezone,
@@ -1446,6 +1453,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         dateBuckets: dailyDateBuckets,
         intervalMinutes,
         rows: timeBucketGridResult.rows,
+        publicHolidayDatesByScopeId,
       })
     : undefined;
   const componentHourlyProfiles = componentHourlyProfilesResult
@@ -1456,6 +1464,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         intervalMinutes,
         series: componentHourlyCircuitSeries,
         rows: componentHourlyProfilesResult.rows,
+        publicHolidayDatesByScopeId,
       })
     : undefined;
   const dailyUsageAnomalies = buildDailyUsageAnomalies({
@@ -1701,6 +1710,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         rows: dailyComponentCategoryResult.rows,
         intervalMinutes,
         cost,
+        publicHolidayDatesByScopeId,
       })
     : undefined;
   const coveragePct = expectedMeterIntervalCount > 0
@@ -2998,6 +3008,7 @@ const buildComponentCategoryBreakdown = (input: {
   rows: unknown[][];
   intervalMinutes: number;
   cost: EnergyScopeAnalysis["cost"];
+  publicHolidayDatesByScopeId: Map<string, Set<string>>;
 }): NonNullable<EnergyScopeAnalysis["componentCategoryBreakdown"]> => {
   const facts = new Map(
     input.rows.map((row) => [
@@ -3026,6 +3037,7 @@ const buildComponentCategoryBreakdown = (input: {
         (left, right) => left.categoryOrder - right.categoryOrder,
       );
       const scope = orderedSeries[0]!;
+      const publicHolidayDates = input.publicHolidayDatesByScopeId.get(scope.scopeId);
       const officialDailyRows = new Map(
         (dailyTotalsByScope.get(scope.scopeId)?.rows ?? []).map((row) => [row.localDate, row]),
       );
@@ -3098,7 +3110,9 @@ const buildComponentCategoryBreakdown = (input: {
           localDate: bucket.localDate,
           from: bucket.from,
           to: bucket.to,
-          dayType: dayTypes.size === 1 ? [...dayTypes][0]! : null,
+          dayType: publicHolidayDates?.has(bucket.localDate)
+            ? "public_holiday" as const
+            : dayTypes.size === 1 ? [...dayTypes][0]! : null,
           officialUsageKwh,
           componentUsageKwh,
           categories: categories.map((category) => ({
@@ -3420,6 +3434,7 @@ const buildTimeBehaviour = (input: {
   dateBuckets: DailyDateBucket[];
   intervalMinutes: number;
   rows: unknown[][];
+  publicHolidayDatesByScopeId: Map<string, Set<string>>;
 }): NonNullable<EnergyScopeAnalysis["timeBehaviour"]> => {
   const factsByScopeDateHour = new Map(
     input.rows.flatMap((row) => parseTimeBucketFacts(
@@ -3481,6 +3496,7 @@ const buildTimeBehaviour = (input: {
   }));
   const dayProfiles: NonNullable<EnergyScopeAnalysis["timeBehaviour"]>["dayProfiles"] = [];
   for (const scope of scopes) {
+    const publicHolidayDates = input.publicHolidayDatesByScopeId.get(scope.scopeId);
     const classifiedCompleteDates = new Map<string, "weekday" | "weekend">();
     let classificationUnavailable = false;
     for (const dateBucket of input.dateBuckets) {
@@ -3526,7 +3542,9 @@ const buildTimeBehaviour = (input: {
         continue;
       }
       const completeDates = [...classifiedCompleteDates.entries()]
-        .filter(([, classifiedDayType]) => classifiedDayType === dayType)
+        .filter(([localDate, classifiedDayType]) => (
+          classifiedDayType === dayType && !publicHolidayDates?.has(localDate)
+        ))
         .map(([localDate]) => localDate);
       if (completeDates.length === 0) {
         dayProfiles.push({
@@ -3564,17 +3582,55 @@ const buildTimeBehaviour = (input: {
         }),
       });
     }
-  }
-  for (const scope of scopes) {
+    if (!publicHolidayDates) {
+      dayProfiles.push({
+        dayType: "public_holiday",
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        status: "unavailable",
+        reason: {
+          code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+          message: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
+        },
+      });
+      continue;
+    }
+    const completeHolidayDates = [...classifiedCompleteDates.keys()]
+      .filter((localDate) => publicHolidayDates.has(localDate));
+    if (completeHolidayDates.length === 0) {
+      dayProfiles.push({
+        dayType: "public_holiday",
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        status: "unavailable",
+        reason: {
+          code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+          message: `No complete public_holiday local-day sample is available for ${scope.scopeName}.`,
+        },
+      });
+      continue;
+    }
+    const completeHolidayDateSet = new Set(completeHolidayDates);
     dayProfiles.push({
       dayType: "public_holiday",
       scopeId: scope.scopeId,
       scopeName: scope.scopeName,
-      status: "unavailable",
-      reason: {
-        code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
-        message: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
-      },
+      status: "available",
+      sampleDayCount: completeHolidayDates.length,
+      values: Array.from({ length: 24 }, (_, localHour) => {
+        const samples = scope.cells.filter((cell) => (
+          cell.localHour === localHour
+          && completeHolidayDateSet.has(cell.localDate)
+          && cell.usageKwh !== null
+        ));
+        return {
+          localHour,
+          usageKwh: round(
+            samples.reduce((sum, cell) => sum + (cell.usageKwh ?? 0), 0) / samples.length,
+            4,
+          ),
+        };
+      }),
     });
   }
   return {
@@ -3588,6 +3644,32 @@ const buildTimeBehaviour = (input: {
   };
 };
 
+const resolvePublicHolidayDatesByScope = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  businessCalendarVersion: string;
+  period: { from: string; to: string };
+  scopes: DailyTotalScope[];
+}): Map<string, Set<string>> => {
+  const resolvedByScope = new Map<string, Set<string>>();
+  for (const scope of input.scopes) {
+    const resolved = input.metadataStore.energyIq.operationalPolicy
+      .resolveOperatingCalendarExceptionDates({
+        project_id: input.projectId,
+        scope_id: scope.scopeId,
+        version_id: input.businessCalendarVersion,
+        period: input.period,
+      });
+    if (!resolved) continue;
+    resolvedByScope.set(scope.scopeId, new Set(
+      resolved.exceptions
+        .filter((exception) => exception.classification === "public_holiday")
+        .map((exception) => exception.date),
+    ));
+  }
+  return resolvedByScope;
+};
+
 const buildComponentHourlyProfiles = (input: {
   timezone: string;
   scopes: DailyTotalScope[];
@@ -3595,6 +3677,7 @@ const buildComponentHourlyProfiles = (input: {
   intervalMinutes: number;
   series: ComponentHourlyCircuitSeries[];
   rows: unknown[][];
+  publicHolidayDatesByScopeId: Map<string, Set<string>>;
 }): NonNullable<EnergyScopeAnalysis["componentHourlyProfiles"]> => {
   const expectedMeterIntervalCount = Math.round(60 / input.intervalMinutes);
   if (expectedMeterIntervalCount <= 0) {
@@ -3624,6 +3707,7 @@ const buildComponentHourlyProfiles = (input: {
     unit: "kWh",
     timezone: input.timezone,
     scopes: input.scopes.map((scope) => {
+      const publicHolidayDates = input.publicHolidayDatesByScopeId.get(scope.scopeId);
       const definitions = input.series.filter((definition) => (
         scope.scopeType === "project" || definition.levelScopeId === scope.scopeId
       ));
@@ -3671,7 +3755,18 @@ const buildComponentHourlyProfiles = (input: {
       const categories = [...new Set(definitions.map((definition) => definition.category))]
         .sort(componentProfileCategoryOrder);
       const profiles: NonNullable<EnergyScopeAnalysis["componentHourlyProfiles"]>["scopes"][number]["profiles"] = [];
-      for (const dayType of ["weekday", "weekend"] as const) {
+      for (const dayType of ["weekday", "weekend", "public_holiday"] as const) {
+        if (dayType === "public_holiday" && !publicHolidayDates) {
+          profiles.push({
+            dayType,
+            status: "unavailable",
+            reason: {
+              code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+              message: "Public Holiday component profiles require an authoritative release-pinned Calendar classification.",
+            },
+          });
+          continue;
+        }
         if (classificationUnavailable) {
           profiles.push({
             dayType,
@@ -3684,7 +3779,9 @@ const buildComponentHourlyProfiles = (input: {
           continue;
         }
         const sampleDates = [...completeDates.entries()]
-          .filter(([, value]) => value === dayType)
+          .filter(([localDate, value]) => dayType === "public_holiday"
+            ? publicHolidayDates?.has(localDate) === true
+            : value === dayType && !publicHolidayDates?.has(localDate))
           .map(([localDate]) => localDate);
         if (sampleDates.length === 0) {
           profiles.push({
@@ -3737,14 +3834,6 @@ const buildComponentHourlyProfiles = (input: {
           })),
         });
       }
-      profiles.push({
-        dayType: "public_holiday",
-        status: "unavailable",
-        reason: {
-          code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
-          message: "Public Holiday component profiles require an authoritative release-pinned Calendar classification.",
-        },
-      });
       return {
         scopeId: scope.scopeId,
         scopeName: scope.scopeName,
@@ -5011,22 +5100,22 @@ const latestAvailableDaySelectionSql = (
 const currentOverviewPeriodSelectionSql = (
   viewName: string,
   meterNodeIds: string[],
-  periodDays: number,
   timezone: string,
 ): string => `
   SELECT
     STRFTIME(local_date, '%Y-%m-%d') AS cutoff_local_date,
-    STRFTIME(local_date - INTERVAL ${periodDays - 1} DAY, '%Y-%m-%d') AS local_from,
+    STRFTIME(DATE_TRUNC('month', local_date), '%Y-%m-%d') AS local_from,
     STRFTIME(local_date + INTERVAL 1 DAY, '%Y-%m-%d') AS local_to_exclusive,
     EPOCH_MS(TIMEZONE(
       ${sqlLiteral(timezone)},
-      CAST(local_date - INTERVAL ${periodDays - 1} DAY AS TIMESTAMP)
+      CAST(DATE_TRUNC('month', local_date) AS TIMESTAMP)
     )) AS from_ms,
     EPOCH_MS(TIMEZONE(
       ${sqlLiteral(timezone)},
       CAST(local_date + INTERVAL 1 DAY AS TIMESTAMP)
     )) AS to_ms,
-    interval_minutes
+    interval_minutes,
+    DATE_DIFF('day', DATE_TRUNC('month', local_date), local_date) + 1 AS period_days
   FROM (
     SELECT
       local_date,

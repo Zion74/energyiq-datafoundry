@@ -33,6 +33,7 @@ export type OperatingExceptionDraft = {
   key: string;
   date: string;
   label: string;
+  classification: "" | "public_holiday" | "special_closure" | "special_operating_day";
   operating: OperatingTimeRangeDraft[];
 };
 
@@ -111,6 +112,7 @@ export const calendarDraftFromConfiguration = (
       key: `${entry.id}-exception-${exceptionIndex}`,
       date: exception.date,
       label: exception.label ?? "",
+      classification: exception.classification ?? "",
       operating: exception.operating.map((range, rangeIndex) => ({
         key: `${entry.id}-exception-${exceptionIndex}-${rangeIndex}`,
         ...range,
@@ -168,6 +170,7 @@ export const calendarPublishEntries = (
             return { from: range.from, to: range.to };
           }),
           ...(exception.label.trim() ? { label: exception.label.trim() } : {}),
+          ...(exception.classification ? { classification: exception.classification } : {}),
         };
       }),
     } : {}),

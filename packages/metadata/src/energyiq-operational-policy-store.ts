@@ -35,6 +35,11 @@ export type EnergyIqOperatingTimeRange = {
   to: string;
 };
 
+export type EnergyIqCalendarExceptionClassification =
+  | "public_holiday"
+  | "special_closure"
+  | "special_operating_day";
+
 export type EnergyIqOperatingCalendarEntry = {
   id: string;
   owner: EnergyIqPolicyOwner;
@@ -45,6 +50,7 @@ export type EnergyIqOperatingCalendarEntry = {
     date: string;
     operating: EnergyIqOperatingTimeRange[];
     label?: string;
+    classification?: EnergyIqCalendarExceptionClassification;
   }>;
 };
 
@@ -425,6 +431,10 @@ export class EnergyIqOperationalPolicyStore {
     timezone: string;
     business_calendar_version: string;
     exception_dates: string[];
+    exceptions: Array<{
+      date: string;
+      classification?: EnergyIqCalendarExceptionClassification;
+    }>;
   } | undefined {
     const period = parsePeriod(input.period);
     const scopeLineage = this.resolveScopeLineage(input.project_id, input.scope_id);
@@ -434,16 +444,17 @@ export class EnergyIqOperationalPolicyStore {
     `).get(input.version_id, input.project_id);
     if (!isRecord(row)) return undefined;
     const revision = mapOperatingCalendarRevision(row);
-    const exceptionDates = resolveOperatingCalendarExceptionDates({
+    const exceptions = resolveOperatingCalendarExceptions({
       revision,
       scopeLineage,
       period,
     });
-    if (!exceptionDates) return undefined;
+    if (!exceptions) return undefined;
     return {
       timezone: revision.timezone,
       business_calendar_version: revision.version_id,
-      exception_dates: exceptionDates,
+      exception_dates: exceptions.map((exception) => exception.date),
+      exceptions,
     };
   }
 
@@ -894,6 +905,7 @@ const canonicalizeOperatingCalendarEntries = (
           `calendar:${entry.id}:exception:${date}`,
         ),
         ...(exception.label?.trim() ? { label: exception.label.trim() } : {}),
+        ...(exception.classification ? { classification: exception.classification } : {}),
       };
     }).sort((left, right) => left.date.localeCompare(right.date));
     return {
@@ -1017,14 +1029,20 @@ const resolveOperatingWindows = (input: {
   return windows;
 };
 
-const resolveOperatingCalendarExceptionDates = (input: {
+const resolveOperatingCalendarExceptions = (input: {
   revision: EnergyIqOperatingCalendarRevision;
   scopeLineage: string[];
   period: { fromMs: number; toMs: number };
-}): string[] | undefined => {
+}): Array<{
+  date: string;
+  classification?: EnergyIqCalendarExceptionClassification;
+}> | undefined => {
   const firstDate = localDateAtInstant(input.period.fromMs, input.revision.timezone);
   const lastDate = localDateAtInstant(input.period.toMs - 1, input.revision.timezone);
-  const exceptionDates: string[] = [];
+  const exceptions: Array<{
+    date: string;
+    classification?: EnergyIqCalendarExceptionClassification;
+  }> = [];
   for (const date of localDateRange(firstDate, lastDate)) {
     const selected = resolveOperatingCalendarEntryForDate({
       entries: input.revision.entries,
@@ -1032,11 +1050,15 @@ const resolveOperatingCalendarExceptionDates = (input: {
       date,
     });
     if (!selected) return undefined;
-    if (selected.exceptions?.some((exception) => exception.date === date)) {
-      exceptionDates.push(date);
+    const exception = selected.exceptions?.find((candidate) => candidate.date === date);
+    if (exception) {
+      exceptions.push({
+        date,
+        ...(exception.classification ? { classification: exception.classification } : {}),
+      });
     }
   }
-  return exceptionDates;
+  return exceptions;
 };
 
 const resolveOperatingCalendarEntryForDate = (input: {

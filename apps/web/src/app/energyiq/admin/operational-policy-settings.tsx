@@ -360,6 +360,7 @@ function CalendarEntryEditor({
                 key: newKey("exception"),
                 date: "",
                 label: "",
+                classification: "",
                 operating: [],
               }],
             })}
@@ -439,9 +440,26 @@ function ExceptionEditor({
 }) {
   return (
     <div className="rounded-lg border border-border bg-surface p-3">
-      <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)_auto]">
+      <div className="grid gap-3 sm:grid-cols-[150px_minmax(0,1fr)_minmax(180px,0.7fr)_auto]">
         <TextField label="Date" type="date" value={exception.date} onChange={(date) => onChange({ ...exception, date })} />
         <TextField label="Label" value={exception.label} placeholder="Public holiday" onChange={(label) => onChange({ ...exception, label })} />
+        <label className="block">
+          <span className={fieldLabel}>Classification</span>
+          <select
+            aria-label="Calendar exception classification"
+            className={compactInputClass}
+            value={exception.classification}
+            onChange={(event) => onChange({
+              ...exception,
+              classification: event.target.value as OperatingExceptionDraft["classification"],
+            })}
+          >
+            <option value="">Unclassified</option>
+            <option value="public_holiday">Public holiday</option>
+            <option value="special_closure">Special closure</option>
+            <option value="special_operating_day">Special operating day</option>
+          </select>
+        </label>
         <button type="button" className={`${secondaryButton} self-end`} onClick={onRemove}>Remove</button>
       </div>
       <div className="mt-3 space-y-2">

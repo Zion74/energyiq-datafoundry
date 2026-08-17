@@ -1161,6 +1161,11 @@ export type EnergyOperatingDayDto =
 
 export type EnergyOperatingTimeRangeDto = { from: string; to: string };
 
+export type EnergyCalendarExceptionClassificationDto =
+  | "public_holiday"
+  | "special_closure"
+  | "special_operating_day";
+
 export type EnergyTariffScheduleEntryDto = {
   id: string;
   owner: EnergyOperationalPolicyOwnerDto;
@@ -1188,6 +1193,7 @@ export type EnergyOperatingCalendarEntryDto = {
     date: string;
     operating: EnergyOperatingTimeRangeDto[];
     label?: string;
+    classification?: EnergyCalendarExceptionClassificationDto;
   }>;
 };
 
@@ -1234,6 +1240,7 @@ export type EnergyOperatingCalendarEntryInputDto = {
     date: string;
     operating: EnergyOperatingTimeRangeDto[];
     label?: string;
+    classification?: EnergyCalendarExceptionClassificationDto;
   }>;
 };
 

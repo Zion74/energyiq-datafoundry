@@ -21,7 +21,12 @@ describe("operational policy Admin model", () => {
     expect(calendarDraftFromConfiguration(configuration)[0]).toMatchObject({
       owner: { kind: "scope", scopeId: "level-6" },
       weekly: { monday: [{ from: "08:00", to: "18:00" }] },
-      exceptions: [{ date: "2026-08-10", label: "Closure", operating: [] }],
+      exceptions: [{
+        date: "2026-08-10",
+        label: "National Day observed",
+        classification: "public_holiday",
+        operating: [],
+      }],
     });
     expect(hasPendingPolicyRelease(configuration)).toBe(true);
   });
@@ -38,6 +43,11 @@ describe("operational policy Admin model", () => {
       owner: { kind: "scope", scopeId: "level-6" },
       effectiveFrom: "2026-07-01",
       weekly: { monday: [{ from: "08:00", to: "18:00" }] },
+      exceptions: [{
+        date: "2026-08-10",
+        label: "National Day observed",
+        classification: "public_holiday",
+      }],
     }]);
   });
 });
@@ -100,7 +110,12 @@ const fixture = (): EnergyOperationalPolicyConfigurationDto => ({
         saturday: [],
         sunday: [],
       },
-      exceptions: [{ date: "2026-08-10", label: "Closure", operating: [] }],
+      exceptions: [{
+        date: "2026-08-10",
+        label: "National Day observed",
+        classification: "public_holiday",
+        operating: [],
+      }],
     }],
   }],
   hasUnpublishedChanges: true,

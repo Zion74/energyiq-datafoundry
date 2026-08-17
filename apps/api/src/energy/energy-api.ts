@@ -3055,6 +3055,13 @@ const parseOperatingExceptions = (
       `ENERGYIQ_OPERATING_EXCEPTION_INVALID:${entryIndex}:${exceptionIndex}`,
     );
     const label = optionalString(exception.label);
+    const classification = exception.classification === undefined
+      ? undefined
+      : requireOperatingExceptionClassification(
+        exception.classification,
+        entryIndex,
+        exceptionIndex,
+      );
     return {
       date: requireNonEmptyString(
         exception.date,
@@ -3065,8 +3072,26 @@ const parseOperatingExceptions = (
         `ENERGYIQ_OPERATING_EXCEPTION_RANGES_INVALID:${entryIndex}:${exceptionIndex}`,
       ),
       ...(label ? { label } : {}),
+      ...(classification ? { classification } : {}),
     };
   });
+};
+
+const requireOperatingExceptionClassification = (
+  value: unknown,
+  entryIndex: number,
+  exceptionIndex: number,
+): "public_holiday" | "special_closure" | "special_operating_day" => {
+  if (
+    value === "public_holiday"
+    || value === "special_closure"
+    || value === "special_operating_day"
+  ) {
+    return value;
+  }
+  throw new Error(
+    `ENERGYIQ_OPERATING_EXCEPTION_CLASSIFICATION_INVALID:${entryIndex}:${exceptionIndex}`,
+  );
 };
 
 const parseTemplateDraftDocument = (value: unknown): EnergyIqTemplateDraftDocument => {

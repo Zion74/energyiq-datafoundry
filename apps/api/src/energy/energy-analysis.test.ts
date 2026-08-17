@@ -357,8 +357,18 @@ describe("EnergyScopeAnalysis", () => {
           effective_from: "2026-04-01",
           weekly: allDays("00:00", "24:00"),
           exceptions: [
-            { date: "2026-05-31", operating: [], label: "Do not parse this label" },
-            { date: "2026-06-01", operating: [], label: "Still not a semantic input" },
+            {
+              date: "2026-05-31",
+              operating: [],
+              label: "Do not parse this label",
+              classification: "public_holiday",
+            },
+            {
+              date: "2026-06-01",
+              operating: [],
+              label: "Still not a semantic input",
+              classification: "public_holiday",
+            },
           ],
         }],
       });
@@ -380,7 +390,6 @@ describe("EnergyScopeAnalysis", () => {
         (rule) => rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
       );
       if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
-
       const analysis = await executeEnergyScopeAnalysis({
         metadataStore: metadata,
         dataGateway: gateway,
@@ -576,11 +585,62 @@ describe("EnergyScopeAnalysis", () => {
       expect(projectSelected?.detailSeries.filter(
         (series) => series.relationship === "component_circuit",
       )).toHaveLength(14);
+
+      const holidayContext = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-05-20",
+          to: "2026-06-16",
+        },
+      });
+      expect(metadata.energyIq.operationalPolicy.resolveOperatingCalendarExceptionDates({
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        scope_id: "project",
+        version_id: "sg-calendar-v1",
+        period: { from: holidayContext.from, to: holidayContext.to },
+      })?.exceptions).toEqual([
+        { date: "2026-05-31", classification: "public_holiday" },
+        { date: "2026-06-01", classification: "public_holiday" },
+      ]);
+      const holidayAnalysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context: holidayContext,
+        databasePath,
+        includeTimeBehaviour: true,
+      });
+      expect(holidayAnalysis.timeBehaviour?.dayProfiles.find((profile) => (
+        profile.scopeId === "project" && profile.dayType === "public_holiday"
+      ))).toMatchObject({
+        status: "available",
+        sampleDayCount: 2,
+        values: expect.any(Array),
+      });
+      expect(holidayAnalysis.componentHourlyProfiles?.scopes
+        .find((scope) => scope.scopeId === "project")
+        ?.profiles.find((profile) => profile.dayType === "public_holiday"))
+        .toMatchObject({
+          status: "available",
+          sampleDayCount: 2,
+          categories: expect.any(Array),
+          circuits: expect.any(Array),
+        });
+      expect(holidayAnalysis.componentCategoryBreakdown?.scopes
+        .find((scope) => scope.scopeId === "project")
+        ?.rows.filter((row) => row.dayType === "public_holiday")
+        .map((row) => row.localDate)).toEqual(["2026-05-31", "2026-06-01"]);
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("requires complete baseline days and rejects a partial-null official Day Type", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-complete-baseline-"));
@@ -1080,13 +1140,14 @@ describe("EnergyScopeAnalysis", () => {
         databasePath,
       });
       expect(currentOverview).toEqual({
-        periodDays: 28,
+        periodBasis: "calendar_month_to_date",
+        periodDays: 16,
         cutoffLocalDate: "2026-06-16",
         intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
         period: {
-          localFrom: "2026-05-20",
+          localFrom: "2026-06-01",
           localToExclusive: "2026-06-17",
-          from: "2026-05-19T16:00:00.000Z",
+          from: "2026-05-31T16:00:00.000Z",
           to: "2026-06-16T16:00:00.000Z",
         },
       });
