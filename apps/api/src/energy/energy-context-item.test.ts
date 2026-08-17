@@ -130,6 +130,9 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("provisional");
     expect(content).toContain("available Evidence does not identify it as the primary driver");
     expect(content).toContain("not an energy-waste problem");
+    expect(content).toContain("exact Centre-level closed-hours total");
+    expect(content).toContain("closed-hours energy does not materially contribute");
+    expect(content).toContain("not a closed-hours energy problem");
     expect(content).toContain("Forecast, tariff cost, savings, ROI");
     expect(content).toContain("current Period, Snapshot and Published Release");
     expect(content).not.toContain("May Period");
