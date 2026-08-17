@@ -374,6 +374,14 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       expect(completeSectionV4(store, emptyIdentity, ngeeAnnSectionResult(emptyIdentity, "empty")))
         .toMatchObject({ status: "available", result_json: expect.any(String) });
 
+      const historicalIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-historical", "trend-and-demand"),
+        identityContractRevision: "ngee-ann-section-v1",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v1",
+      };
+      expect(completeSectionV4(store, historicalIdentity, ngeeAnnSectionResult(historicalIdentity, "available")))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
+
       const mismatchedIdentity = ngeeAnnSectionIdentity("snapshot-ngee-mismatch", "trend-and-demand");
       expect(() => completeSectionV4(store, mismatchedIdentity, {
         ...ngeeAnnSectionResult(mismatchedIdentity, "available"),
@@ -919,13 +927,13 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v1",
+  identityContractRevision: "ngee-ann-section-v2",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
   validatorRevision: "energyiq-project-section-acceptance-v1",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
-  investigatorPromptRevision: "energyiq-project-section-discovery-v1",
+  investigatorPromptRevision: "energyiq-project-section-discovery-v2",
   capabilityRevision: "pack-only-v1",
   publicationRevision: "energyiq-project-section-publication-v1",
 });

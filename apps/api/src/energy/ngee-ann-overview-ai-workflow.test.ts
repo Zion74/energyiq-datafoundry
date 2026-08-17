@@ -53,7 +53,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v1")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v2")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(executiveCalls[0]).toMatchObject({
       artifactKind: "executive-synthesis",

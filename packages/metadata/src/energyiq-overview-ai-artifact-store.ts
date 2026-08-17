@@ -538,7 +538,8 @@ const requireSectionInterpretationResult = (
   parsed: Record<string, unknown>,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  if (identity.identityContractRevision === "ngee-ann-section-v1") {
+  if (identity.identityContractRevision === "ngee-ann-section-v1"
+    || identity.identityContractRevision === "ngee-ann-section-v2") {
     requireProjectSectionInterpretationResultV1(parsed, identity);
     return;
   }
@@ -571,7 +572,10 @@ const requireProjectSectionInterpretationResultV1 = (
     || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
     || identity.validatorRevision !== "energyiq-project-section-acceptance-v1"
     || identity.workflowRevision !== "energyiq-project-section-discover-publish-v1"
-    || identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v1"
+    || (identity.identityContractRevision === "ngee-ann-section-v1"
+      ? identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v1"
+      : identity.identityContractRevision !== "ngee-ann-section-v2"
+        || identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v2")
     || identity.capabilityRevision !== "pack-only-v1"
     || identity.publicationRevision !== "energyiq-project-section-publication-v1"
     || !identity.targetId

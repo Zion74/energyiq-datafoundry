@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 import { assembleNgeeAnnSectionPacks } from "./ngee-ann-section-pack.js";
 import {
+  buildNgeeAnnSectionPrompt,
   createNgeeAnnSectionInterpreter,
   materializeNgeeAnnSectionResult,
 } from "./ngee-ann-section-interpreter.js";
@@ -102,6 +103,59 @@ describe("materializeNgeeAnnSectionResult", () => {
     ]);
   });
 
+  it("accepts display-precision rounding while still rejecting an unrelated numeric claim", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
+    pack.facts.decisionPriorities = {
+      status: "available",
+      limitation: null,
+      evidencePins: {} as never,
+      items: [{ finding: { relativePct: 26.3762, impactKwh: 319.4721 } } as never],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "decision-priorities",
+        status: "available",
+        summary: {
+          text: "Rolling usage is 26.4% above its comparison baseline.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:rounded",
+          title: "The recent comparison moved materially",
+          text: "The current difference is about 319.5 kWh, which may merit a closer look.",
+          epistemicStatus: "inferred",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:unsupported",
+          title: "An unrelated exact claim",
+          text: "The current difference is 777.7 kWh.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:rounded",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ id: "candidate:rounded" }],
+      publication: {
+        discoveredCount: 2,
+        acceptedCount: 1,
+        rejectedCount: 1,
+        rejectedCandidateIds: ["candidate:unsupported"],
+      },
+    });
+  });
+
   it("rejects an embedded or wrong-root response instead of searching for JSON inside text", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["circuit-concentration"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
@@ -115,6 +169,44 @@ describe("materializeNgeeAnnSectionResult", () => {
       identity,
       runId: "run:ngee:bad",
     })).toThrow("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
+  });
+});
+
+describe("buildNgeeAnnSectionPrompt", () => {
+  it("keeps every current time cell in a compact projection instead of rejecting a complete Pack", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    const timeBehaviour = pack.facts.timeBehaviour;
+    if (!timeBehaviour) throw new Error("TEST_TIME_BEHAVIOUR_REQUIRED");
+    pack.facts.timeBehaviour = {
+      ...timeBehaviour,
+      scopes: Array.from({ length: 3 }, (_, scopeIndex) => ({
+        scopeId: `scope-${scopeIndex + 1}`,
+        scopeName: `Scope ${scopeIndex + 1}`,
+        scopeType: scopeIndex === 0 ? "project" : "level",
+        cells: Array.from({ length: 672 }, (_, index) => ({
+          localDate: `2026-06-${String(Math.floor(index / 24) + 1).padStart(2, "0")}`,
+          localHour: index % 24,
+          from: `from-${scopeIndex}-${index}`,
+          to: `to-${scopeIndex}-${index}`,
+          usageKwh: scopeIndex * 1_000 + index + 0.125,
+          dataHealth: {
+            status: "complete",
+            coveragePct: 100,
+            expectedMeterIntervalCount: 2,
+            validIntervalCount: 2,
+            qualityEventCount: 0,
+          },
+        })),
+      })),
+    };
+
+    const prompt = buildNgeeAnnSectionPrompt(pack);
+
+    expect(prompt.length).toBeLessThan(220_000);
+    expect(prompt).toContain("scope-3");
+    expect(prompt).toContain("2671.125");
+    expect(prompt).toContain("projectedRowCount");
+    expect(prompt).toContain("2016");
   });
 });
 

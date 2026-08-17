@@ -117,6 +117,7 @@ import {
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
 import { createNgeeAnnProjectOverviewAiAdapter } from "./energy/ngee-ann-overview-ai-adapter.js";
 import { createNgeeAnnOverviewAiWorkflow } from "./energy/ngee-ann-overview-ai-workflow.js";
+import { NGEE_ANN_SECTION_MESSAGE_MAX_CHARS } from "./energy/ngee-ann-section-interpreter.js";
 import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
@@ -245,7 +246,10 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
   return {
     structuredOutput: input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
-      ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
+      ? input.identity?.rendererKey === "ngee-ann-overview"
+        && input.identity.identityContractRevision === "ngee-ann-section-v2"
+        ? NGEE_ANN_SECTION_MESSAGE_MAX_CHARS
+        : PACK_V2_SECTION_MESSAGE_MAX_CHARS
       : input.stage === "additional-insights-discovery"
         ? MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS
         : input.stage === "additional-insights-transition"
