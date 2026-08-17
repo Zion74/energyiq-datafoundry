@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { EnergyProjectOverviewAiReadModelDto } from "../../../lib/config-api";
+
 import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
@@ -1067,6 +1069,68 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("489.973864 SGD");
     expect(markup).not.toContain("Tariff allocations");
     expect(markup).not.toContain("0.32 SGD/kWh");
+  });
+});
+
+describe("NgeeAnnOverviewRenderer Saved Project AI", () => {
+  it("renders the frozen @3 model rather than the legacy browser AI runner", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const unit = (id: string) => ({
+      status: "available" as const,
+      artifactId: `artifact:${id}`,
+      result: { status: "available", runId: `run:${id}`, summary: { text: `Frozen ${id}.`, evidenceRefs: [] }, findings: [], insights: [] },
+    });
+    const model: EnergyProjectOverviewAiReadModelDto = {
+      contract: "energyiq-project-overview-ai-read-model@1",
+      rendererKey: "ngee-ann-overview",
+      binding: {
+        workspaceId: snapshot.context.workspaceId,
+        projectId: snapshot.context.projectId,
+        scopeId: snapshot.context.scopeId,
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+        analysisPeriod: { from: snapshot.context.primaryPeriod.start, to: snapshot.context.primaryPeriod.endExclusive },
+        modelProfileId: "workspace-default-model-profile",
+        modelProfileRevision: 8,
+        generation: {},
+      },
+      keyFindings: unit("saved-key-findings"),
+      sections: Object.fromEntries([
+        "trend-and-demand", "time-behaviour", "circuit-concentration", "decision-priorities",
+      ].map((id) => [id, unit(id)])),
+      additionalInsights: {
+        status: "available",
+        artifactId: "artifact:saved-additional",
+        result: {
+          status: "available",
+          runId: "run:saved-additional",
+          findings: [{
+            id: "saved-additional",
+            title: "Frozen saved-additional.",
+            text: "A frozen exploratory angle.",
+            epistemicStatus: "inferred",
+            evidenceRefs: ["evidence:saved"],
+          }],
+        },
+      },
+    };
+
+    const markup = renderToStaticMarkup(<NgeeAnnOverviewRenderer
+      state={{ status: "ready", snapshot }}
+      aiSlotMode="saved"
+      savedAiArtifact={{
+        contract: "energyiq-saved-ai-result@3",
+        rendererKey: "ngee-ann-overview",
+        snapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+        result: model,
+        completedAt: "2026-08-17T00:00:00.000Z",
+      }}
+    />);
+
+    expect(markup).toContain("Frozen saved-key-findings.");
+    expect(markup).toContain("Frozen saved-additional.");
+    expect(markup).not.toContain("Restoring saved AI analysis");
   });
 });
 

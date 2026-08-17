@@ -86,6 +86,7 @@ import { createProjectOverviewAdminReadinessService } from "./project-overview-a
 import {
   findProjectOverviewAiAdapter,
   projectOverviewAiReadModelMatchesIdentity,
+  type ProjectOverviewAiReadModel,
 } from "./project-overview-ai-adapter.js";
 import { createProjectHarnessConfigurationReader } from "./project-harness-configuration.js";
 import { createProjectAiOperationsReader } from "./project-ai-operations.js";
@@ -1366,11 +1367,11 @@ export const handleEnergyApiRequest = async (
         requireDecisionGradeCoverage(analysis);
         const templateRevision = requireSnapshotTemplateRevision(context, resolution.snapshot);
         const viewState = parseRequestedSavedAnalysisViewState(body.viewState);
-        const aiArtifact = parseRequestedSavedAnalysisAiArtifact(
+        const aiArtifact = await parseRequestedSavedAnalysisAiArtifact(
           body.aiArtifact,
           resolution.snapshot,
           context,
-          user.id,
+          user,
         );
         const rerunQuery = savedAnalysisRerunQuery(query);
         const record = context.metadataStore.energyIq.savedAnalyses.create({
@@ -1413,11 +1414,11 @@ export const handleEnergyApiRequest = async (
         const snapshot = parseSavedAnalysisSnapshot(previous);
         if (!snapshot) throw new Error("ENERGYIQ_SAVED_ANALYSIS_SNAPSHOT_INVALID");
         const body = requireRecord(await readJsonBody(request));
-        const aiArtifact = parseRequestedSavedAnalysisAiArtifact(
+        const aiArtifact = await parseRequestedSavedAnalysisAiArtifact(
           body.aiArtifact,
           snapshot,
           context,
-          user.id,
+          user,
         );
         if (!aiArtifact) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
         const record = context.metadataStore.energyIq.savedAnalyses.attachAiResult({
@@ -2086,7 +2087,17 @@ type SavedAnalysisAiSectionedArtifactInput = {
   result: PreschoolOverviewAiReadModel;
 };
 
-type SavedAnalysisAiArtifactInput = SavedAnalysisAiLegacyArtifactInput | SavedAnalysisAiSectionedArtifactInput;
+type SavedAnalysisAiProjectArtifactInput = {
+  contract: "energyiq-saved-ai-result@3";
+  rendererKey: "ngee-ann-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: ProjectOverviewAiReadModel;
+};
+
+type SavedAnalysisAiArtifactInput = SavedAnalysisAiLegacyArtifactInput
+  | SavedAnalysisAiSectionedArtifactInput
+  | SavedAnalysisAiProjectArtifactInput;
 
 type SavedAnalysisAiArtifact = SavedAnalysisAiArtifactInput & {
   completedAt: string;
@@ -2098,12 +2109,12 @@ type SavedAnalysisAiArtifact = SavedAnalysisAiArtifactInput & {
   };
 };
 
-const parseRequestedSavedAnalysisAiArtifact = (
+const parseRequestedSavedAnalysisAiArtifact = async (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
   context: Required<ConfigApiContext>,
-  userId: string,
-): SavedAnalysisAiArtifact | undefined => {
+  user: UserRecord,
+): Promise<SavedAnalysisAiArtifact | undefined> => {
   if (value === undefined) return undefined;
   let artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
   if (artifact.contract === "energyiq-saved-ai-result@2") {
@@ -2132,6 +2143,31 @@ const parseRequestedSavedAnalysisAiArtifact = (
     }
     artifact = { ...artifact, result: canonical };
   }
+  if (artifact.contract === "energyiq-saved-ai-result@3") {
+    const baseIdentity = createOverviewAiArtifactIdentity({
+      workspaceId: artifact.result.binding.workspaceId,
+      projectId: artifact.result.binding.projectId,
+      scopeId: artifact.result.binding.scopeId,
+      dataSnapshotId: artifact.result.binding.dataSnapshotId,
+      projectReleaseId: artifact.result.binding.projectReleaseId,
+      analysisPeriodFrom: artifact.result.binding.analysisPeriod.from,
+      analysisPeriodTo: artifact.result.binding.analysisPeriod.to,
+      rendererKey: snapshot.renderer.key,
+      rendererVersion: snapshot.renderer.version,
+      modelProfileId: artifact.result.binding.modelProfileId,
+      modelProfileRevision: artifact.result.binding.modelProfileRevision,
+    });
+    const adapter = findProjectOverviewAiAdapter(context.projectOverviewAiAdapters, artifact.rendererKey);
+    if (!adapter
+      || !projectOverviewAiReadModelMatchesIdentity(artifact.result, baseIdentity)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    const canonical = await adapter.readExact({ identity: baseIdentity, user });
+    if (!canonical || !isDeepStrictEqual(canonical, artifact.result)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    artifact = { ...artifact, result: canonical };
+  }
   if (artifact.contract === "energyiq-saved-ai-result@1"
     && snapshot.renderer.key === "preschool-overview"
     && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
@@ -2139,7 +2175,13 @@ const parseRequestedSavedAnalysisAiArtifact = (
   }
   const runIds = savedAnalysisAiRunIds(artifact.result);
   const runs = runIds.map((runId) => {
-    const run = context.metadataStore.runs.find({ user_id: userId, run_id: runId });
+    const run = artifact.contract === "energyiq-saved-ai-result@3"
+      ? context.metadataStore.runs.findByProject({
+          workspace_id: artifact.result.binding.workspaceId,
+          project_id: artifact.result.binding.projectId,
+          run_id: runId,
+        })
+      : context.metadataStore.runs.find({ user_id: user.id, run_id: runId });
     if (!run
       || run.status !== "completed"
       || !run.finished_at
@@ -2219,6 +2261,21 @@ const parseSavedAnalysisAiArtifactInput = (
     }
     return artifact;
   }
+  if (isRecord(value) && value.contract === "energyiq-saved-ai-result@3") {
+    if (value.rendererKey !== "ngee-ann-overview"
+      || snapshot.renderer.key !== "ngee-ann-overview"
+      || value.snapshotId !== snapshot.dataSnapshot.id
+      || value.projectReleaseId !== snapshot.projectRelease.id
+      || !isNgeeAnnProjectSavedResult(value.result, snapshot)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    const artifact = value as unknown as SavedAnalysisAiProjectArtifactInput;
+    if (savedAnalysisAiRunIds(artifact.result).length === 0
+      || JSON.stringify(artifact).length > 262_144) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    return artifact;
+  }
   if (!isRecord(value)
     || value.contract !== "energyiq-saved-ai-result@1"
     || value.rendererKey !== snapshot.renderer.key
@@ -2270,6 +2327,12 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
         : []),
     ])];
   }
+  if (isProjectOverviewAiReadModel(result)) {
+    return [...new Set(projectOverviewSavedUnits(result).flatMap((unit) => {
+      if (!isRecord(unit) || unit.status !== "available" || !isRecord(unit.result) || typeof unit.result.runId !== "string") return [];
+      return unit.result.runId.trim() ? [unit.result.runId] : [];
+    }))];
+  }
   if (!isRecord(result.workflow)
     || !isRecord(result.workflow.stages)
     || !isRecord(result.workflow.stages.investigator)
@@ -2283,6 +2346,17 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
 };
 
 const primarySavedAnalysisAiRunId = (result: SavedAnalysisAiArtifactInput["result"]): string => {
+  if (isProjectOverviewAiReadModel(result)) {
+    const preferred = [result.keyFindings, result.additionalInsights, ...Object.values(result.sections)]
+      .find((unit) => unit.status === "available"
+        && isRecord(unit.result)
+        && typeof unit.result.runId === "string"
+        && unit.result.runId.trim());
+    if (preferred?.status === "available" && isRecord(preferred.result) && typeof preferred.result.runId === "string") {
+      return preferred.result.runId;
+    }
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+  }
   if (!isPreschoolOverviewAiReadModel(result)) return result.runId;
   if (result.executive.status === "available" || result.executive.status === "empty") {
     return result.executive.result.runId;
@@ -2290,6 +2364,72 @@ const primarySavedAnalysisAiRunId = (result: SavedAnalysisAiArtifactInput["resul
   const runIds = savedAnalysisAiRunIds(result);
   if (runIds.length === 0) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
   return runIds[runIds.length - 1]!;
+};
+
+const NGEE_ANN_SAVED_SECTION_IDS = [
+  "trend-and-demand",
+  "time-behaviour",
+  "circuit-concentration",
+  "decision-priorities",
+] as const;
+
+const isNgeeAnnProjectSavedResult = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+): value is ProjectOverviewAiReadModel => isProjectOverviewAiReadModel(value)
+  && value.rendererKey === "ngee-ann-overview"
+  && value.binding.workspaceId === snapshot.context.workspaceId
+  && value.binding.projectId === snapshot.context.projectId
+  && value.binding.scopeId === snapshot.context.scopeId
+  && value.binding.dataSnapshotId === snapshot.dataSnapshot.id
+  && value.binding.projectReleaseId === snapshot.projectRelease.id
+  && value.binding.analysisPeriod.from === snapshot.context.primaryPeriod.start
+  && value.binding.analysisPeriod.to === snapshot.context.primaryPeriod.endExclusive
+  && Object.keys(value.sections).sort().join("|") === [...NGEE_ANN_SAVED_SECTION_IDS].sort().join("|")
+  && projectOverviewSavedUnits(value).every(isTerminalProjectOverviewSavedUnit);
+
+const isProjectOverviewAiReadModel = (value: unknown): value is ProjectOverviewAiReadModel => isRecord(value)
+  && value.contract === "energyiq-project-overview-ai-read-model@1"
+  && value.rendererKey === "ngee-ann-overview"
+  && isRecord(value.binding)
+  && isRecord(value.binding.analysisPeriod)
+  && isRecord(value.binding.generation)
+  && typeof value.binding.workspaceId === "string"
+  && typeof value.binding.projectId === "string"
+  && typeof value.binding.scopeId === "string"
+  && typeof value.binding.dataSnapshotId === "string"
+  && typeof value.binding.projectReleaseId === "string"
+  && typeof value.binding.analysisPeriod.from === "string"
+  && typeof value.binding.analysisPeriod.to === "string"
+  && typeof value.binding.modelProfileId === "string"
+  && Number.isInteger(value.binding.modelProfileRevision)
+  && isRecord(value.keyFindings)
+  && isRecord(value.sections)
+  && isRecord(value.additionalInsights);
+
+const projectOverviewSavedUnits = (value: ProjectOverviewAiReadModel): unknown[] => [
+  value.keyFindings,
+  ...NGEE_ANN_SAVED_SECTION_IDS.map((sectionId) => value.sections[sectionId]),
+  value.additionalInsights,
+];
+
+const isTerminalProjectOverviewSavedUnit = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.status === "available") {
+    return typeof value.artifactId === "string"
+      && value.artifactId.trim().length > 0
+      && isRecord(value.result)
+      && value.result.status === "available"
+      && typeof value.result.runId === "string"
+      && value.result.runId.trim().length > 0;
+  }
+  if (value.status === "empty") {
+    return typeof value.artifactId === "string" && value.artifactId.trim().length > 0;
+  }
+  if (value.status === "failed" || value.status === "unavailable") {
+    return typeof value.reason === "string" && value.reason.trim().length > 0;
+  }
+  return false;
 };
 
 const isPreschoolSectionedSavedResult = (

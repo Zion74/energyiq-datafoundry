@@ -262,7 +262,9 @@ export function NgeeAnnOverviewRenderer({
       />
 
       <div id="ngee-ann-ai-analysis" className="scroll-mt-28 border-b border-border">
-        {aiSlotMode === "saved" ? <NgeeAnnAiSlot
+        {aiSlotMode === "saved" && savedAiArtifact?.contract === "energyiq-saved-ai-result@3"
+          ? <NgeeAnnProjectAiSlots snapshot={state.snapshot} savedModel={savedAiArtifact.result} />
+          : aiSlotMode === "saved" ? <NgeeAnnAiSlot
           snapshot={state.snapshot}
           decisionPriorities={view.decisionPriorities}
           aiAnalystHref={aiAnalystHref}

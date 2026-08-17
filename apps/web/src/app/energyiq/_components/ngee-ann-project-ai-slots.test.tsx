@@ -92,6 +92,23 @@ describe("NgeeAnnProjectAiSlots", () => {
     expect(container.textContent).toContain("Evidence · 2");
     expect(container.textContent).not.toContain("Additional AI InsightsAvailable.");
   });
+
+  it("renders an exact frozen Saved read model without issuing a live restore request", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const restore = vi.fn();
+
+    await act(async () => {
+      root.render(<NgeeAnnProjectAiSlots
+        snapshot={snapshot}
+        savedModel={readModel(snapshot)}
+        restore={restore}
+      />);
+    });
+
+    expect(restore).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Peak demand and time behaviour should be read together");
+    expect(container.textContent).toContain("4 of 4 Sections ready");
+  });
 });
 
 const readModel = (snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>): EnergyProjectOverviewAiReadModelDto => ({

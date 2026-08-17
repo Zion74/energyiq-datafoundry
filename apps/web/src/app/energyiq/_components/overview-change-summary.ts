@@ -266,6 +266,7 @@ const extractAiState = (
       generationBasisExact: false,
     };
   }
+  if (artifact.contract !== "energyiq-saved-ai-result@2") return null;
   const executive = artifact.result.executive;
   const keyFindingEntries: NarrativeFinding[] = executive.status === "available"
     ? "findings" in executive.result

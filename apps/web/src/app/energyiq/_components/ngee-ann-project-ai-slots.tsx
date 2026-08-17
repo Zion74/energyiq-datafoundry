@@ -23,9 +23,11 @@ const defaultRestore = (projectId: string, scopeId: string) =>
 
 export function NgeeAnnProjectAiSlots({
   snapshot,
+  savedModel,
   restore = defaultRestore,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
+  savedModel?: EnergyProjectOverviewAiReadModelDto;
   restore?: (projectId: string, scopeId: string) => Promise<EnergyProjectOverviewAiReadModelDto>;
 }) {
   const identityKey = `${snapshot.context.projectId}:${snapshot.context.scopeId}:${snapshot.dataSnapshot.id}:${snapshot.projectRelease.id}`;
@@ -36,6 +38,7 @@ export function NgeeAnnProjectAiSlots({
   } | null>(null);
 
   useEffect(() => {
+    if (savedModel) return;
     let active = true;
     void restore(snapshot.context.projectId, snapshot.context.scopeId)
       .then((model) => {
@@ -50,10 +53,15 @@ export function NgeeAnnProjectAiSlots({
         if (active) setState({ identityKey, error: "Saved AI analysis is temporarily unavailable." });
       });
     return () => { active = false; };
-  }, [identityKey, restore, snapshot]);
+  }, [identityKey, restore, savedModel, snapshot]);
 
-  const model = state?.identityKey === identityKey ? state.model : undefined;
-  const error = state?.identityKey === identityKey ? state.error : undefined;
+  const savedMatches = savedModel ? matchesSnapshot(savedModel, snapshot) : false;
+  const model = savedModel
+    ? (savedMatches ? savedModel : undefined)
+    : state?.identityKey === identityKey ? state.model : undefined;
+  const error = savedModel && !savedMatches
+    ? "The saved AI result does not match this Snapshot."
+    : state?.identityKey === identityKey ? state.error : undefined;
   const readyCount = useMemo(() => model
     ? SECTIONS.filter(([sectionId]) => terminal(model.sections[sectionId])).length
     : 0, [model]);
@@ -168,7 +176,7 @@ function AdditionalInsights({ unit }: { unit: EnergyProjectOverviewAiUnitStatusD
           Additional AI Insights
         </h4>
         <p className="mt-1 text-sm leading-6 text-muted">
-          New cross-section angles that passed the local Evidence and novelty checks. Treat inferred ideas as leads to verify, not confirmed causes.
+          New analytical angles that passed the local Evidence and novelty checks. Treat inferred ideas as leads to verify, not confirmed causes.
         </p>
       </div>
       <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">

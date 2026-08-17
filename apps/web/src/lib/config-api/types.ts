@@ -2114,6 +2114,12 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
   snapshotId: string;
   projectReleaseId: string;
   result: PreschoolOverviewAiReadModelDto;
+} | {
+  contract: "energyiq-saved-ai-result@3";
+  rendererKey: "ngee-ann-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: EnergyProjectOverviewAiReadModelDto;
 };
 
 export type EnergyOverviewAiArtifactDto = {
