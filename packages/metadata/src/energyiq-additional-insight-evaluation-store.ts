@@ -1608,6 +1608,10 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.validatorRevision === "additional-insights-acceptance-v17"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v21"
     && target.promptRevision === "additional-insights-discovery-v11")
+  || (target.artifactIdentityRevision === "additional-insights-v23"
+    && target.validatorRevision === "additional-insights-acceptance-v17"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v21"
+    && target.promptRevision === "additional-insights-discovery-v12")
 );
 
 const overviewArtifactIdentityMatchesEvaluationTarget = (
@@ -1642,10 +1646,10 @@ const overviewArtifactIdentityMatchesEvaluationTarget = (
 };
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v22"
+  if (target.artifactIdentityRevision !== "additional-insights-v23"
     || target.validatorRevision !== "additional-insights-acceptance-v17"
     || target.workflowRevision !== "additional-insights-discover-accept-publish-v21"
-    || target.promptRevision !== "additional-insights-discovery-v11") {
+    || target.promptRevision !== "additional-insights-discovery-v12") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }
 };

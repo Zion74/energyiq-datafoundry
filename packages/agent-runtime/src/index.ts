@@ -1042,6 +1042,7 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
     input.trustedStageCapability === "energyiq-additional-insight-discovery";
   const energyIqTrustedStageTransition =
     input.trustedStageCapability === "energyiq-additional-insight-transition";
+  const additionalAiInsightSubmissionEnabled = enabled(ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME);
   const hasAnyEnabledTools = input.toolNames.length > 0 || input.mcpToolNames.length > 0;
   const promoteWorkspaceFileEnabled = enabled("promote_workspace_file");
   const dataTools = ["list_data_sources", "inspect_schema", "preview_table", "run_sql_readonly"].filter(enabled);
@@ -1053,6 +1054,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
     toolGroups.push(
       `Server-scoped read-only tools: ${input.trustedStageToolNames.join(", ")}. `
       + "Their identity and Evidence boundary are server-owned; pass only each tool's declared controlled arguments.",
+    );
+  }
+  if (additionalAiInsightSubmissionEnabled) {
+    toolGroups.push(
+      `Submission tool: ${ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME}. `
+        + "This tool is available in addition to the server-scoped read-only tools. Call it exactly once with the final "
+        + "Candidate envelope, including candidates: [] when no angle survives review.",
     );
   }
   if ((context.enabled_knowledge_ids?.length ?? 0) > 0 && enabled("retrieve_knowledge")) {
@@ -1197,7 +1205,9 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         "EnergyIQ server-scoped discovery path: use only the listed server-scoped read-only tools and the "
           + "server-provided Evidence context. Explore Evidence-backed angles openly; zero candidates is valid. "
           + "Do not request SQL, arbitrary queries, network access, writes, or tools outside this run's allowlist. "
-          + "The structured output and downstream server acceptance remain authoritative.",
+          + (additionalAiInsightSubmissionEnabled
+            ? "The native submission and downstream server acceptance remain authoritative."
+            : "The structured output and downstream server acceptance remain authoritative."),
       );
     } else if (!enabled("inspect_schema") || !enabled("run_sql_readonly")) {
       policies.push(
@@ -1426,9 +1436,14 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "invent a change merely to fill the result."
     : context.energy_query_context
       ? energyIqTrustedStageDiscovery
-      ? "For EnergyIQ server-scoped discovery, follow the requested structured output exactly. Keep factual claims bound "
-        + "to current Evidence and distinguish observed, inferred, and speculative content honestly. Do not force a fixed "
-        + "What/Why/Action lens or invent a candidate merely to fill the result."
+      ? additionalAiInsightSubmissionEnabled
+        ? `For EnergyIQ server-scoped discovery, submit the requested Candidate envelope through `
+          + `${ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME} exactly once. Keep factual claims bound to current Evidence and `
+          + "distinguish observed, inferred, and speculative content honestly. Do not force a fixed What/Why/Action lens "
+          + "or invent a candidate merely to fill the result."
+        : "For EnergyIQ server-scoped discovery, follow the requested structured output exactly. Keep factual claims bound "
+          + "to current Evidence and distinguish observed, inferred, and speculative content honestly. Do not force a fixed "
+          + "What/Why/Action lens or invent a candidate merely to fill the result."
       : "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
       + "the answer or finding, then explain What happened, Why it matters or may have happened, What to do next, and "
       + "How to verify when those sections are useful. Unless the user explicitly requests detail, multiple deliverables, "
@@ -1444,13 +1459,14 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
     : "Reply in the same natural language as the user's latest request. If the user mixes languages, use the dominant "
       + "language from the request. Keep SQL, code, table names, column names, and other technical identifiers unchanged."
   );
-  policies.push(
-    "Always finish a run with a brief natural-language message to the user that summarizes what you did and the "
+  policies.push(additionalAiInsightSubmissionEnabled
+    ? `After a successful submission, stop immediately. Do not emit the Candidate envelope or any closing Assistant `
+      + `text after ${ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME}; the accepted tool result is the run's terminal value.`
+    : "Always finish a run with a brief natural-language message to the user that summarizes what you did and the "
       + "outcome, even when your most recent action was a tool call such as a file write, command execution, or "
       + "artifact publish. Never end a run silently right after a tool result: that closing message is how the user "
       + "learns the result. Summarize outcomes and refer to any produced files or artifacts by name instead of "
-      + "restating raw tool output."
-  );
+      + "restating raw tool output.");
   policies.push(
     "Runtime circuit breakers exist only to stop runaway execution; they are not an analysis budget or a reason to "
       + "answer early. Continue until the requirement is supported by sufficient Evidence or the unresolved gap is "

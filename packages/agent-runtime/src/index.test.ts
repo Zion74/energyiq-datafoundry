@@ -127,6 +127,15 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
         ...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
         "energyiq_additional_insights_submit",
       ].sort());
+      const instructions = await runtime.agent.getInstructions();
+      const instructionText = typeof instructions === "string" ? instructions : JSON.stringify(instructions);
+      expect(instructionText).toContain(
+        "Submission tool: energyiq_additional_insights_submit",
+      );
+      expect(instructionText).toContain(
+        "After a successful submission, stop immediately",
+      );
+      expect(instructionText).not.toContain("Always finish a run with a brief natural-language message");
     } finally {
       await runtime.destroyWorkspace();
     }

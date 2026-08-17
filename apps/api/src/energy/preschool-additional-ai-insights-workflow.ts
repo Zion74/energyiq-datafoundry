@@ -1516,7 +1516,7 @@ const buildDiscoveryPrompt = (input: {
   entityGuidance: string;
 }): string => {
   const nativeSubmission = input.identity.rendererKey === "preschool-overview"
-    && input.identity.identityContractRevision === "additional-insights-v22";
+    && input.identity.identityContractRevision === "additional-insights-v23";
   const candidateShape = "{candidates:[{id,title,observation,angle,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}";
   const prompt = [
     `You are the Additional AI Insights discovery stage for ${input.productLabel}.`,
