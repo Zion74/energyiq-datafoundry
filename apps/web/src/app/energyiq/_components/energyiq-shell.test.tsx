@@ -176,6 +176,33 @@ describe("EnergyIQ Shell Project navigation", () => {
       "/energyiq/overview?scopeId=project&resource=electricity&grain=day",
     );
   });
+
+  it("clears stale AI Analyst Snapshot and Release pins after switching Workspace", async () => {
+    navigation.pathname = "/energyiq/ai";
+    navigation.search = "projectId=project-a&scopeId=project&resource=electricity&period=Custom&from=2026-05-20&to=2026-06-16&dataSnapshotId=snapshot-ngee&projectReleaseId=release-ngee&finding=old-finding&evidence=old-evidence";
+    window.history.replaceState({}, "", `/energyiq/ai?${navigation.search}`);
+    mockedAccess.access = {
+      ...accessContext([project("project-a", "Project A")]),
+      workspaces: [
+        { id: "workspace-1", name: "Workspace 1", kind: "customer", disabled: false },
+        { id: "workspace-2", name: "Workspace 2", kind: "customer", disabled: false },
+      ],
+    };
+    await act(async () => {
+      root.render(<EnergyIqShell><div>AI Analyst</div></EnergyIqShell>);
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Customer workspace']");
+    await act(async () => trigger?.click());
+    const workspaceTwoOption = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.textContent?.includes("Workspace 2"));
+    await act(async () => workspaceTwoOption?.click());
+
+    expect(mockedAccess.selectOrganisation).toHaveBeenCalledWith("workspace-2");
+    expect(navigation.replace).toHaveBeenCalledWith(
+      "/energyiq/ai?scopeId=project&resource=electricity",
+    );
+  });
 });
 
 function project(id: string, name: string): EnergyProjectDto {

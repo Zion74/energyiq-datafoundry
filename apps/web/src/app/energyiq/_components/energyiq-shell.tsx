@@ -52,6 +52,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentTo");
     nextSearchParams.delete("currentDataSnapshotId");
     nextSearchParams.delete("currentProjectReleaseId");
+    nextSearchParams.delete("dataSnapshotId");
+    nextSearchParams.delete("projectReleaseId");
     nextSearchParams.delete("finding");
     nextSearchParams.delete("evidence");
     nextSearchParams.delete("history");
@@ -77,6 +79,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentTo");
     nextSearchParams.delete("currentDataSnapshotId");
     nextSearchParams.delete("currentProjectReleaseId");
+    nextSearchParams.delete("dataSnapshotId");
+    nextSearchParams.delete("projectReleaseId");
     nextSearchParams.delete("finding");
     nextSearchParams.delete("evidence");
     nextSearchParams.delete("history");
