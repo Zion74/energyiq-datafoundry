@@ -470,7 +470,7 @@ const materializeExecutiveResultV4 = (input: {
     if (parsed.summary !== undefined || parsed.findings.length !== 0) {
       throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_MALFORMED");
     }
-    return emptyResultV4(input.identity, input.runId);
+    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EMPTY_UNSUPPORTED");
   }
   if (parsed.status !== "available"
     || !isRecord(parsed.summary)

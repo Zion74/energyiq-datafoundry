@@ -752,7 +752,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v20",
+      validatorRevision: "preschool-executive-synthesis-validator-v21",
       workflowRevision: "preschool-executive-synthesis-v12",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v12",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
@@ -1153,6 +1153,29 @@ describe("Preschool Executive Synthesis", () => {
       findings: [],
     });
     expect(providerCalls).toBe(0);
+  });
+
+  it("fails retryably instead of publishing a model-declared empty when two current Sections can contribute", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({ status: "empty", findings: [] }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_EMPTY_UNSUPPORTED",
+    });
   });
 
   it("rejects a one-Section restatement while preserving a distinct cross-Section sibling", async () => {
