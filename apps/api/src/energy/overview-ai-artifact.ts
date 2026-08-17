@@ -60,7 +60,7 @@ export type PreschoolAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiIn
 };
 
 export type NgeeAnnAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
-  identityContractRevision: "ngee-ann-additional-insights-v2";
+  identityContractRevision: "ngee-ann-additional-insights-v3";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -323,13 +323,13 @@ export const createNgeeAnnAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "ngee-ann-additional-insights-v2",
+    identityContractRevision: "ngee-ann-additional-insights-v3",
     analysisPackId: "ngee-ann-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
     validatorRevision: "additional-insights-acceptance-v17",
     workflowRevision: "additional-insights-discover-accept-publish-v20",
-    investigatorPromptRevision: "additional-insights-discovery-v10",
+    investigatorPromptRevision: "additional-insights-discovery-v11",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
@@ -371,13 +371,13 @@ export const isCurrentProjectAdditionalAiInsightArtifactIdentity = (
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)
   || (identity.rendererKey === "ngee-ann-overview"
     && identity.artifactKind === "autonomous-insights"
-    && identity.identityContractRevision === "ngee-ann-additional-insights-v2"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v3"
     && identity.analysisPackId === "ngee-ann-additional-insights-pack"
     && identity.analysisPackRevision === "v1"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
     && identity.validatorRevision === "additional-insights-acceptance-v17"
     && identity.workflowRevision === "additional-insights-discover-accept-publish-v20"
-    && identity.investigatorPromptRevision === "additional-insights-discovery-v10"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v11"
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.methodSkillId === "energyiq-open-discovery"
     && identity.methodSkillRevision === "1.0.0"

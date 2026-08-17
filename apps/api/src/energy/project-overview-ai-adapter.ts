@@ -14,7 +14,7 @@ export type ProjectOverviewAiUnitStatus =
   | { status: "missing" }
   | { status: "queued" | "running"; artifactId?: string }
   | { status: "available"; artifactId: string; completedAt?: string; result: unknown }
-  | { status: "empty"; artifactId: string; completedAt?: string }
+  | { status: "empty"; artifactId: string; runId: string; completedAt?: string }
   | { status: "failed"; reason: string; artifactId: string; completedAt?: string }
   | { status: "unavailable"; reason: string; artifactId?: string; completedAt?: string };
 

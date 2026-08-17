@@ -231,6 +231,7 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
   execute(input: {
     baseIdentity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
+    modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   }): Promise<EnergyIqOverviewAiArtifactRecord>;
   evaluateAttempt(input: {
     identity: ProjectAdditionalAiInsightArtifactIdentity;
@@ -378,7 +379,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
 
   return {
     evaluateAttempt,
-    async execute({ baseIdentity, user }) {
+    async execute({ baseIdentity, user, modelProfileSnapshot }) {
     const methodSet = requireMethodResources(resolveCurrentAdditionalAiInsightMethodSet(
       baseIdentity.workspaceId,
       input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
@@ -386,7 +387,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       }),
     ));
     const identity = createArtifactIdentity({ baseIdentity, methodSet });
-    requireModelRuntimeIdentity(input.metadataStore, identity);
+    requireModelRuntimeIdentity(input.metadataStore, identity, modelProfileSnapshot);
     const queued = input.metadataStore.energyIq.overviewAiArtifacts.queue({
       identity,
       triggeredBy: user.id,
@@ -400,7 +401,13 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     const runId = `${runPrefix}-${randomUUID()}`;
     const sessionId = `${runPrefix}-${randomUUID()}`;
     try {
-      const artifact = await evaluateAttempt({ identity, user, runId, sessionId });
+      const artifact = await evaluateAttempt({
+        identity,
+        user,
+        runId,
+        sessionId,
+        ...(modelProfileSnapshot ? { modelProfileSnapshot } : {}),
+      });
       return input.metadataStore.energyIq.overviewAiArtifacts.complete({
         identity,
         workerId,
@@ -597,10 +604,10 @@ const parseDiscoveryCandidates = (
   identity: ProjectAdditionalAiInsightArtifactIdentity,
 ): DiscoveryCandidate[] | null => {
   if (typeof answer !== "string" || answer.length > MAX_DISCOVERY_ANSWER_CHARS) return null;
-  const allowBoundedRepair = identity.identityContractRevision === "ngee-ann-additional-insights-v2";
+  const allowBoundedRepair = identity.identityContractRevision === "ngee-ann-additional-insights-v3";
   const parsed = parseDiscoveryEnvelope(answer, allowBoundedRepair);
   if (!isRecord(parsed) || !Array.isArray(parsed.candidates)) return null;
-  const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v2"
+  const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v3"
     && parsed.type === "object"
     ? ["candidates", "type"]
     : ["candidates"];

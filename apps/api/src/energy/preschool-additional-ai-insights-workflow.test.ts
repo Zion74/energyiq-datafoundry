@@ -16,6 +16,7 @@ import {
   createPreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
+import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 import {
   createPreschoolAdditionalAiInsightsWorkflow,
   createPreschoolAdditionalAiPresentedClaims,
@@ -2185,6 +2186,36 @@ describe("Preschool Additional AI Insights workflow", () => {
 
       expect(completed.status).toBe("available");
       expect(repeated).toEqual(completed);
+      expect(runDiscovery).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("pins one trusted Model Profile snapshot through queued generation", async () => {
+    const harness = createHarness();
+    try {
+      const trustedSnapshot = resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata);
+      const runDiscovery = vi.fn(async ({ runId, sessionId, modelProfileSnapshot }) => {
+        expect(modelProfileSnapshot).toBe(trustedSnapshot);
+        return {
+          answer: JSON.stringify({ candidates: [] }),
+          runId,
+          sessionId,
+        };
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery,
+      });
+
+      await expect(workflow.execute({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        modelProfileSnapshot: trustedSnapshot,
+      })).resolves.toMatchObject({ status: "available" });
       expect(runDiscovery).toHaveBeenCalledTimes(1);
     } finally {
       harness.close();

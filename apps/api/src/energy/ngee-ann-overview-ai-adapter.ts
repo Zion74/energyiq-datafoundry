@@ -177,6 +177,9 @@ const artifactUnit = (
     return {
       status: "empty",
       artifactId: record.id,
+      runId: typeof result.runId === "string" && result.runId.trim()
+        ? result.runId
+        : record.run_id ?? "",
       ...(record.completed_at ? { completedAt: record.completed_at } : {}),
     };
   }

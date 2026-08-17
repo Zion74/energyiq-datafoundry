@@ -1392,7 +1392,8 @@ const ngeeAnnAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   scopeId: "ngee-ann-polytechnic",
   rendererKey: "ngee-ann-overview",
   analysisPackId: "ngee-ann-additional-insights-pack",
-  identityContractRevision: "ngee-ann-additional-insights-v2",
+  identityContractRevision: "ngee-ann-additional-insights-v3",
+  investigatorPromptRevision: "additional-insights-discovery-v11",
 });
 
 const historicalAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({

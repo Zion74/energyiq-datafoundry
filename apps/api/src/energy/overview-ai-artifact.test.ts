@@ -83,12 +83,18 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(additional).toMatchObject({
       rendererKey: "ngee-ann-overview",
       artifactKind: "autonomous-insights",
-      identityContractRevision: "ngee-ann-additional-insights-v2",
+      identityContractRevision: "ngee-ann-additional-insights-v3",
       analysisPackId: "ngee-ann-additional-insights-pack",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
+      investigatorPromptRevision: "additional-insights-discovery-v11",
       methodSetId: "preschool-additional-insights-current",
     });
     expect(isCurrentProjectAdditionalAiInsightArtifactIdentity(additional)).toBe(true);
+    expect(isCurrentProjectAdditionalAiInsightArtifactIdentity({
+      ...additional,
+      identityContractRevision: "ngee-ann-additional-insights-v2",
+      investigatorPromptRevision: "additional-insights-discovery-v10",
+    })).toBe(false);
   });
 });
 

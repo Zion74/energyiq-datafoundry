@@ -96,7 +96,9 @@ describe("Ngee Ann Saved Project AI", () => {
           "time-behaviour",
           "circuit-concentration",
           "decision-priorities",
-        ].map((sectionId) => [sectionId, availableUnit(sectionId, runId)])),
+        ].map((sectionId) => [sectionId, sectionId === "time-behaviour"
+          ? emptyUnit(sectionId, runId)
+          : availableUnit(sectionId, runId)])),
         additionalInsights: availableUnit("additional", runId),
       };
       const readExact = vi.fn().mockResolvedValue(model);
@@ -165,6 +167,28 @@ describe("Ngee Ann Saved Project AI", () => {
       expect(readExact).toHaveBeenCalledOnce();
       expect(adapter.generateMissing).not.toHaveBeenCalled();
 
+      const emptyModel: ProjectOverviewAiReadModel = {
+        ...model,
+        keyFindings: emptyUnit("executive-empty", runId),
+        sections: Object.fromEntries(Object.keys(model.sections).map((sectionId) => [
+          sectionId,
+          emptyUnit(`${sectionId}-empty`, runId),
+        ])),
+        additionalInsights: emptyUnit("additional-empty", runId),
+      };
+      const emptySaved = metadata.energyIq.savedAnalyses.create({
+        ...saved,
+        id: "saved-analysis-ngee-project-ai-empty",
+        series_id: "saved-analysis-ngee-project-ai-empty-series",
+        title: "Ngee AI empty",
+      });
+      readExact.mockResolvedValueOnce(emptyModel);
+      expect(await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...artifact, result: emptyModel } }),
+        ["projects", project.id, "saved-analyses", emptySaved.id, "ai-result"],
+        context,
+      )).toMatchObject({ status: 200, body: { success: true } });
+
       const tampered = structuredClone(model);
       (tampered.keyFindings as Extract<typeof tampered.keyFindings, { status: "available" }>).result = {
         status: "available",
@@ -217,6 +241,12 @@ const availableUnit = (id: string, runId: string) => ({
   status: "available" as const,
   artifactId: `artifact:${id}`,
   result: { status: "available", runId, findings: [] },
+});
+
+const emptyUnit = (id: string, runId: string) => ({
+  status: "empty" as const,
+  artifactId: `artifact:${id}`,
+  runId,
 });
 
 const jsonPost = (body: unknown): IncomingMessage => {

@@ -2329,7 +2329,9 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
   }
   if (isProjectOverviewAiReadModel(result)) {
     return [...new Set(projectOverviewSavedUnits(result).flatMap((unit) => {
-      if (!isRecord(unit) || unit.status !== "available" || !isRecord(unit.result) || typeof unit.result.runId !== "string") return [];
+      if (!isRecord(unit)) return [];
+      if (unit.status === "empty" && typeof unit.runId === "string" && unit.runId.trim()) return [unit.runId];
+      if (unit.status !== "available" || !isRecord(unit.result) || typeof unit.result.runId !== "string") return [];
       return unit.result.runId.trim() ? [unit.result.runId] : [];
     }))];
   }
@@ -2348,13 +2350,15 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
 const primarySavedAnalysisAiRunId = (result: SavedAnalysisAiArtifactInput["result"]): string => {
   if (isProjectOverviewAiReadModel(result)) {
     const preferred = [result.keyFindings, result.additionalInsights, ...Object.values(result.sections)]
-      .find((unit) => unit.status === "available"
+      .find((unit) => (unit.status === "available"
         && isRecord(unit.result)
         && typeof unit.result.runId === "string"
-        && unit.result.runId.trim());
+        && unit.result.runId.trim())
+        || (unit.status === "empty" && typeof unit.runId === "string" && unit.runId.trim()));
     if (preferred?.status === "available" && isRecord(preferred.result) && typeof preferred.result.runId === "string") {
       return preferred.result.runId;
     }
+    if (preferred?.status === "empty" && typeof preferred.runId === "string") return preferred.runId;
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
   }
   if (!isPreschoolOverviewAiReadModel(result)) return result.runId;
@@ -2424,7 +2428,10 @@ const isTerminalProjectOverviewSavedUnit = (value: unknown): boolean => {
       && value.result.runId.trim().length > 0;
   }
   if (value.status === "empty") {
-    return typeof value.artifactId === "string" && value.artifactId.trim().length > 0;
+    return typeof value.artifactId === "string"
+      && value.artifactId.trim().length > 0
+      && typeof value.runId === "string"
+      && value.runId.trim().length > 0;
   }
   if (value.status === "failed" || value.status === "unavailable") {
     return typeof value.reason === "string" && value.reason.trim().length > 0;

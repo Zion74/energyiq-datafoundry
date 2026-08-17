@@ -83,10 +83,12 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
       identity,
       user,
       retryTarget,
+      modelProfileSnapshot: providedModelProfileSnapshot,
     }: {
       identity: EnergyIqOverviewAiArtifactIdentity;
       user: UserRecord;
       retryTarget?: string;
+      modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
     }): Promise<{
       sections: Record<NgeeAnnSectionId, EnergyIqOverviewAiArtifactRecord>;
       executive?: EnergyIqOverviewAiArtifactRecord;
@@ -96,7 +98,7 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
         throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_RETRY_TARGET_INVALID");
       }
       assertRuntimeIdentity(baseIdentity);
-      const modelProfileSnapshot = resolveModelProfileSnapshot();
+      const modelProfileSnapshot = providedModelProfileSnapshot ?? resolveModelProfileSnapshot();
       if (modelProfileSnapshot.bindingRevision !== baseIdentity.modelProfileRevision) {
         throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
       }
@@ -117,16 +119,30 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
 };
 
 export const areNgeeAnnSectionArtifactsTerminal = (
-  sections: Record<NgeeAnnSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>,
+  sections: Record<string, { status: string }>,
 ): boolean => NGEE_ANN_SECTION_IDS.every((sectionId) =>
-  sections[sectionId].status === "available" || sections[sectionId].status === "failed");
+  isTerminalGenerationStatus(sections[sectionId]?.status));
 
 export const isNgeeAnnOverviewAiGenerationTerminal = (input: {
-  sections: Record<NgeeAnnSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>;
-  executive?: Pick<EnergyIqOverviewAiArtifactRecord, "status">;
+  sections: Record<string, { status: string }>;
+  executive?: { status: string };
+  keyFindings?: { status: string };
 }): boolean => areNgeeAnnSectionArtifactsTerminal(input.sections)
-  && Boolean(input.executive
-    && (input.executive.status === "available" || input.executive.status === "failed"));
+  && isTerminalGenerationStatus((input.executive ?? input.keyFindings)?.status);
+
+export const requireNgeeAnnAdditionalInsightsReady = <T extends {
+  sections: Record<string, { status: string }>;
+  executive?: { status: string };
+  keyFindings?: { status: string };
+}>(input: T): T => {
+  if (!isNgeeAnnOverviewAiGenerationTerminal(input)) {
+    throw new Error("ENERGYIQ_NGEE_ANN_ADDITIONAL_INSIGHTS_CORE_NOT_READY");
+  }
+  return input;
+};
+
+const isTerminalGenerationStatus = (status: string | undefined): boolean =>
+  status === "available" || status === "empty" || status === "failed";
 
 const isNgeeAnnSectionId = (value: string): value is NgeeAnnSectionId =>
   (NGEE_ANN_SECTION_IDS as readonly string[]).includes(value);

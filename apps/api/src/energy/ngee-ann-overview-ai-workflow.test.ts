@@ -11,6 +11,7 @@ import {
   areNgeeAnnSectionArtifactsTerminal,
   createNgeeAnnOverviewAiWorkflow,
   isNgeeAnnOverviewAiGenerationTerminal,
+  requireNgeeAnnAdditionalInsightsReady,
 } from "./ngee-ann-overview-ai-workflow.js";
 import {
   NGEE_ANN_SECTION_IDS,
@@ -24,14 +25,18 @@ describe("Ngee Ann Overview AI workflow", () => {
     const store = fakeArtifactStore(records);
     const sectionCalls: EnergyIqOverviewAiArtifactIdentity[] = [];
     const executiveCalls: EnergyIqOverviewAiArtifactIdentity[] = [];
+    const sectionProfileSnapshots: unknown[] = [];
+    const executiveProfileSnapshots: unknown[] = [];
+    const trustedSnapshot = modelProfileSnapshot();
     const workflow = createNgeeAnnOverviewAiWorkflow({
       metadataStore: { energyIq: { overviewAiArtifacts: store } } as unknown as MetadataStore,
       dataGateway: {} as never,
       assertRuntimeIdentity: vi.fn(),
-      resolveModelProfileSnapshot: () => modelProfileSnapshot(),
+      resolveModelProfileSnapshot: () => trustedSnapshot,
       resolvePacks: vi.fn().mockResolvedValue(packs()),
-      runSection: async ({ identity, runId, sessionId }) => {
+      runSection: async ({ identity, runId, sessionId, modelProfileSnapshot: snapshot }) => {
         sectionCalls.push(identity);
+        sectionProfileSnapshots.push(snapshot);
         return {
           answer: JSON.stringify({
             sectionId: identity.targetId,
@@ -43,8 +48,9 @@ describe("Ngee Ann Overview AI workflow", () => {
           sessionId,
         };
       },
-      runExecutive: async ({ identity, runId, sessionId }) => {
+      runExecutive: async ({ identity, runId, sessionId, modelProfileSnapshot: snapshot }) => {
         executiveCalls.push(identity);
+        executiveProfileSnapshots.push(snapshot);
         return { answer: JSON.stringify({ status: "empty", findings: [] }), runId, sessionId };
       },
     });
@@ -57,6 +63,8 @@ describe("Ngee Ann Overview AI workflow", () => {
       && rendererKey === "ngee-ann-overview"
       && identityContractRevision === "ngee-ann-section-v4")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
+    expect(sectionProfileSnapshots).toEqual(Array.from({ length: 4 }, () => trustedSnapshot));
+    expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);
     expect(executiveCalls[0]).toMatchObject({
       artifactKind: "executive-synthesis",
       identityContractRevision: "ngee-ann-executive-v3",
@@ -88,6 +96,17 @@ describe("Ngee Ann Overview AI workflow", () => {
       sections: terminal,
       executive: { status: "available" },
     })).toBe(true);
+    expect(() => requireNgeeAnnAdditionalInsightsReady({
+      sections: terminal,
+      executive: { status: "running" },
+    })).toThrowError("ENERGYIQ_NGEE_ANN_ADDITIONAL_INSIGHTS_CORE_NOT_READY");
+    expect(requireNgeeAnnAdditionalInsightsReady({
+      sections: { ...terminal, "time-behaviour": { status: "empty" } },
+      keyFindings: { status: "empty" },
+    })).toEqual({
+      sections: { ...terminal, "time-behaviour": { status: "empty" } },
+      keyFindings: { status: "empty" },
+    });
   });
 });
 

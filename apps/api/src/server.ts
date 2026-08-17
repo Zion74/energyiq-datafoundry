@@ -122,6 +122,7 @@ import {
 import {
   createNgeeAnnOverviewAiWorkflow,
   isNgeeAnnOverviewAiGenerationTerminal,
+  requireNgeeAnnAdditionalInsightsReady,
 } from "./energy/ngee-ann-overview-ai-workflow.js";
 import { NGEE_ANN_SECTION_MESSAGE_MAX_CHARS } from "./energy/ngee-ann-section-interpreter.js";
 import {
@@ -136,6 +137,7 @@ import {
   MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
 } from "./energy/preschool-additional-ai-insights-workflow.js";
 import { composePreschoolOverviewAiReadModel } from "./energy/preschool-overview-ai-read-model.js";
+import { resolveWorkspaceDefaultModelProfileSnapshot } from "./workspace-model-profile-resolver.js";
 import {
   createNgeeAnnAdditionalAiInsightArtifactIdentity,
   isCurrentProjectAdditionalAiInsightArtifactIdentity,
@@ -755,17 +757,31 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     metadataStore,
     dataGateway,
     async executeMissing({ identity, user, retryTarget }) {
+      const modelProfileSnapshot = resolveWorkspaceDefaultModelProfileSnapshot(metadataStore);
       if (retryTarget === "additional-insights") {
-        await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
+        requireNgeeAnnAdditionalInsightsReady(composeNgeeAnnOverviewAiReadModel({
+          metadataStore,
+          baseIdentity: projectCurrentOverviewAiArtifactBaseIdentity(identity),
+        }));
+        await ngeeAnnAdditionalAiInsightsWorkflow.execute({
+          baseIdentity: identity,
+          user,
+          modelProfileSnapshot,
+        });
         return;
       }
       const core = await ngeeAnnOverviewAiWorkflow.execute({
         identity,
         user,
+        modelProfileSnapshot,
         ...(retryTarget ? { retryTarget } : {}),
       });
       if (!retryTarget && isNgeeAnnOverviewAiGenerationTerminal(core)) {
-        await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
+        await ngeeAnnAdditionalAiInsightsWorkflow.execute({
+          baseIdentity: identity,
+          user,
+          modelProfileSnapshot,
+        });
       }
     },
   });

@@ -2146,7 +2146,7 @@ export type EnergyProjectOverviewAiUnitStatusDto =
   | { status: "missing" }
   | { status: "queued" | "running"; artifactId?: string }
   | { status: "available"; artifactId: string; completedAt?: string; result: Record<string, unknown> }
-  | { status: "empty"; artifactId: string; completedAt?: string }
+  | { status: "empty"; artifactId: string; runId: string; completedAt?: string }
   | { status: "failed" | "unavailable"; artifactId?: string; completedAt?: string; reason: string };
 
 export type EnergyProjectOverviewAiReadModelDto = {
