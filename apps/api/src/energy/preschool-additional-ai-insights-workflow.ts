@@ -323,7 +323,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     if (completed.runId !== runId || completed.sessionId !== sessionId) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_RUNTIME_IDENTITY_MISMATCH");
     }
-    const candidates = parseDiscoveryCandidates(completed.answer);
+    const candidates = parseDiscoveryCandidates(completed.answer, identity);
     if (!candidates) throw new Error("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
     const artifact = publishAdditionalArtifact({
       identity,
@@ -578,10 +578,18 @@ const parseDiscoveryEnvelope = (answer: string): unknown => {
   }
 };
 
-const parseDiscoveryCandidates = (answer: string): DiscoveryCandidate[] | null => {
+const parseDiscoveryCandidates = (
+  answer: string,
+  identity: ProjectAdditionalAiInsightArtifactIdentity,
+): DiscoveryCandidate[] | null => {
   if (typeof answer !== "string" || answer.length > MAX_DISCOVERY_ANSWER_CHARS) return null;
   const parsed = parseDiscoveryEnvelope(answer);
-  if (!isRecord(parsed) || !hasExactKeys(parsed, ["candidates"]) || !Array.isArray(parsed.candidates)) return null;
+  if (!isRecord(parsed) || !Array.isArray(parsed.candidates)) return null;
+  const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v2"
+    && parsed.type === "object"
+    ? ["candidates", "type"]
+    : ["candidates"];
+  if (!hasExactKeys(parsed, exactKeys)) return null;
   const seen = new Set<string>();
   return parsed.candidates.map((value, index) => {
     const proposed = isRecord(value) && nonEmptyString(value.id) ? value.id.trim() : `candidate-${index + 1}`;

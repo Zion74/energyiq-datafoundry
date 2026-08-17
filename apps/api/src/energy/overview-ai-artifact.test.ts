@@ -83,7 +83,7 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(additional).toMatchObject({
       rendererKey: "ngee-ann-overview",
       artifactKind: "autonomous-insights",
-      identityContractRevision: "ngee-ann-additional-insights-v1",
+      identityContractRevision: "ngee-ann-additional-insights-v2",
       analysisPackId: "ngee-ann-additional-insights-pack",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
       methodSetId: "preschool-additional-insights-current",

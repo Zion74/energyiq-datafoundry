@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createNgeeAnnAdditionalAiInsightArtifactIdentity,
   createOverviewAiArtifactIdentity,
   createPreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
@@ -1550,6 +1551,67 @@ describe("Preschool Additional AI Insights workflow", () => {
         user: harness.user,
         runId: "preamble-run",
         sessionId: "preamble-session",
+      })).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts only the known DeepSeek schema marker on the Ngee Ann discovery envelope", async () => {
+    const harness = createHarness();
+    try {
+      const ngeeAnnBaseIdentity = {
+        ...harness.baseIdentity,
+        rendererKey: "ngee-ann-overview",
+      } as const;
+      const ngeeAnnIdentity = createNgeeAnnAdditionalAiInsightArtifactIdentity({
+        baseIdentity: ngeeAnnBaseIdentity,
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        createArtifactIdentity: createNgeeAnnAdditionalAiInsightArtifactIdentity,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [], type: "object" }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: ngeeAnnIdentity,
+        user: harness.user,
+        runId: "ngee-ann-schema-marker-run",
+        sessionId: "ngee-ann-schema-marker-session",
+      })).resolves.toMatchObject({
+        status: "empty",
+        publication: { discoveredCount: 0, acceptedCount: 0, rejectedCount: 0 },
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps the Preschool discovery root exact when the schema marker is present", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [], type: "object" }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "preschool-schema-marker-run",
+        sessionId: "preschool-schema-marker-session",
       })).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
     } finally {
       harness.close();

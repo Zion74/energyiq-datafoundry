@@ -60,7 +60,7 @@ export type PreschoolAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiIn
 };
 
 export type NgeeAnnAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
-  identityContractRevision: "ngee-ann-additional-insights-v1";
+  identityContractRevision: "ngee-ann-additional-insights-v2";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -323,7 +323,7 @@ export const createNgeeAnnAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "ngee-ann-additional-insights-v1",
+    identityContractRevision: "ngee-ann-additional-insights-v2",
     analysisPackId: "ngee-ann-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
@@ -371,7 +371,7 @@ export const isCurrentProjectAdditionalAiInsightArtifactIdentity = (
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)
   || (identity.rendererKey === "ngee-ann-overview"
     && identity.artifactKind === "autonomous-insights"
-    && identity.identityContractRevision === "ngee-ann-additional-insights-v1"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v2"
     && identity.analysisPackId === "ngee-ann-additional-insights-pack"
     && identity.analysisPackRevision === "v1"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"

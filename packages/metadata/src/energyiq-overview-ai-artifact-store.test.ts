@@ -1220,7 +1220,7 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const ngeeAnnIdentity: EnergyIqOverviewAiArtifactIdentity = {
         ...additionalIdentity("snapshot-additional-ngee-ann"),
         rendererKey: "ngee-ann-overview",
-        identityContractRevision: "ngee-ann-additional-insights-v1",
+        identityContractRevision: "ngee-ann-additional-insights-v2",
         analysisPackId: "ngee-ann-additional-insights-pack",
       };
       expect(metadata.energyIq.overviewAiArtifacts.queue({
