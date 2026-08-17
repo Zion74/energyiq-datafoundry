@@ -1077,6 +1077,10 @@ const requireExecutiveSynthesisResult = (
   identity: EnergyIqOverviewAiArtifactIdentity,
   db: DatabaseSync,
 ): void => {
+  if (identity.identityContractRevision === "ngee-ann-executive-v1") {
+    requireProjectExecutiveSynthesisResultV1(parsed, identity);
+    return;
+  }
   if (identity.identityContractRevision === "v4"
     || identity.outputContractRevision === "preschool-executive-synthesis-v4") {
     requireExecutiveSynthesisResultV4(parsed, identity, db);
@@ -1084,6 +1088,70 @@ const requireExecutiveSynthesisResult = (
   }
   requireExecutiveSynthesisResultV3(parsed, identity);
 };
+
+const requireProjectExecutiveSynthesisResultV1 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const summary = parsed.summary;
+  const findings = parsed.findings;
+  const sourceIds = parsed.sourceSectionArtifactIds;
+  if (identity.rendererKey !== "ngee-ann-overview"
+    || identity.analysisPackId !== "ngee-ann-section-artifacts"
+    || identity.analysisPackRevision !== "v1"
+    || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
+    || identity.validatorRevision !== "energyiq-project-executive-acceptance-v1"
+    || identity.workflowRevision !== "energyiq-project-executive-synthesis-v1"
+    || identity.investigatorPromptRevision !== "energyiq-project-executive-prompt-v1"
+    || identity.capabilityRevision !== "section-artifacts-v1"
+    || identity.publicationRevision !== "energyiq-project-key-findings-v1"
+    || parsed.artifactKind !== "executive-synthesis"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "energyiq-project-executive-synthesis"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || !Array.isArray(sourceIds)
+    || !sourceIds.every(nonEmptyString)
+    || new Set(sourceIds).size !== sourceIds.length
+    || !Array.isArray(findings)
+    || findings.length > 3
+    || !findings.every(validProjectExecutiveFindingV1)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (summary !== undefined || findings.length !== 0) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (sourceIds.length < 2 || !validSectionSummaryV4(summary)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.title)
+  && value.title.length <= 96
+  && nonEmptyString(value.text)
+  && value.text.length <= 480
+  && (value.epistemicStatus === "observed"
+    || value.epistemicStatus === "inferred"
+    || value.epistemicStatus === "speculative")
+  && Array.isArray(value.sectionIds)
+  && value.sectionIds.length > 0
+  && value.sectionIds.every((sectionId) => nonEmptyString(sectionId) && NGEE_ANN_SECTION_IDS.has(sectionId))
+  && new Set(value.sectionIds).size === value.sectionIds.length
+  && Array.isArray(value.sourceInsightIds)
+  && value.sourceInsightIds.every(nonEmptyString)
+  && new Set(value.sourceInsightIds).size === value.sourceInsightIds.length
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
 
 const requireExecutiveSynthesisResultV3 = (
   parsed: Record<string, unknown>,

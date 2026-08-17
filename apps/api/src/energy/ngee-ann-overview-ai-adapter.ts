@@ -14,6 +14,7 @@ import {
   resolveCurrentOverviewAiArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
 } from "./overview-ai-artifact.js";
+import { ngeeAnnExecutiveTargetId } from "./ngee-ann-executive-synthesis.js";
 import {
   NGEE_ANN_SECTION_IDS,
   type NgeeAnnSectionId,
@@ -76,16 +77,20 @@ export const createNgeeAnnProjectOverviewAiAdapter = (input: {
   }): Promise<ProjectOverviewAiReadModel> => {
     const baseIdentity = requireCurrentNgeeAnnBaseIdentity(identity);
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
-    const sections = Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => {
+    const sectionRecords = NGEE_ANN_SECTION_IDS.map((sectionId) => {
       const sectionIdentity = createNgeeAnnOverviewAiSectionArtifactIdentity({
         baseIdentity,
         targetId: sectionId,
       });
-      return [sectionId, artifactUnit(store.find(sectionIdentity))];
-    })) as Record<NgeeAnnSectionId, ProjectOverviewAiUnitStatus>;
+      return { sectionId, record: store.find(sectionIdentity) };
+    });
+    const sections = Object.fromEntries(sectionRecords.map(({ sectionId, record }) => [
+      sectionId,
+      artifactUnit(record),
+    ])) as Record<NgeeAnnSectionId, ProjectOverviewAiUnitStatus>;
     const executiveIdentity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
       baseIdentity,
-      targetId: "sections:current-v1",
+      targetId: ngeeAnnExecutiveTargetId(sectionRecords.flatMap(({ record }) => record ? [record] : [])),
     });
 
     return {

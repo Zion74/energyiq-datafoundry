@@ -399,6 +399,29 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
+  it("stores only exact Ngee Ann Executive findings with declared Section and Evidence lineage", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-ngee-executive-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+
+      const availableIdentity = ngeeAnnExecutiveIdentity("snapshot-ngee-executive");
+      expect(completeSectionV4(store, availableIdentity, ngeeAnnExecutiveResult(availableIdentity)))
+        .toMatchObject({ status: "available" });
+
+      const mismatchedIdentity = ngeeAnnExecutiveIdentity("snapshot-ngee-executive-mismatch");
+      const malformed = ngeeAnnExecutiveResult(mismatchedIdentity);
+      malformed.findings[0]!.sectionIds = ["centre-benchmark"];
+      expect(() => completeSectionV4(store, mismatchedIdentity, malformed))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the immediately previous Section v12 and Executive v10 identities writable for historical completion", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-previous-current-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;
@@ -952,6 +975,55 @@ const ngeeAnnSectionResult = (
     publishedCount: 0,
     suppressedCandidateIds: [],
   },
+});
+
+const ngeeAnnExecutiveIdentity = (
+  dataSnapshotId: string,
+): SectionV4Identity => ({
+  ...sectionV3Identity(dataSnapshotId, "sections:test-v1"),
+  rendererKey: "ngee-ann-overview",
+  artifactKind: "executive-synthesis",
+  identityContractRevision: "ngee-ann-executive-v1",
+  analysisPackId: "ngee-ann-section-artifacts",
+  analysisPackRevision: "v1",
+  outputContractRevision: "energyiq-project-executive-synthesis-v1",
+  validatorRevision: "energyiq-project-executive-acceptance-v1",
+  workflowRevision: "energyiq-project-executive-synthesis-v1",
+  investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
+  capabilityRevision: "section-artifacts-v1",
+  publicationRevision: "energyiq-project-key-findings-v1",
+});
+
+const ngeeAnnExecutiveResult = (identity: SectionV4Identity) => ({
+  artifactKind: "executive-synthesis" as const,
+  status: "available" as const,
+  providerProfileId: identity.modelProfileId,
+  runId: `run:${identity.dataSnapshotId}`,
+  contract: {
+    id: "energyiq-project-executive-synthesis",
+    revision: "energyiq-project-executive-synthesis-v1",
+  },
+  binding: {
+    workspaceId: identity.workspaceId,
+    projectId: identity.projectId,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    projectReleaseId: identity.projectReleaseId,
+    analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+    modelProfileId: identity.modelProfileId,
+    modelProfileRevision: identity.modelProfileRevision,
+  },
+  sourceSectionArtifactIds: ["artifact:trend", "artifact:time"],
+  summary: { text: "Two Ngee Ann Sections support a cross-Section reading.", evidenceRefs: ["evidence:trend"] },
+  findings: [{
+    id: "finding:ngee",
+    title: "A cross-Section management angle",
+    text: "The accepted Sections point to a shared line of inquiry.",
+    epistemicStatus: "inferred",
+    sectionIds: ["trend-and-demand", "time-behaviour"],
+    sourceInsightIds: ["insight:trend"],
+    evidenceRefs: ["evidence:trend"],
+  }],
 });
 
 const sectionV4Result = (

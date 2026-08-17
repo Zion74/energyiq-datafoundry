@@ -37,3 +37,28 @@ export const NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1 = {
     },
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
+export const NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1 = {
+  errorStrategy: "warn",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["status", "findings"],
+    properties: {
+      status: { type: "string", enum: ["available", "empty"] },
+      summary: {
+        type: "object",
+        additionalProperties: false,
+        required: ["text", "evidenceRefs"],
+        properties: {
+          text: { type: "string", minLength: 1, maxLength: 600 },
+          evidenceRefs: {
+            type: "array", minItems: 1, uniqueItems: true,
+            items: { type: "string", minLength: 1 },
+          },
+        },
+      },
+      findings: { type: "array", minItems: 0, maxItems: 12, items: { type: "object" } },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;

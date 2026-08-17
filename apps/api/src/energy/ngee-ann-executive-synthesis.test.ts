@@ -1,0 +1,174 @@
+import type { EnergyIqOverviewAiArtifactRecord } from "@datafoundry/metadata";
+import { describe, expect, it } from "vitest";
+
+import {
+  materializeNgeeAnnExecutiveResult,
+  ngeeAnnExecutiveTargetId,
+  type NgeeAnnExecutiveSource,
+} from "./ngee-ann-executive-synthesis.js";
+import {
+  createNgeeAnnOverviewAiExecutiveArtifactIdentity,
+  createOverviewAiArtifactIdentity,
+} from "./overview-ai-artifact.js";
+
+describe("Ngee Ann Executive Synthesis", () => {
+  it("keeps supported cross-Section value while locally rejecting an unsupported sibling", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:test",
+    });
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "Demand and time behaviour point to two related management questions.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:kept",
+          title: "Peak demand and hourly concentration deserve a joint reading",
+          text: "The 138.8 kW peak and the daytime pattern may share an operational boundary, but the current Evidence does not establish a cause.",
+          epistemicStatus: "speculative",
+          sectionIds: ["trend-and-demand", "time-behaviour"],
+          sourceInsightIds: ["insight:trend", "insight:time"],
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        }, {
+          id: "finding:rejected",
+          title: "Unsupported number",
+          text: "The unexplained impact is 999.9 kW.",
+          epistemicStatus: "observed",
+          sectionIds: ["trend-and-demand"],
+          sourceInsightIds: ["insight:trend"],
+          evidenceRefs: ["evidence:trend"],
+        }],
+      }),
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      sourceSectionArtifactIds: ["artifact:trend", "artifact:time"],
+      findings: [{ id: "finding:kept", epistemicStatus: "speculative" }],
+    });
+  });
+
+  it("does not upgrade a speculative Section angle to an observed Executive fact", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:test",
+    });
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: { text: "Two Sections are available for a combined reading.", evidenceRefs: ["evidence:trend"] },
+        findings: [{
+          id: "finding:upgrade",
+          title: "The timetable caused the peak",
+          text: "The source hypothesis is now presented as confirmed.",
+          epistemicStatus: "observed",
+          sectionIds: ["time-behaviour"],
+          sourceInsightIds: ["insight:time"],
+          evidenceRefs: ["evidence:time"],
+        }],
+      }),
+    });
+
+    expect(result.findings).toEqual([]);
+  });
+
+  it("rotates the Executive target when any contributing Section Artifact changes", () => {
+    const records = [record("artifact:trend", "hash-a"), record("artifact:time", "hash-b")];
+    const changed = [record("artifact:trend", "hash-a"), record("artifact:time-v2", "hash-c")];
+
+    expect(ngeeAnnExecutiveTargetId(records)).not.toBe(ngeeAnnExecutiveTargetId(changed));
+    expect(ngeeAnnExecutiveTargetId([])).toBe("sections:none-v1");
+  });
+});
+
+const baseIdentity = () => createOverviewAiArtifactIdentity({
+  workspaceId: "workspace-ngee",
+  projectId: "ngee-ann-polytechnic",
+  scopeId: "ngee-ann-polytechnic",
+  dataSnapshotId: "snapshot-ngee",
+  projectReleaseId: "release-ngee",
+  analysisPeriodFrom: "2026-05-19T16:00:00.000Z",
+  analysisPeriodTo: "2026-06-16T16:00:00.000Z",
+  rendererKey: "ngee-ann-overview",
+  rendererVersion: "1",
+  modelProfileId: "workspace-default-model-profile",
+  modelProfileRevision: 8,
+});
+
+const sourceSections = (): NgeeAnnExecutiveSource[] => [{
+  sectionId: "trend-and-demand",
+  artifactId: "artifact:trend",
+  result: {
+    artifactKind: "section-interpretation",
+    status: "available",
+    providerProfileId: "workspace-default-model-profile",
+    runId: "run:trend",
+    contract: { id: "energyiq-project-section-interpretation", revision: "energyiq-project-section-interpretation-v1" },
+    binding: binding(),
+    sectionId: "trend-and-demand",
+    packRevision: "v1",
+    capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+    summary: { text: "Peak demand was 138.8 kW.", evidenceRefs: ["evidence:trend"] },
+    insights: [{
+      id: "insight:trend", title: "Peak signal", text: "Peak demand was 138.8 kW.",
+      epistemicStatus: "observed", evidenceRefs: ["evidence:trend"],
+    }],
+    publication: publication(),
+  },
+}, {
+  sectionId: "time-behaviour",
+  artifactId: "artifact:time",
+  result: {
+    artifactKind: "section-interpretation",
+    status: "available",
+    providerProfileId: "workspace-default-model-profile",
+    runId: "run:time",
+    contract: { id: "energyiq-project-section-interpretation", revision: "energyiq-project-section-interpretation-v1" },
+    binding: binding(),
+    sectionId: "time-behaviour",
+    packRevision: "v1",
+    capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+    summary: { text: "Usage is concentrated in daytime hours.", evidenceRefs: ["evidence:time"] },
+    insights: [{
+      id: "insight:time", title: "Possible timetable boundary", text: "A timetable may shape the profile.",
+      epistemicStatus: "speculative", evidenceRefs: ["evidence:time"],
+    }],
+    publication: publication(),
+  },
+}];
+
+const binding = () => ({
+  workspaceId: "workspace-ngee", projectId: "ngee-ann-polytechnic", scopeId: "ngee-ann-polytechnic",
+  dataSnapshotId: "snapshot-ngee", projectReleaseId: "release-ngee",
+  analysisPeriod: { from: "2026-05-19T16:00:00.000Z", to: "2026-06-16T16:00:00.000Z" },
+  modelProfileId: "workspace-default-model-profile", modelProfileRevision: 8,
+});
+
+const publication = () => ({
+  policyId: "energyiq-project-section-publication" as const,
+  policyRevision: "energyiq-project-section-publication-v1" as const,
+  discoveredCount: 1, acceptedCount: 1, rejectedCount: 0, publishedCount: 1,
+  suppressedCandidateIds: [], rejectedCandidateIds: [],
+});
+
+const record = (id: string, identityHash: string): EnergyIqOverviewAiArtifactRecord => ({
+  id, identity_hash: identityHash, identity_json: "{}", workspace_id: "workspace-ngee",
+  project_id: "ngee-ann-polytechnic", scope_id: "ngee-ann-polytechnic", resource: "electricity",
+  data_snapshot_id: "snapshot-ngee", project_release_id: "release-ngee", renderer_key: "ngee-ann-overview",
+  renderer_version: "1", analysis_pack_id: "ngee-ann-section-pack", analysis_pack_revision: "v1",
+  model_profile_id: "workspace-default-model-profile", model_profile_revision: 8,
+  output_contract_revision: "energyiq-project-section-interpretation-v1",
+  validator_revision: "energyiq-project-section-acceptance-v1", status: "available", attempt_count: 1,
+  triggered_by: "dev-user", created_at: "2026-08-17T00:00:00.000Z", updated_at: "2026-08-17T00:00:00.000Z",
+});
