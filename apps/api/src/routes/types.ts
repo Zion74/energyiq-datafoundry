@@ -9,6 +9,7 @@ import type { PreschoolOverviewAiPageWorkflow } from "../energy/preschool-overvi
 import type { PreschoolAdditionalAiInsightsWorkflow } from "../energy/preschool-additional-ai-insights-workflow.js";
 import type { PreschoolAdditionalAiInsightsEvaluationWorkflow } from "../energy/preschool-additional-ai-insights-evaluation.js";
 import type { EnergyIqTemplateChangeWorkflow } from "../energy/energy-template-change-workflow.js";
+import type { ProjectOverviewAiAdapter } from "../energy/project-overview-ai-adapter.js";
 
 export type ConfigApiContext = {
   authService: AuthService;
@@ -17,6 +18,7 @@ export type ConfigApiContext = {
   knowledgeService: LocalKnowledgeService;
   metadataStore: MetadataStore;
   overviewAiWorkflow: PreschoolOverviewAiPageWorkflow;
+  projectOverviewAiAdapters: readonly ProjectOverviewAiAdapter[];
   additionalAiInsightsWorkflow: PreschoolAdditionalAiInsightsWorkflow | undefined;
   additionalAiInsightsEvaluationWorkflow: PreschoolAdditionalAiInsightsEvaluationWorkflow | undefined;
   templateChangeWorkflow: EnergyIqTemplateChangeWorkflow | undefined;

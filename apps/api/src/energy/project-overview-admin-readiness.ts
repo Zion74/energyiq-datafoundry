@@ -1,4 +1,8 @@
-import type { MetadataStore, UserRecord } from "@datafoundry/metadata";
+import type {
+  EnergyIqOverviewAiArtifactIdentity,
+  MetadataStore,
+  UserRecord,
+} from "@datafoundry/metadata";
 
 import type { OverviewAiArtifactIdentityV13 } from "./overview-ai-artifact.js";
 import type { PreschoolAdditionalAiInsightsWorkflow } from "./preschool-additional-ai-insights-workflow.js";
@@ -18,6 +22,13 @@ import {
   unavailableProjectAiExplainabilityState,
   type ProjectAiExplainabilityState,
 } from "./project-ai-explainability.js";
+import {
+  findProjectOverviewAiAdapter,
+  projectOverviewAiReadModelMatchesIdentity,
+  type ProjectOverviewAiAdapter,
+  type ProjectOverviewAiReadModel,
+  type ProjectOverviewAiUnitStatus,
+} from "./project-overview-ai-adapter.js";
 
 export type ProjectOverviewAdminReadinessStatus =
   | "ready"
@@ -53,7 +64,7 @@ export type ProjectOverviewAdminState = {
   } | null;
   capabilities: {
     keyFindings: boolean;
-    sectionAnalysis: PreschoolSectionId[];
+    sectionAnalysis: string[];
     additionalInsights: boolean;
   };
   analysis: {
@@ -91,6 +102,7 @@ export const createProjectOverviewAdminReadinessService = (input: {
   overviewAiWorkflow?: Pick<PreschoolOverviewAiPageWorkflow, "resolveCurrentIdentity" | "read">;
   overviewAiExecutor?: Pick<PreschoolOverviewAiPageWorkflow, "execute">;
   additionalAiInsightsWorkflow?: Pick<PreschoolAdditionalAiInsightsWorkflow, "execute">;
+  projectOverviewAiAdapters?: readonly ProjectOverviewAiAdapter[];
 }): ProjectOverviewAdminReadinessService => {
   const readProjectOverviewAdminState: ProjectOverviewAdminReadinessService["readProjectOverviewAdminState"] = async ({ projectId, user }) => {
     const project = input.metadataStore.energyIq.getProject(projectId);
@@ -112,6 +124,31 @@ export const createProjectOverviewAdminReadinessService = (input: {
             detail: "Assign a registered customer Overview before publishing this Project.",
             url: null,
           };
+
+    const projectAdapter = findProjectOverviewAiAdapter(
+      input.projectOverviewAiAdapters ?? [],
+      profile?.rendererKey ?? null,
+    );
+    if (profile?.rendererKey !== "preschool-overview" && projectAdapter) {
+      const identity = await projectAdapter.resolveIdentity({
+        projectId: project.id,
+        scopeId: project.root_scope_id,
+        user,
+        request: { kind: "current" },
+      });
+      const readModel = await projectAdapter.readExact({ identity, user });
+      const adapterState = projectAdapterAdminState(projectAdapter, identity, readModel);
+      return {
+        projectId: project.id,
+        projectName: project.name,
+        rendererKey: projectAdapter.rendererKey,
+        customerOverview,
+        ...adapterState,
+        explainability: unavailableProjectAiExplainabilityState(
+          "No saved Artifact explainability trace is available yet for this Project adapter.",
+        ),
+      };
+    }
 
     if (profile?.rendererKey !== "preschool-overview") {
       return {
@@ -242,10 +279,25 @@ export const createProjectOverviewAdminReadinessService = (input: {
       if (action !== "generate-missing") throw new Error("ENERGYIQ_OVERVIEW_ADMIN_ACTION_INVALID");
       const before = await readProjectOverviewAdminState({ projectId, user });
       if (!before.allowedActions.includes("generate-missing")) return before;
+      const project = input.metadataStore.energyIq.getProject(projectId);
+      const profile = resolveProjectOverviewProfile(project.id);
+      const projectAdapter = findProjectOverviewAiAdapter(
+        input.projectOverviewAiAdapters ?? [],
+        profile?.rendererKey ?? null,
+      );
+      if (profile?.rendererKey !== "preschool-overview" && projectAdapter) {
+        const identity = await projectAdapter.resolveIdentity({
+          projectId,
+          scopeId: project.root_scope_id,
+          user,
+          request: { kind: "current" },
+        });
+        await projectAdapter.generateMissing({ identity, user });
+        return readProjectOverviewAdminState({ projectId, user });
+      }
       if (!input.overviewAiWorkflow || !input.overviewAiExecutor) {
         throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
       }
-      const project = input.metadataStore.energyIq.getProject(projectId);
       const identity = await input.overviewAiWorkflow.resolveCurrentIdentity({
         projectId,
         scopeId: project.root_scope_id,
@@ -279,6 +331,67 @@ export const createProjectOverviewAdminReadinessService = (input: {
     },
   };
 };
+
+const projectAdapterAdminState = (
+  adapter: ProjectOverviewAiAdapter,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  readModel: ProjectOverviewAiReadModel | null,
+): Pick<ProjectOverviewAdminState,
+  "currentIdentity" | "capabilities" | "analysis" | "allowedActions" | "recommendedNextAction"> => {
+  const unitEntries = readModel && projectOverviewAiReadModelMatchesIdentity(readModel, identity)
+    ? [
+        adapterUnitItem("key-findings", "Key Findings", readModel.keyFindings),
+        ...adapter.sections.map(({ id, label }) => adapterUnitItem(`section:${id}`, label, readModel.sections[id]
+          ?? { status: "unavailable", reason: `${label} has not been generated.` })),
+        adapterUnitItem("additional-insights", "Additional AI Insights", readModel.additionalInsights),
+      ]
+    : [
+        missingItem("key-findings", "Key Findings"),
+        ...adapter.sections.map(({ id, label }) => missingItem(`section:${id}`, label)),
+        missingItem("additional-insights", "Additional AI Insights"),
+      ];
+  const readyCount = unitEntries.filter(({ status }) => status === "ready" || status === "no-new-insight").length;
+  const status = aggregateAnalysisStatus(unitEntries);
+  const canGenerate = unitEntries.some(({ status: itemStatus }) => itemStatus === "not-generated" || itemStatus === "needs-attention");
+  return {
+    currentIdentity: {
+      dataSnapshotId: identity.dataSnapshotId,
+      projectReleaseId: identity.projectReleaseId,
+      analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+      modelProfileRevision: identity.modelProfileRevision,
+    },
+    capabilities: {
+      keyFindings: true,
+      sectionAnalysis: adapter.sections.map(({ id }) => id),
+      additionalInsights: true,
+    },
+    analysis: {
+      supported: true,
+      status,
+      detail: analysisDetail(status, readyCount, unitEntries.length),
+      readyCount,
+      totalCount: unitEntries.length,
+      lastGeneratedAt: latestTimestamp(unitEntries.flatMap((item) => item.completedAt ? [item.completedAt] : [])),
+      items: unitEntries,
+    },
+    allowedActions: canGenerate ? ["generate-missing"] : [],
+    recommendedNextAction: canGenerate
+      ? {
+          action: "generate-missing",
+          label: unitEntries.some(({ status: itemStatus }) => itemStatus === "not-generated")
+            ? "Generate missing analysis"
+            : "Retry failed analysis",
+          detail: "Create or retry only the current analysis results that are missing or need attention.",
+        }
+      : null,
+  };
+};
+
+const adapterUnitItem = (
+  id: string,
+  label: string,
+  unit: ProjectOverviewAiUnitStatus,
+): ProjectOverviewAdminReadinessItem => unitItem(id, label, unit as PreschoolOverviewAiUnitStatus<unknown>);
 
 const retryTargetForItem = (
   item: ProjectOverviewAdminReadinessItem,

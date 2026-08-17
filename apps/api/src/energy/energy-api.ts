@@ -83,6 +83,10 @@ import {
   composePreschoolOverviewAiReadModelV3,
 } from "./preschool-overview-ai-read-model.js";
 import { createProjectOverviewAdminReadinessService } from "./project-overview-admin-readiness.js";
+import {
+  findProjectOverviewAiAdapter,
+  projectOverviewAiReadModelMatchesIdentity,
+} from "./project-overview-ai-adapter.js";
 import { createProjectHarnessConfigurationReader } from "./project-harness-configuration.js";
 import { createProjectAiOperationsReader } from "./project-ai-operations.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
@@ -557,6 +561,8 @@ export const handleEnergyApiRequest = async (
     if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       const project = context.metadataStore.energyIq.getProject(projectId);
+      const rendererKey = resolveProjectOverviewProfile(projectId)?.rendererKey ?? null;
+      const projectAdapter = findProjectOverviewAiAdapter(context.projectOverviewAiAdapters, rendererKey);
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const scopeId = requestUrl.searchParams.get("scopeId") ?? project.root_scope_id;
       const pinParts = {
@@ -585,6 +591,50 @@ export const handleEnergyApiRequest = async (
             projectReleaseId: pinParts.projectReleaseId!,
           }
         : undefined;
+      if (projectAdapter) {
+        const identity = await projectAdapter.resolveIdentity({
+          projectId,
+          scopeId,
+          user,
+          request: pin ? { kind: "pinned", pin } : { kind: "current" },
+        });
+        if (segments.length === 3 && request.method === "GET") {
+          const readModel = await projectAdapter.readExact({ identity, user });
+          if (readModel && !projectOverviewAiReadModelMatchesIdentity(readModel, identity)) {
+            throw new Error("ENERGYIQ_PROJECT_OVERVIEW_AI_READ_MODEL_IDENTITY_MISMATCH");
+          }
+          return {
+            status: 200,
+            headers: { "Cache-Control": "private, no-store" },
+            body: createSuccessResult(readModel ?? {
+              status: "missing",
+              rendererKey: projectAdapter.rendererKey,
+              dataSnapshotId: identity.dataSnapshotId,
+              projectReleaseId: identity.projectReleaseId,
+            }),
+          };
+        }
+        if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
+          return {
+            status: 200,
+            headers: { "Cache-Control": "private, no-store" },
+            body: createSuccessResult(await projectAdapter.generateMissing({ identity, user })),
+          };
+        }
+        if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
+          const body = requireRecord(await readJsonBody(request));
+          const retryTarget = optionalString(body.targetId);
+          return {
+            status: 200,
+            headers: { "Cache-Control": "private, no-store" },
+            body: createSuccessResult(await projectAdapter.generateMissing({
+              identity,
+              user,
+              ...(retryTarget ? { retryTarget } : {}),
+            })),
+          };
+        }
+      }
       if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
       const exactRead = segments.length === 3 && request.method === "GET" && pin;
       const identity = exactRead && typeof context.overviewAiWorkflow.resolveReadIdentity === "function"
@@ -675,6 +725,7 @@ export const handleEnergyApiRequest = async (
       const service = createProjectOverviewAdminReadinessService({
         metadataStore: context.metadataStore,
         ...(context.overviewAiWorkflow ? { overviewAiWorkflow: context.overviewAiWorkflow } : {}),
+        projectOverviewAiAdapters: context.projectOverviewAiAdapters,
       });
       return {
         status: 200,
@@ -730,6 +781,7 @@ export const handleEnergyApiRequest = async (
         metadataStore: context.metadataStore,
         overviewAiWorkflow: context.overviewAiWorkflow,
         overviewAiExecutor: context.overviewAiWorkflow,
+        projectOverviewAiAdapters: context.projectOverviewAiAdapters,
         ...(context.additionalAiInsightsWorkflow
           ? { additionalAiInsightsWorkflow: context.additionalAiInsightsWorkflow }
           : {}),

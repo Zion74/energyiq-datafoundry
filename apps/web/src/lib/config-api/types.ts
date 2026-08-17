@@ -2259,7 +2259,7 @@ export type EnergyProjectOverviewAdminStateDto = {
   } | null;
   capabilities: {
     keyFindings: boolean;
-    sectionAnalysis: PreschoolOverviewAiSectionIdDto[];
+    sectionAnalysis: string[];
     additionalInsights: boolean;
   };
   analysis: {

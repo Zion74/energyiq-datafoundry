@@ -765,6 +765,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         additionalAiInsightsWorkflow,
         additionalAiInsightsEvaluationWorkflow,
         overviewAiWorkflow,
+        projectOverviewAiAdapters: [],
         templateChangeWorkflow,
         runCancelRegistry,
         userId: authContext.user.id,

@@ -753,17 +753,58 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
-  it("does not invent Preschool AI Sections for Ngee Ann and keeps the read side-effect free", async () => {
+  it("derives Ngee Ann Admin readiness from the same exact Project adapter without generation", async () => {
     const harness = await createHarness();
     try {
-      const read = vi.fn();
-      const execute = vi.fn();
-      const resolveCurrentIdentity = vi.fn();
       const ngeeAnnProject = harness.metadata.energyIq.getProject("ngee-ann-polytechnic");
+      const identity = {
+        ...harness.identity,
+        workspaceId: ngeeAnnProject.workspace_id,
+        projectId: ngeeAnnProject.id,
+        scopeId: ngeeAnnProject.root_scope_id,
+        rendererKey: "ngee-ann-overview",
+        dataSnapshotId: "ngee-snapshot-current",
+        projectReleaseId: "ngee-release-current",
+      };
+      const resolveIdentity = vi.fn().mockResolvedValue(identity);
+      const readExact = vi.fn().mockResolvedValue({
+        contract: "energyiq-project-overview-ai-read-model@1",
+        rendererKey: "ngee-ann-overview",
+        binding: {
+          workspaceId: identity.workspaceId,
+          projectId: identity.projectId,
+          scopeId: identity.scopeId,
+          dataSnapshotId: identity.dataSnapshotId,
+          projectReleaseId: identity.projectReleaseId,
+          analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+          modelProfileId: identity.modelProfileId,
+          modelProfileRevision: identity.modelProfileRevision,
+        },
+        keyFindings: { status: "unavailable", reason: "Key Findings has not been generated." },
+        sections: {
+          "trend-and-demand": { status: "unavailable", reason: "Not generated." },
+          "time-behaviour": { status: "unavailable", reason: "Not generated." },
+          "circuit-concentration": { status: "unavailable", reason: "Not generated." },
+          "decision-priorities": { status: "unavailable", reason: "Not generated." },
+        },
+        additionalInsights: { status: "unavailable", reason: "Not generated." },
+      });
+      const generateMissing = vi.fn();
       const context = {
         ...harness.context,
         workspaceId: ngeeAnnProject.workspace_id,
-        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        projectOverviewAiAdapters: [{
+          rendererKey: "ngee-ann-overview",
+          sections: [
+            { id: "trend-and-demand", label: "Trend and demand" },
+            { id: "time-behaviour", label: "Time behaviour" },
+            { id: "circuit-concentration", label: "Circuit concentration" },
+            { id: "decision-priorities", label: "Decision priorities" },
+          ],
+          resolveIdentity,
+          readExact,
+          generateMissing,
+        }],
       } as unknown as Required<ConfigApiContext>;
 
       const response = await handleEnergyApiRequest(
@@ -780,19 +821,34 @@ describe("Overview AI Artifact API", () => {
             projectId: "ngee-ann-polytechnic",
             customerOverview: { status: "ready" },
             capabilities: {
-              keyFindings: false,
-              sectionAnalysis: [],
-              additionalInsights: false,
+              keyFindings: true,
+              sectionAnalysis: [
+                "trend-and-demand",
+                "time-behaviour",
+                "circuit-concentration",
+                "decision-priorities",
+              ],
+              additionalInsights: true,
             },
-            analysis: { supported: false, items: [] },
-            allowedActions: [],
-            recommendedNextAction: null,
+            analysis: {
+              supported: true,
+              totalCount: 6,
+              items: expect.arrayContaining([
+                expect.objectContaining({ id: "section:trend-and-demand", status: "not-generated" }),
+                expect.objectContaining({ id: "section:decision-priorities", status: "not-generated" }),
+              ]),
+            },
+            allowedActions: ["generate-missing"],
+            recommendedNextAction: { action: "generate-missing" },
           },
         },
       });
-      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
-      expect(read).not.toHaveBeenCalled();
-      expect(execute).not.toHaveBeenCalled();
+      expect(resolveIdentity).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: "ngee-ann-polytechnic",
+        request: { kind: "current" },
+      }));
+      expect(readExact).toHaveBeenCalledWith({ identity, user: expect.objectContaining({ id: "dev-user" }) });
+      expect(generateMissing).not.toHaveBeenCalled();
     } finally {
       harness.close();
     }
@@ -1030,6 +1086,115 @@ describe("Overview AI Artifact API", () => {
         retryTarget: "centre-benchmark",
       });
       expect(executeAdditional).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("restores an exact pinned Ngee Ann Layer 1–3 read model through the Project adapter without generation", async () => {
+    const harness = await createHarness();
+    try {
+      const ngeeAnnProject = harness.metadata.energyIq.getProject("ngee-ann-polytechnic");
+      const pin = {
+        from: "2026-05-20",
+        to: "2026-06-16",
+        dataSnapshotId: "ngee-snapshot-current",
+        projectReleaseId: "ngee-release-current",
+      };
+      const identity = {
+        ...harness.identity,
+        workspaceId: ngeeAnnProject.workspace_id,
+        projectId: ngeeAnnProject.id,
+        scopeId: ngeeAnnProject.root_scope_id,
+        rendererKey: "ngee-ann-overview",
+        dataSnapshotId: pin.dataSnapshotId,
+        projectReleaseId: pin.projectReleaseId,
+        analysisPeriodFrom: "2026-05-19T16:00:00.000Z",
+        analysisPeriodTo: "2026-06-16T16:00:00.000Z",
+      };
+      const readModel = {
+        contract: "energyiq-project-overview-ai-read-model@1",
+        rendererKey: "ngee-ann-overview",
+        binding: {
+          workspaceId: identity.workspaceId,
+          projectId: identity.projectId,
+          scopeId: identity.scopeId,
+          dataSnapshotId: identity.dataSnapshotId,
+          projectReleaseId: identity.projectReleaseId,
+          analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+          modelProfileId: identity.modelProfileId,
+          modelProfileRevision: identity.modelProfileRevision,
+        },
+        keyFindings: { status: "unavailable", reason: "Key Findings has not been generated." },
+        sections: {
+          "trend-and-demand": { status: "unavailable", reason: "Not generated." },
+          "time-behaviour": { status: "unavailable", reason: "Not generated." },
+          "circuit-concentration": { status: "unavailable", reason: "Not generated." },
+          "decision-priorities": { status: "unavailable", reason: "Not generated." },
+        },
+        additionalInsights: { status: "unavailable", reason: "Not generated." },
+      };
+      const resolveIdentity = vi.fn().mockResolvedValue(identity);
+      const readExact = vi.fn().mockResolvedValue(readModel);
+      const generateMissing = vi.fn();
+      const context = {
+        ...harness.context,
+        workspaceId: ngeeAnnProject.workspace_id,
+        overviewAiWorkflow: {
+          resolveReadIdentity: vi.fn(() => { throw new Error("PRESCHOOL_PATH_MUST_NOT_RUN"); }),
+          resolveCurrentIdentity: vi.fn(() => { throw new Error("PRESCHOOL_PATH_MUST_NOT_RUN"); }),
+          read: vi.fn(),
+          execute: vi.fn(),
+        },
+        projectOverviewAiAdapters: [{
+          rendererKey: "ngee-ann-overview",
+          sections: [
+            { id: "trend-and-demand", label: "Trend and demand" },
+            { id: "time-behaviour", label: "Time behaviour" },
+            { id: "circuit-concentration", label: "Circuit concentration" },
+            { id: "decision-priorities", label: "Decision priorities" },
+          ],
+          resolveIdentity,
+          readExact,
+          generateMissing,
+        }],
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/ngee-ann-polytechnic/overview-ai-artifact?scopeId=${encodeURIComponent(ngeeAnnProject.root_scope_id)}&from=${pin.from}&to=${pin.to}&dataSnapshotId=${pin.dataSnapshotId}&projectReleaseId=${pin.projectReleaseId}`),
+        ["projects", "ngee-ann-polytechnic", "overview-ai-artifact"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: {
+          success: true,
+          data: {
+            contract: "energyiq-project-overview-ai-read-model@1",
+            rendererKey: "ngee-ann-overview",
+            binding: {
+              dataSnapshotId: pin.dataSnapshotId,
+              projectReleaseId: pin.projectReleaseId,
+            },
+            sections: {
+              "trend-and-demand": { status: "unavailable" },
+              "time-behaviour": { status: "unavailable" },
+              "circuit-concentration": { status: "unavailable" },
+              "decision-priorities": { status: "unavailable" },
+            },
+          },
+        },
+      });
+      expect(JSON.stringify(response)).not.toMatch(/centre-benchmark|standby-wastage|operating-behaviour|planning-outlook/u);
+      expect(resolveIdentity).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: "ngee-ann-polytechnic",
+        scopeId: ngeeAnnProject.root_scope_id,
+        request: { kind: "pinned", pin },
+      }));
+      expect(readExact).toHaveBeenCalledWith({ identity, user: expect.objectContaining({ id: "dev-user" }) });
+      expect(generateMissing).not.toHaveBeenCalled();
     } finally {
       harness.close();
     }
