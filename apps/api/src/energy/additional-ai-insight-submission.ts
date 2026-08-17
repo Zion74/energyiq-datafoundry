@@ -59,18 +59,27 @@ export const collectAdditionalAiInsightSubmission = (
       || attempt.resultIndex === undefined
       || attempt.resultIndex <= startIndex) return [];
     const parsed = parseResult(attempt.result);
-    return isRecord(parsed) ? [{ parsed }] : [];
+    return isRecord(parsed) ? [{ id, parsed, startIndex }] : [];
   });
   if (results.length !== starts.length) return null;
-  const successes = results.flatMap(({ parsed }, attemptIndex) => {
+  const successes = results.flatMap(({ id, parsed, startIndex }, attemptIndex) => {
     if (!isRecord(parsed)
       || parsed.ok !== true
       || parsed.resultType !== "additional-ai-insight-submission"
       || !isRecord(parsed.payload)
       || !Array.isArray(parsed.payload.candidates)
       || Object.keys(parsed.payload).length !== 1) return [];
-    return [{ candidates: parsed.payload.candidates, attemptIndex }];
+    return [{ candidates: parsed.payload.candidates, attemptIndex, id, startIndex }];
   });
   if (successes.length !== 1 || successes[0]!.attemptIndex !== starts.length - 1) return null;
-  return { candidates: successes[0]!.candidates };
+  const successful = successes[0]!;
+  const nonSubmissionCallIds = new Set([...attempts.entries()].flatMap(([id, attempt]) =>
+    id !== successful.id && attempt.name !== ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME ? [id] : []));
+  const hasPostSubmissionToolActivity = events.slice(successful.startIndex + 1).some((event) => {
+    const id = nonEmptyString(event.toolCallId)
+      ? event.toolCallId
+      : nonEmptyString(event.tool_call_id) ? event.tool_call_id : null;
+    return id !== null && nonSubmissionCallIds.has(id);
+  });
+  return hasPostSubmissionToolActivity ? null : { candidates: successful.candidates };
 };

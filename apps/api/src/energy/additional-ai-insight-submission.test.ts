@@ -67,4 +67,26 @@ describe("Additional AI Insight structured submission", () => {
       start("submit-2"), result("submit-2", rejected),
     ])).toBeNull();
   });
+
+  it("fails closed when any Evidence tool is still active after the successful submission starts", () => {
+    expect(collectAdditionalAiInsightSubmission([
+      start("submit-1"),
+      result("submit-1", {
+        ok: true,
+        resultType: "additional-ai-insight-submission",
+        payload: { candidates: [{ id: "candidate-1", toolAuditIds: ["future-audit"] }] },
+      }),
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: "evidence-after-submit",
+        toolCallName: "energy_evidence_read",
+      },
+      {
+        type: "TOOL_CALL_RESULT",
+        toolCallId: "evidence-after-submit",
+        toolCallName: "energy_evidence_read",
+        result: { ok: true, auditId: "future-audit" },
+      },
+    ])).toBeNull();
+  });
 });

@@ -1941,7 +1941,8 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(artifact).toMatchObject({ status: "available" });
       expect(receivedPrompt).toContain(ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1);
       expect(receivedPrompt).toContain("Zero candidates is valid");
-      expect(receivedPrompt).toContain("The first character must be { and the last character must be }");
+      expect(receivedPrompt).toContain("Call energyiq_additional_insights_submit once");
+      expect(receivedPrompt).toContain("After a successful submission, stop immediately");
       expect(receivedPrompt).toContain("title must be 100 characters or fewer");
       expect(receivedPrompt).toContain("toolAuditIds is required; use [] when no tool was called");
       expect(receivedPrompt).toContain("ai-discovery must contain exactly kind and directionMethodResourceIds");

@@ -1345,6 +1345,7 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const historicalV18Identity = historicalAdditionalIdentityV18(currentIdentity);
       const historicalV19Identity = historicalAdditionalIdentityV19(currentIdentity);
       const historicalV20Identity = historicalAdditionalIdentityV20(currentIdentity);
+      const historicalV21Identity = historicalAdditionalIdentityV21(currentIdentity);
       seedHistoricalTerminalArtifact({
         databasePath,
         source: currentArtifact,
@@ -1435,6 +1436,11 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
         source: currentArtifact,
         identity: historicalV20Identity,
       });
+      seedHistoricalTerminalArtifact({
+        databasePath,
+        source: currentArtifact,
+        identity: historicalV21Identity,
+      });
       const historicalArtifact = metadata.energyIq.overviewAiArtifacts.get(historicalIdentity);
       const historicalV4Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV4Identity);
       const historicalV5Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV5Identity);
@@ -1453,6 +1459,7 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const historicalV18Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV18Identity);
       const historicalV19Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV19Identity);
       const historicalV20Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV20Identity);
+      const historicalV21Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV21Identity);
       const proposal = metadata.energyIq.insightMethodGovernance.createProposal({
         expectedWorkspaceId: "artifact-workspace",
         expectedProjectId: "artifact-project",
@@ -1521,6 +1528,12 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV19Identity)).toEqual(historicalV19Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.find(historicalV20Identity)).toEqual(historicalV20Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV20Identity)).toEqual(historicalV20Artifact);
+      expect(metadata.energyIq.overviewAiArtifacts.find(historicalV21Identity)).toEqual(historicalV21Artifact);
+      expect(metadata.energyIq.overviewAiArtifacts.get(historicalV21Identity)).toEqual(historicalV21Artifact);
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: historicalV21Identity,
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
       expect(() => metadata.energyIq.overviewAiArtifacts.queue({
         identity: historicalV20Identity,
         triggeredBy: "dev-user",

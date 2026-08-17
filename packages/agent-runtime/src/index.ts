@@ -369,7 +369,8 @@ const assertTrustedStageFinalTools = (
   }
   if (capability === undefined
     && toolNames.some((toolName) =>
-      (ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 as readonly string[]).includes(toolName))) {
+      (ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 as readonly string[]).includes(toolName)
+      || toolName === ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME)) {
     throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
   }
 };

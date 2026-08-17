@@ -183,6 +183,13 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
       mcpToolNames: [...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1],
       mcpTools: createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1),
     })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+
+    await expect(createEnergyIqAgent([], {
+      energyIqContext: false,
+      explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+      mcpToolNames: ["energyiq_additional_insights_submit"],
+      mcpTools: createNamedTools(["energyiq_additional_insights_submit"]),
+    })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
   });
 
   it("attaches no tools when a bounded value stage disables tools", async () => {
