@@ -44,6 +44,20 @@ describe("Saved Analysis Project AI", () => {
     await expect(runSavedAnalysisAiForSnapshot(snapshot)).resolves.toBeNull();
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it("does not offer a Saved AI attachment when every unit only failed or is unavailable", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const failed = readModel(snapshot);
+    failed.keyFindings = { status: "failed", artifactId: "artifact:executive", reason: "failed" };
+    failed.sections = Object.fromEntries(Object.keys(failed.sections).map((sectionId) => [
+      sectionId,
+      { status: "failed", artifactId: `artifact:${sectionId}`, reason: "failed" },
+    ]));
+    failed.additionalInsights = { status: "unavailable", reason: "unavailable" };
+    vi.spyOn(configApi, "getEnergyProjectOverviewAiReadModel").mockResolvedValue(failed);
+
+    await expect(runSavedAnalysisAiForSnapshot(snapshot)).resolves.toBeNull();
+  });
 });
 
 const readModel = (snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>): EnergyProjectOverviewAiReadModelDto => ({

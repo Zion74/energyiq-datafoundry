@@ -2217,7 +2217,9 @@ const parseStoredSavedAnalysisAiArtifact = (
   } catch {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
-  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot, {
+    allowLegacyProjectEmptyWithoutRunId: true,
+  });
   if (!isRecord(value) || typeof value.completedAt !== "string" || !Number.isFinite(Date.parse(value.completedAt))) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
@@ -2245,6 +2247,7 @@ const parseSavedAnalysisAiRunProvenance = (
 const parseSavedAnalysisAiArtifactInput = (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
+  options: { allowLegacyProjectEmptyWithoutRunId?: boolean } = {},
 ): SavedAnalysisAiArtifactInput => {
   if (isRecord(value) && value.contract === "energyiq-saved-ai-result@2") {
     if (value.rendererKey !== "preschool-overview"
@@ -2266,11 +2269,16 @@ const parseSavedAnalysisAiArtifactInput = (
       || snapshot.renderer.key !== "ngee-ann-overview"
       || value.snapshotId !== snapshot.dataSnapshot.id
       || value.projectReleaseId !== snapshot.projectRelease.id
-      || !isNgeeAnnProjectSavedResult(value.result, snapshot)) {
+      || !isNgeeAnnProjectSavedResult(
+        value.result,
+        snapshot,
+        options.allowLegacyProjectEmptyWithoutRunId === true,
+      )) {
       throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
     }
     const artifact = value as unknown as SavedAnalysisAiProjectArtifactInput;
-    if (savedAnalysisAiRunIds(artifact.result).length === 0
+    if ((!options.allowLegacyProjectEmptyWithoutRunId
+        && savedAnalysisAiRunIds(artifact.result).length === 0)
       || JSON.stringify(artifact).length > 262_144) {
       throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
     }
@@ -2380,6 +2388,7 @@ const NGEE_ANN_SAVED_SECTION_IDS = [
 const isNgeeAnnProjectSavedResult = (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
+  allowLegacyEmptyWithoutRunId = false,
 ): value is ProjectOverviewAiReadModel => isProjectOverviewAiReadModel(value)
   && value.rendererKey === "ngee-ann-overview"
   && value.binding.workspaceId === snapshot.context.workspaceId
@@ -2390,7 +2399,8 @@ const isNgeeAnnProjectSavedResult = (
   && value.binding.analysisPeriod.from === snapshot.context.primaryPeriod.start
   && value.binding.analysisPeriod.to === snapshot.context.primaryPeriod.endExclusive
   && Object.keys(value.sections).sort().join("|") === [...NGEE_ANN_SAVED_SECTION_IDS].sort().join("|")
-  && projectOverviewSavedUnits(value).every(isTerminalProjectOverviewSavedUnit);
+  && projectOverviewSavedUnits(value).every((unit) =>
+    isTerminalProjectOverviewSavedUnit(unit, allowLegacyEmptyWithoutRunId));
 
 const isProjectOverviewAiReadModel = (value: unknown): value is ProjectOverviewAiReadModel => isRecord(value)
   && value.contract === "energyiq-project-overview-ai-read-model@1"
@@ -2417,7 +2427,10 @@ const projectOverviewSavedUnits = (value: ProjectOverviewAiReadModel): unknown[]
   value.additionalInsights,
 ];
 
-const isTerminalProjectOverviewSavedUnit = (value: unknown): boolean => {
+const isTerminalProjectOverviewSavedUnit = (
+  value: unknown,
+  allowLegacyEmptyWithoutRunId: boolean,
+): boolean => {
   if (!isRecord(value)) return false;
   if (value.status === "available") {
     return typeof value.artifactId === "string"
@@ -2430,8 +2443,8 @@ const isTerminalProjectOverviewSavedUnit = (value: unknown): boolean => {
   if (value.status === "empty") {
     return typeof value.artifactId === "string"
       && value.artifactId.trim().length > 0
-      && typeof value.runId === "string"
-      && value.runId.trim().length > 0;
+      && (allowLegacyEmptyWithoutRunId
+        || (typeof value.runId === "string" && value.runId.trim().length > 0));
   }
   if (value.status === "failed" || value.status === "unavailable") {
     return typeof value.reason === "string" && value.reason.trim().length > 0;

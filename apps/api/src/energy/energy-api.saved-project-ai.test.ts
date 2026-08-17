@@ -76,6 +76,7 @@ describe("Ngee Ann Saved Project AI", () => {
         modelProfileRevision: 8,
       });
       const runId = "saved-ngee-project-ai-run";
+      const emptyRunId = "saved-ngee-project-ai-empty-run";
       const model: ProjectOverviewAiReadModel = {
         contract: "energyiq-project-overview-ai-read-model@1",
         rendererKey: "ngee-ann-overview",
@@ -97,7 +98,7 @@ describe("Ngee Ann Saved Project AI", () => {
           "circuit-concentration",
           "decision-priorities",
         ].map((sectionId) => [sectionId, sectionId === "time-behaviour"
-          ? emptyUnit(sectionId, runId)
+          ? emptyUnit(sectionId, emptyRunId)
           : availableUnit(sectionId, runId)])),
         additionalInsights: availableUnit("additional", runId),
       };
@@ -126,6 +127,16 @@ describe("Ngee Ann Saved Project AI", () => {
         model_name: "saved-ngee-test-model",
       });
       metadata.runs.updateStatus({ user_id: "dev-user", run_id: runId, status: "completed" });
+      metadata.runs.create({
+        id: emptyRunId,
+        user_id: "dev-user",
+        session_id: "saved-ngee-project-ai-session",
+        status: "running",
+        user_input: `Snapshot ${project.data_snapshot_id}; Release ${templateRevision.revision_id}; empty Section`,
+        model_provider: "openai-compatible",
+        model_name: "saved-ngee-test-model",
+      });
+      metadata.runs.updateStatus({ user_id: "dev-user", run_id: emptyRunId, status: "completed" });
       const saved = metadata.energyIq.savedAnalyses.create({
         id: "saved-analysis-ngee-project-ai",
         series_id: "saved-analysis-ngee-project-ai-series",
@@ -169,12 +180,12 @@ describe("Ngee Ann Saved Project AI", () => {
 
       const emptyModel: ProjectOverviewAiReadModel = {
         ...model,
-        keyFindings: emptyUnit("executive-empty", runId),
+        keyFindings: emptyUnit("executive-empty", emptyRunId),
         sections: Object.fromEntries(Object.keys(model.sections).map((sectionId) => [
           sectionId,
-          emptyUnit(`${sectionId}-empty`, runId),
+          emptyUnit(`${sectionId}-empty`, emptyRunId),
         ])),
-        additionalInsights: emptyUnit("additional-empty", runId),
+        additionalInsights: emptyUnit("additional-empty", emptyRunId),
       };
       const emptySaved = metadata.energyIq.savedAnalyses.create({
         ...saved,
@@ -188,6 +199,34 @@ describe("Ngee Ann Saved Project AI", () => {
         ["projects", project.id, "saved-analyses", emptySaved.id, "ai-result"],
         context,
       )).toMatchObject({ status: 200, body: { success: true } });
+
+      const historicalEmptyModel = structuredClone(emptyModel);
+      for (const unit of [
+        historicalEmptyModel.keyFindings,
+        ...Object.values(historicalEmptyModel.sections),
+        historicalEmptyModel.additionalInsights,
+      ]) {
+        if (unit.status === "empty") delete unit.runId;
+      }
+      const historicalSaved = metadata.energyIq.savedAnalyses.create({
+        ...saved,
+        id: "saved-analysis-ngee-project-ai-historical-empty",
+        series_id: "saved-analysis-ngee-project-ai-historical-empty-series",
+        title: "Ngee AI historical empty",
+        ai_result_json: JSON.stringify({
+          ...artifact,
+          result: historicalEmptyModel,
+          completedAt: "2026-08-17T00:00:00.000Z",
+        }),
+      });
+      expect(await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", project.id, "saved-analyses", historicalSaved.id],
+        context,
+      )).toMatchObject({
+        status: 200,
+        body: { success: true, data: { aiArtifact: { result: historicalEmptyModel } } },
+      });
 
       const tampered = structuredClone(model);
       (tampered.keyFindings as Extract<typeof tampered.keyFindings, { status: "available" }>).result = {

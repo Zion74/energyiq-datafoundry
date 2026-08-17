@@ -14,7 +14,8 @@ export async function runSavedAnalysisAiForSnapshot(
       snapshot.context.projectId,
       snapshot.context.scopeId,
     );
-    if (!isExactTerminalNgeeAnnReadModel(result, snapshot)) return null;
+    if (!isExactTerminalNgeeAnnReadModel(result, snapshot)
+      || !hasSavableNgeeAnnRunProvenance(result)) return null;
     return {
       contract: "energyiq-saved-ai-result@3",
       rendererKey: "ngee-ann-overview",
@@ -82,3 +83,13 @@ const terminal = (status: string): boolean => status === "available"
   || status === "empty"
   || status === "failed"
   || status === "unavailable";
+
+const hasSavableNgeeAnnRunProvenance = (value: EnergyProjectOverviewAiReadModelDto): boolean => [
+  value.keyFindings,
+  value.sections["trend-and-demand"],
+  value.sections["time-behaviour"],
+  value.sections["circuit-concentration"],
+  value.sections["decision-priorities"],
+  value.additionalInsights,
+].some((unit) => unit?.status === "available"
+  || (unit?.status === "empty" && typeof unit.runId === "string" && unit.runId.trim().length > 0));
