@@ -354,7 +354,7 @@ const buildExecutivePromptV4 = (
     "Qualify the Summary sentence, Finding title, and every Finding sentence independently. A cautious word in the body never makes an unqualified headline safe.",
     "A Section screening priority does not mean that Centre dominates total energy. Do not use 'dominated', 'proves', or 'confirms' unless that exact relationship is explicit in the cited source narrative.",
     "Different named circuits may form a management theme, but they do not prove shared equipment or a shared cause; keep that connection explicitly possible or separate.",
-    "Return one concise answer-first summary and 0-3 compact findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
+    "Return one concise answer-first summary and 1-3 compact cross-Section findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
     `Presentation limits only — Summary: target at most ${PRESCHOOL_EXECUTIVE_SUMMARY_TARGET_CHARS} characters and three sentences (hard validation limit ${PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS}); finding title: at most ${PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS} characters; finding text: at most ${PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS} characters. Preserve the best supported analytical angle within those limits.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Evidence labels may still use portfolio.",
     "Narrative text may use only limited inline **bold** and _italics_; do not return headings, links, images, HTML, code, tables, or custom styling.",
@@ -647,6 +647,9 @@ const materializeExecutiveResultV4 = (input: {
       ...(alert ? { alert } : {}),
     }];
   });
+  if (findings.length === 0) {
+    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_NO_SUPPORTED_FINDINGS");
+  }
   let publishedSummaryText = summaryText;
   let publishedSummaryEvidenceRefs = summaryEvidenceRefs;
   if (summaryIsSupported) {
@@ -654,7 +657,7 @@ const materializeExecutiveResultV4 = (input: {
     for (const factId of summaryOverviewFactIds) usedOverviewFactIds.add(factId);
   } else {
     const fallback = findings[0];
-    if (!fallback) return emptyResultV4(input.identity, input.runId);
+    if (!fallback) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_NO_SUPPORTED_FINDINGS");
     publishedSummaryText = /[.!?]$/u.test(fallback.title) ? fallback.title : `${fallback.title}.`;
     publishedSummaryEvidenceRefs = [...fallback.evidenceRefs];
   }
@@ -662,7 +665,9 @@ const materializeExecutiveResultV4 = (input: {
     const accepted = acceptedBySection.get(sectionId);
     return contributingSections.has(sectionId) && accepted ? [accepted.artifactId] : [];
   });
-  if (sourceSectionArtifactIds.length < 2) return emptyResultV4(input.identity, input.runId);
+  if (sourceSectionArtifactIds.length < 2) {
+    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_NO_SUPPORTED_FINDINGS");
+  }
   return {
     artifactKind: "executive-synthesis",
     status: "available",

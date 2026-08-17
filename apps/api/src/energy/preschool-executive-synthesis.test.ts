@@ -467,8 +467,8 @@ describe("Preschool Executive Synthesis", () => {
             evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary"],
           },
           findings: [{
-            title: "One cross-Section pattern stands out",
-            text: "The accepted benchmark and operating insights point in the same direction.",
+            title: "A possible cross-Section pattern stands out",
+            text: "The accepted benchmark and operating insights may point in the same direction.",
             sectionIds: ["centre-benchmark", "operating-behaviour"],
             evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
           }],
@@ -509,8 +509,8 @@ describe("Preschool Executive Synthesis", () => {
               evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary"],
             },
             findings: [{
-              title: "One cross-Section pattern stands out",
-              text: "The accepted benchmark and operating insights point in the same direction.",
+              title: "A possible cross-Section pattern stands out",
+              text: "The accepted benchmark and operating insights may point in the same direction.",
               sectionIds: ["centre-benchmark", "operating-behaviour"],
               evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
             }],
@@ -564,12 +564,20 @@ describe("Preschool Executive Synthesis", () => {
             text: "The benchmark and standby Sections provide the summary context.",
             evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:standby-wastage:summary"],
           },
-          findings: [{
-            title: "Mismatched lineage",
-            text: "This finding claims to connect the benchmark and standby Sections.",
-            sectionIds: ["centre-benchmark", "standby-wastage"],
-            evidenceRefs: ["evidence:operating-behaviour:insight"],
-          }],
+          findings: [
+            {
+              title: "Mismatched lineage",
+              text: "This finding claims to connect the benchmark and standby Sections.",
+              sectionIds: ["centre-benchmark", "standby-wastage"],
+              evidenceRefs: ["evidence:operating-behaviour:insight"],
+            },
+            {
+              title: "A possible benchmark and standby connection",
+              text: "The accepted benchmark and standby insights may warrant review together.",
+              sectionIds: ["centre-benchmark", "standby-wastage"],
+              evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
+            },
+          ],
         }),
         runId: input.runId,
         sessionId: input.sessionId,
@@ -583,7 +591,9 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
       sourceSectionArtifactIds: [benchmark.id, standby.id],
-      findings: [],
+      findings: [expect.objectContaining({
+        title: "A possible benchmark and standby connection",
+      })],
     });
     expect(storedBenchmark).toEqual(benchmark);
   });
@@ -752,7 +762,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v21",
+      validatorRevision: "preschool-executive-synthesis-validator-v22",
       workflowRevision: "preschool-executive-synthesis-v12",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v12",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
@@ -930,7 +940,7 @@ describe("Preschool Executive Synthesis", () => {
           },
           findings: [{
             title: "Operating evidence remains available",
-            text: "The accepted benchmark and operating evidence support a focused cross-Section review.",
+            text: "The accepted benchmark and operating evidence may support a focused cross-Section review.",
             sectionIds: ["centre-benchmark", "operating-behaviour"],
             evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
           }],
@@ -1175,6 +1185,74 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact).toMatchObject({
       status: "failed",
       error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_EMPTY_UNSUPPORTED",
+    });
+  });
+
+  it("fails retryably when local review rejects every model-declared Key Finding", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Current centre-benchmark summary.",
+            evidenceRefs: ["evidence:centre-benchmark:summary"],
+          },
+          findings: [{
+            title: "Benchmark finding copied from one Section",
+            text: "Current centre-benchmark summary.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:summary"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_NO_SUPPORTED_FINDINGS",
+    });
+  });
+
+  it("fails retryably when a supported cross-Section summary has no Key Finding", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Benchmark and standby patterns may warrant a coordinated review.",
+            evidenceRefs: [
+              "evidence:centre-benchmark:summary",
+              "evidence:standby-wastage:summary",
+            ],
+          },
+          findings: [],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_NO_SUPPORTED_FINDINGS",
     });
   });
 
