@@ -266,8 +266,8 @@ const parseFinding = (
 ): NgeeAnnExecutiveFinding | null => {
   if (!isRecord(value)
     || !boundedString(value.id, 160)
-    || !boundedString(value.title, 96)
-    || !boundedString(value.text, 480)
+    || !boundedString(value.title, 120)
+    || !boundedString(value.text, 720)
     || (value.epistemicStatus !== "observed"
       && value.epistemicStatus !== "inferred"
       && value.epistemicStatus !== "speculative")
@@ -290,25 +290,27 @@ const parseFinding = (
   ]));
   if (!validRefs(evidenceRefs, evidenceIds)) return null;
   const sourceInsights = sourceInsightIds.map((id) => insightById.get(id as string)!).filter(Boolean);
-  if (!epistemicFloor(value.epistemicStatus, sourceInsights)
-    || !numbersSupported(`${value.title} ${value.text}`, sourceText)) return null;
+  if (!numbersSupported(`${value.title} ${value.text}`, sourceText)) return null;
+  const epistemicStatus = lowerToSourceUncertainty(value.epistemicStatus, sourceInsights);
   return {
     id: value.id,
     title: value.title,
     text: value.text,
-    epistemicStatus: value.epistemicStatus,
+    epistemicStatus,
     sectionIds: [...sectionIds] as NgeeAnnSectionId[],
     sourceInsightIds: [...sourceInsightIds] as string[],
     evidenceRefs: [...evidenceRefs] as string[],
   };
 };
 
-const epistemicFloor = (
+const lowerToSourceUncertainty = (
   proposed: NgeeAnnExecutiveFinding["epistemicStatus"],
   sources: NgeeAnnSectionInsight[],
-): boolean => {
+): NgeeAnnExecutiveFinding["epistemicStatus"] => {
   const rank = { observed: 0, inferred: 1, speculative: 2 } as const;
-  return rank[proposed] >= Math.max(0, ...sources.map(({ epistemicStatus }) => rank[epistemicStatus]));
+  const floor = Math.max(rank[proposed], ...sources.map(({ epistemicStatus }) => rank[epistemicStatus]));
+  return (Object.keys(rank) as Array<keyof typeof rank>).find((status) => rank[status] === floor)
+    ?? "speculative";
 };
 
 const resultBase = (

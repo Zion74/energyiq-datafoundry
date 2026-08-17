@@ -61,7 +61,7 @@ describe("Overview AI server stage options", () => {
   it("reserves the larger complete-projection message budget only for the exact Ngee Ann Section identity", () => {
     const identity = {
       rendererKey: "ngee-ann-overview",
-      identityContractRevision: "ngee-ann-section-v2",
+      identityContractRevision: "ngee-ann-section-v3",
     } as EnergyIqOverviewAiArtifactIdentity;
     expect(resolveOverviewAiServerRunnerOptions({
       stage: "section-interpreter",

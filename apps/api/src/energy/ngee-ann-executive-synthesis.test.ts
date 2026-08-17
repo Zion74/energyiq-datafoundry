@@ -55,7 +55,7 @@ describe("Ngee Ann Executive Synthesis", () => {
     });
   });
 
-  it("does not upgrade a speculative Section angle to an observed Executive fact", () => {
+  it("preserves a useful Executive finding while lowering it to the source uncertainty", () => {
     const sources = sourceSections();
     const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
       baseIdentity: baseIdentity(),
@@ -80,7 +80,43 @@ describe("Ngee Ann Executive Synthesis", () => {
       }),
     });
 
-    expect(result.findings).toEqual([]);
+    expect(result.findings).toEqual([expect.objectContaining({
+      id: "finding:upgrade",
+      epistemicStatus: "speculative",
+    })]);
+  });
+
+  it("keeps a readable cross-Section finding beyond the old card cut-off", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:readable-long-form",
+    });
+    const longText = `The accepted Sections support a useful cross-Section management conclusion. ${"It keeps the reasoning visible while preserving exact source lineage. ".repeat(7)}`;
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-long-form",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: `The current data supports a concise management reading. ${"The conclusion remains tied to both accepted Sections. ".repeat(9)}`,
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:readable-long-form",
+          title: "Peak demand and hourly concentration support one coordinated management question",
+          text: longText,
+          epistemicStatus: "speculative",
+          sectionIds: ["trend-and-demand", "time-behaviour"],
+          sourceInsightIds: ["insight:trend", "insight:time"],
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        }],
+      }),
+    });
+
+    expect(longText.length).toBeGreaterThan(480);
+    expect(result.findings).toEqual([expect.objectContaining({ id: "finding:readable-long-form" })]);
   });
 
   it("rotates the Executive target when any contributing Section Artifact changes", () => {

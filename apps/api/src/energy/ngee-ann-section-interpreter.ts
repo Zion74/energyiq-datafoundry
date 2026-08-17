@@ -16,9 +16,9 @@ import type {
 import { NGEE_ANN_SECTION_IDS } from "./ngee-ann-section-pack.js";
 
 const MAX_ANSWER_CHARS = 160_000;
-const MAX_SUMMARY_CHARS = 480;
-const MAX_TITLE_CHARS = 96;
-const MAX_TEXT_CHARS = 480;
+const MAX_SUMMARY_CHARS = 600;
+const MAX_TITLE_CHARS = 120;
+const MAX_TEXT_CHARS = 720;
 const MAX_DEEP_DIVE_CHARS = 220;
 export const NGEE_ANN_SECTION_MESSAGE_MAX_CHARS = 220_000;
 const MAX_PROMPT_CHARS = NGEE_ANN_SECTION_MESSAGE_MAX_CHARS;
@@ -593,7 +593,7 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  if (identity.identityContractRevision !== "ngee-ann-section-v2"
+  if (identity.identityContractRevision !== "ngee-ann-section-v3"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

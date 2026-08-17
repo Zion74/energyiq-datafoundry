@@ -539,7 +539,8 @@ const requireSectionInterpretationResult = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   if (identity.identityContractRevision === "ngee-ann-section-v1"
-    || identity.identityContractRevision === "ngee-ann-section-v2") {
+    || identity.identityContractRevision === "ngee-ann-section-v2"
+    || identity.identityContractRevision === "ngee-ann-section-v3") {
     requireProjectSectionInterpretationResultV1(parsed, identity);
     return;
   }
@@ -570,11 +571,14 @@ const requireProjectSectionInterpretationResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-pack"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
-    || identity.validatorRevision !== "energyiq-project-section-acceptance-v1"
+    || (identity.identityContractRevision === "ngee-ann-section-v3"
+      ? identity.validatorRevision !== "energyiq-project-section-acceptance-v2"
+      : identity.validatorRevision !== "energyiq-project-section-acceptance-v1")
     || identity.workflowRevision !== "energyiq-project-section-discover-publish-v1"
     || (identity.identityContractRevision === "ngee-ann-section-v1"
       ? identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v1"
       : identity.identityContractRevision !== "ngee-ann-section-v2"
+        && identity.identityContractRevision !== "ngee-ann-section-v3"
         || identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v2")
     || identity.capabilityRevision !== "pack-only-v1"
     || identity.publicationRevision !== "energyiq-project-section-publication-v1"
@@ -598,7 +602,7 @@ const requireProjectSectionInterpretationResultV1 = (
     || capability.tools.length !== 0
     || !Array.isArray(insights)
     || insights.length > 3
-    || !insights.every(validSectionInsightV4)
+    || !insights.every(validProjectSectionInsightV1)
     || !validProjectSectionPublicationV1(publication, identity, insights.length)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
@@ -608,12 +612,37 @@ const requireProjectSectionInterpretationResultV1 = (
     }
     return;
   }
-  if (!validSectionSummaryV4(summary)
+  if (!validProjectSectionSummaryV1(summary)
     || !optionalString(parsed.limitation)
     || (typeof parsed.limitation === "string" && parsed.limitation.length > 320)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
+
+const validProjectSectionSummaryV1 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.text)
+  && value.text.length <= 600
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
+
+const validProjectSectionInsightV1 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.title)
+  && value.title.length <= 120
+  && (value.epistemicStatus === "observed"
+    || value.epistemicStatus === "inferred"
+    || value.epistemicStatus === "speculative")
+  && nonEmptyString(value.text)
+  && value.text.length <= 720
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length
+  && optionalString(value.deepDiveQuestion)
+  && (value.deepDiveQuestion === undefined
+    || (typeof value.deepDiveQuestion === "string" && value.deepDiveQuestion.length <= 220));
 
 const validProjectSectionPublicationV1 = (
   value: unknown,
@@ -1081,7 +1110,8 @@ const requireExecutiveSynthesisResult = (
   identity: EnergyIqOverviewAiArtifactIdentity,
   db: DatabaseSync,
 ): void => {
-  if (identity.identityContractRevision === "ngee-ann-executive-v1") {
+  if (identity.identityContractRevision === "ngee-ann-executive-v1"
+    || identity.identityContractRevision === "ngee-ann-executive-v2") {
     requireProjectExecutiveSynthesisResultV1(parsed, identity);
     return;
   }
@@ -1104,7 +1134,9 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-artifacts"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
-    || identity.validatorRevision !== "energyiq-project-executive-acceptance-v1"
+    || (identity.identityContractRevision === "ngee-ann-executive-v2"
+      ? identity.validatorRevision !== "energyiq-project-executive-acceptance-v2"
+      : identity.validatorRevision !== "energyiq-project-executive-acceptance-v1")
     || identity.workflowRevision !== "energyiq-project-executive-synthesis-v1"
     || identity.investigatorPromptRevision !== "energyiq-project-executive-prompt-v1"
     || identity.capabilityRevision !== "section-artifacts-v1"
@@ -1131,7 +1163,7 @@ const requireProjectExecutiveSynthesisResultV1 = (
     }
     return;
   }
-  if (sourceIds.length < 2 || !validSectionSummaryV4(summary)) {
+  if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(summary)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
@@ -1139,9 +1171,9 @@ const requireProjectExecutiveSynthesisResultV1 = (
 const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.id)
   && nonEmptyString(value.title)
-  && value.title.length <= 96
+  && value.title.length <= 120
   && nonEmptyString(value.text)
-  && value.text.length <= 480
+  && value.text.length <= 720
   && (value.epistemicStatus === "observed"
     || value.epistemicStatus === "inferred"
     || value.epistemicStatus === "speculative")
@@ -1152,6 +1184,14 @@ const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(val
   && Array.isArray(value.sourceInsightIds)
   && value.sourceInsightIds.every(nonEmptyString)
   && new Set(value.sourceInsightIds).size === value.sourceInsightIds.length
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
+
+const validProjectExecutiveSummaryV1 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.text)
+  && value.text.length <= 600
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)

@@ -156,6 +156,43 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("keeps a useful summary and insight within the readable Ngee Ann card budget", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const summaryText = `A supported operational pattern matters to the current review. ${"It links the observed schedule to a focused management question. ".repeat(8)}`;
+    const insightText = `This is a supported, decision-relevant explanation of the current hourly pattern. ${"It preserves the useful reasoning instead of deleting the whole card at an arbitrary sentence boundary. ".repeat(6)}`;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "time-behaviour",
+        status: "available",
+        summary: { text: summaryText, evidenceRefs: [evidenceRef] },
+        candidates: [{
+          id: "candidate:readable-long-form",
+          title: "The current schedule supports a focused operational question",
+          text: insightText,
+          epistemicStatus: "inferred",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:readable-long-form",
+    });
+
+    expect(summaryText.length).toBeGreaterThan(480);
+    expect(insightText.length).toBeGreaterThan(480);
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: summaryText },
+      insights: [{ id: "candidate:readable-long-form", text: insightText }],
+    });
+  });
+
   it("rejects an embedded or wrong-root response instead of searching for JSON inside text", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["circuit-concentration"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({

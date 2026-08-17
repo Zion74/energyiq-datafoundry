@@ -45,11 +45,11 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(section).toMatchObject({
       artifactKind: "section-interpretation",
       targetId: "time-behaviour",
-      identityContractRevision: "ngee-ann-section-v2",
+      identityContractRevision: "ngee-ann-section-v3",
       analysisPackId: "ngee-ann-section-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-project-section-interpretation-v1",
-      validatorRevision: "energyiq-project-section-acceptance-v1",
+      validatorRevision: "energyiq-project-section-acceptance-v2",
       workflowRevision: "energyiq-project-section-discover-publish-v1",
       investigatorPromptRevision: "energyiq-project-section-discovery-v2",
       capabilityRevision: "pack-only-v1",
@@ -58,10 +58,11 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(executive).toMatchObject({
       artifactKind: "executive-synthesis",
       targetId: "sections:current-v1",
-      identityContractRevision: "ngee-ann-executive-v1",
+      identityContractRevision: "ngee-ann-executive-v2",
       analysisPackId: "ngee-ann-section-artifacts",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-project-executive-synthesis-v1",
+      validatorRevision: "energyiq-project-executive-acceptance-v2",
       capabilityRevision: "section-artifacts-v1",
     });
 
