@@ -980,11 +980,11 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v3",
+  identityContractRevision: "ngee-ann-section-v4",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v2",
+  validatorRevision: "energyiq-project-section-acceptance-v3",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
   investigatorPromptRevision: targetId === "time-behaviour"
     ? "energyiq-project-section-discovery-v3"

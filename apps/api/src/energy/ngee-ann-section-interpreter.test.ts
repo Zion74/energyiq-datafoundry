@@ -187,6 +187,37 @@ describe("materializeNgeeAnnSectionResult", () => {
     })]);
   });
 
+  it("keeps an actionable angle but does not label the recommendation as directly observed", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "decision-priorities",
+        status: "available",
+        summary: { text: "The current priority signal is available for review.", evidenceRefs: [evidenceRef] },
+        candidates: [{
+          id: "candidate:actionable",
+          title: "The current concentration warrants a focused controls review",
+          text: "Investigate the contributing circuits before changing the operating schedule.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:actionable",
+    });
+
+    expect(result.insights).toEqual([expect.objectContaining({
+      id: "candidate:actionable",
+      epistemicStatus: "inferred",
+    })]);
+  });
+
   it("keeps a useful summary and insight within the readable Ngee Ann card budget", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({

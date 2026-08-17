@@ -386,7 +386,7 @@ const lowerSectionEpistemicStatus = (
   proposed: NgeeAnnSectionInsight["epistemicStatus"],
   narrative: string,
 ): NgeeAnnSectionInsight["epistemicStatus"] => proposed === "observed"
-  && /\b(?:may|might|could|likely|possibly|suggests?|indicates?|points?\s+to)\b/iu.test(narrative)
+  && /\b(?:may|might|could|likely|possibly|suggests?|indicates?|points?\s+to|warrants?|investigat\w*|recommends?|reviews?|verif(?:y|ies)|opportunit\w*|should|would)\b/iu.test(narrative)
   ? "inferred"
   : proposed;
 
@@ -610,7 +610,7 @@ const requirePackIdentity = (
   const expectedPromptRevision = pack.sectionId === "time-behaviour"
     ? "energyiq-project-section-discovery-v3"
     : "energyiq-project-section-discovery-v2";
-  if (identity.identityContractRevision !== "ngee-ann-section-v3"
+  if (identity.identityContractRevision !== "ngee-ann-section-v4"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

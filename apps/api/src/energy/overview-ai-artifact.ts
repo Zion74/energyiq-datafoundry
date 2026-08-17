@@ -95,11 +95,11 @@ export const createNgeeAnnOverviewAiSectionArtifactIdentity = (input: {
     ...projectOverviewAiDerivedIdentityBase(input.baseIdentity),
     artifactKind: "section-interpretation",
     targetId: input.targetId,
-    identityContractRevision: "ngee-ann-section-v3",
+    identityContractRevision: "ngee-ann-section-v4",
     analysisPackId: "ngee-ann-section-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-project-section-interpretation-v1",
-    validatorRevision: "energyiq-project-section-acceptance-v2",
+    validatorRevision: "energyiq-project-section-acceptance-v3",
     workflowRevision: "energyiq-project-section-discover-publish-v1",
     investigatorPromptRevision: input.targetId === "time-behaviour"
       ? "energyiq-project-section-discovery-v3"
