@@ -560,6 +560,7 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
       const projectId = decodeURIComponent(segments[1] ?? "");
+      const access = requireEnergyProjectAccess(context, user, projectId);
       const project = context.metadataStore.energyIq.getProject(projectId);
       const rendererKey = resolveProjectOverviewProfile(projectId)?.rendererKey ?? null;
       const projectAdapter = findProjectOverviewAiAdapter(context.projectOverviewAiAdapters, rendererKey);
@@ -598,6 +599,16 @@ export const handleEnergyApiRequest = async (
           user,
           request: pin ? { kind: "pinned", pin } : { kind: "current" },
         });
+        if (identity.workspaceId !== access.activeWorkspaceId
+          || identity.workspaceId !== project.workspace_id
+          || identity.projectId !== project.id
+          || identity.scopeId !== scopeId
+          || identity.rendererKey !== rendererKey
+          || identity.rendererKey !== projectAdapter.rendererKey
+          || (pin && (identity.dataSnapshotId !== pin.dataSnapshotId
+            || identity.projectReleaseId !== pin.projectReleaseId))) {
+          throw new Error("ENERGYIQ_PROJECT_OVERVIEW_AI_IDENTITY_MISMATCH");
+        }
         if (segments.length === 3 && request.method === "GET") {
           const readModel = await projectAdapter.readExact({ identity, user });
           if (readModel && !projectOverviewAiReadModelMatchesIdentity(readModel, identity)) {
@@ -615,23 +626,31 @@ export const handleEnergyApiRequest = async (
           };
         }
         if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
+          const generated = await projectAdapter.generateMissing({ identity, user });
+          if (!projectOverviewAiReadModelMatchesIdentity(generated, identity)) {
+            throw new Error("ENERGYIQ_PROJECT_OVERVIEW_AI_READ_MODEL_IDENTITY_MISMATCH");
+          }
           return {
             status: 200,
             headers: { "Cache-Control": "private, no-store" },
-            body: createSuccessResult(await projectAdapter.generateMissing({ identity, user })),
+            body: createSuccessResult(generated),
           };
         }
         if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
           const body = requireRecord(await readJsonBody(request));
           const retryTarget = optionalString(body.targetId);
+          const generated = await projectAdapter.generateMissing({
+            identity,
+            user,
+            ...(retryTarget ? { retryTarget } : {}),
+          });
+          if (!projectOverviewAiReadModelMatchesIdentity(generated, identity)) {
+            throw new Error("ENERGYIQ_PROJECT_OVERVIEW_AI_READ_MODEL_IDENTITY_MISMATCH");
+          }
           return {
             status: 200,
             headers: { "Cache-Control": "private, no-store" },
-            body: createSuccessResult(await projectAdapter.generateMissing({
-              identity,
-              user,
-              ...(retryTarget ? { retryTarget } : {}),
-            })),
+            body: createSuccessResult(generated),
           };
         }
       }

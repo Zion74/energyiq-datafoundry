@@ -358,6 +358,47 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
+  it("stores only exact Ngee Ann section results and keeps an empty section terminal", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-ngee-section-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+
+      const availableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-available", "time-behaviour");
+      expect(completeSectionV4(store, availableIdentity, ngeeAnnSectionResult(availableIdentity, "available")))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
+
+      const emptyIdentity = ngeeAnnSectionIdentity("snapshot-ngee-empty", "decision-priorities");
+      expect(completeSectionV4(store, emptyIdentity, ngeeAnnSectionResult(emptyIdentity, "empty")))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
+
+      const mismatchedIdentity = ngeeAnnSectionIdentity("snapshot-ngee-mismatch", "trend-and-demand");
+      expect(() => completeSectionV4(store, mismatchedIdentity, {
+        ...ngeeAnnSectionResult(mismatchedIdentity, "available"),
+        sectionId: "circuit-concentration",
+      })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const missingEvidenceIdentity = ngeeAnnSectionIdentity("snapshot-ngee-missing-evidence", "circuit-concentration");
+      const malformed = {
+        ...ngeeAnnSectionResult(missingEvidenceIdentity, "available"),
+        insights: [{
+          id: "insight:unsupported",
+          title: "Unsupported angle",
+          text: "This has no cited Evidence.",
+          epistemicStatus: "inferred",
+          evidenceRefs: [],
+        }],
+      };
+      expect(() => completeSectionV4(store, missingEvidenceIdentity, malformed))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the immediately previous Section v12 and Executive v10 identities writable for historical completion", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-previous-current-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;
@@ -847,6 +888,70 @@ const sectionV4Identity = (
   investigatorPromptRevision: "discovery-prompt-v11",
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",
+});
+
+const ngeeAnnSectionIdentity = (
+  dataSnapshotId: string,
+  targetId: string,
+): SectionV4Identity => ({
+  ...sectionV3Identity(dataSnapshotId, targetId),
+  rendererKey: "ngee-ann-overview",
+  identityContractRevision: "ngee-ann-section-v1",
+  analysisPackId: "ngee-ann-section-pack",
+  analysisPackRevision: "v1",
+  outputContractRevision: "energyiq-project-section-interpretation-v1",
+  validatorRevision: "energyiq-project-section-acceptance-v1",
+  workflowRevision: "energyiq-project-section-discover-publish-v1",
+  investigatorPromptRevision: "energyiq-project-section-discovery-v1",
+  capabilityRevision: "pack-only-v1",
+  publicationRevision: "energyiq-project-section-publication-v1",
+});
+
+const ngeeAnnSectionResult = (
+  artifactIdentity: SectionV4Identity,
+  status: "available" | "empty",
+) => ({
+  artifactKind: "section-interpretation" as const,
+  status,
+  providerProfileId: artifactIdentity.modelProfileId,
+  runId: `run:${artifactIdentity.dataSnapshotId}`,
+  contract: {
+    id: "energyiq-project-section-interpretation",
+    revision: "energyiq-project-section-interpretation-v1",
+  },
+  binding: {
+    workspaceId: artifactIdentity.workspaceId,
+    projectId: artifactIdentity.projectId,
+    scopeId: artifactIdentity.scopeId,
+    dataSnapshotId: artifactIdentity.dataSnapshotId,
+    projectReleaseId: artifactIdentity.projectReleaseId,
+    analysisPeriod: {
+      from: artifactIdentity.analysisPeriodFrom,
+      to: artifactIdentity.analysisPeriodTo,
+    },
+    modelProfileId: artifactIdentity.modelProfileId,
+    modelProfileRevision: artifactIdentity.modelProfileRevision,
+  },
+  sectionId: artifactIdentity.targetId,
+  packRevision: "v1",
+  capability: {
+    revision: "pack-only-v1",
+    mode: "pack-only",
+    tools: [],
+  },
+  ...(status === "available"
+    ? { summary: { text: "A concise Ngee Ann Section summary.", evidenceRefs: ["evidence:ngee:summary"] } }
+    : {}),
+  insights: [],
+  publication: {
+    policyId: "energyiq-project-section-publication",
+    policyRevision: "energyiq-project-section-publication-v1",
+    discoveredCount: 0,
+    acceptedCount: 0,
+    rejectedCount: 0,
+    publishedCount: 0,
+    suppressedCandidateIds: [],
+  },
 });
 
 const sectionV4Result = (

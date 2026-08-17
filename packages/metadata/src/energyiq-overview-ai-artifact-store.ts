@@ -538,6 +538,10 @@ const requireSectionInterpretationResult = (
   parsed: Record<string, unknown>,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
+  if (identity.identityContractRevision === "ngee-ann-section-v1") {
+    requireProjectSectionInterpretationResultV1(parsed, identity);
+    return;
+  }
   if (identity.identityContractRevision !== undefined
     || identity.outputContractRevision === "preschool-section-interpretation-v4") {
     requireSectionInterpretationResultV4(parsed, identity);
@@ -545,6 +549,86 @@ const requireSectionInterpretationResult = (
   }
   requireSectionInterpretationResultV3(parsed, identity);
 };
+
+const NGEE_ANN_SECTION_IDS = new Set([
+  "trend-and-demand",
+  "time-behaviour",
+  "circuit-concentration",
+  "decision-priorities",
+]);
+
+const requireProjectSectionInterpretationResultV1 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const summary = parsed.summary;
+  const insights = parsed.insights;
+  const capability = parsed.capability;
+  const publication = parsed.publication;
+  if (identity.rendererKey !== "ngee-ann-overview"
+    || identity.analysisPackId !== "ngee-ann-section-pack"
+    || identity.analysisPackRevision !== "v1"
+    || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
+    || identity.validatorRevision !== "energyiq-project-section-acceptance-v1"
+    || identity.workflowRevision !== "energyiq-project-section-discover-publish-v1"
+    || identity.investigatorPromptRevision !== "energyiq-project-section-discovery-v1"
+    || identity.capabilityRevision !== "pack-only-v1"
+    || identity.publicationRevision !== "energyiq-project-section-publication-v1"
+    || !identity.targetId
+    || !NGEE_ANN_SECTION_IDS.has(identity.targetId)
+    || parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "energyiq-project-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || parsed.sectionId !== identity.targetId
+    || parsed.packRevision !== identity.analysisPackRevision
+    || !isRecord(capability)
+    || capability.revision !== identity.capabilityRevision
+    || capability.mode !== "pack-only"
+    || !Array.isArray(capability.tools)
+    || capability.tools.length !== 0
+    || !Array.isArray(insights)
+    || insights.length > 3
+    || !insights.every(validSectionInsightV4)
+    || !validProjectSectionPublicationV1(publication, identity, insights.length)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (summary !== undefined || insights.length !== 0 || parsed.limitation !== undefined) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!validSectionSummaryV4(summary)
+    || !optionalString(parsed.limitation)
+    || (typeof parsed.limitation === "string" && parsed.limitation.length > 320)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validProjectSectionPublicationV1 = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  insightCount: number,
+): boolean => isRecord(value)
+  && value.policyId === "energyiq-project-section-publication"
+  && value.policyRevision === identity.publicationRevision
+  && nonNegativeInteger(value.discoveredCount)
+  && nonNegativeInteger(value.acceptedCount)
+  && nonNegativeInteger(value.rejectedCount)
+  && nonNegativeInteger(value.publishedCount)
+  && value.publishedCount === insightCount
+  && (value.acceptedCount as number) >= insightCount
+  && (value.discoveredCount as number) === (value.acceptedCount as number) + (value.rejectedCount as number)
+  && Array.isArray(value.suppressedCandidateIds)
+  && value.suppressedCandidateIds.every(nonEmptyString)
+  && new Set(value.suppressedCandidateIds).size === value.suppressedCandidateIds.length
+  && value.suppressedCandidateIds.length === (value.acceptedCount as number) - insightCount;
 
 const requireAdditionalAiInsightsResult = (
   parsed: Record<string, unknown>,

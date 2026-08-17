@@ -20,36 +20,45 @@ type NgeeAnnSectionPackBinding = {
 };
 
 type NgeeAnnSectionPackFacts = {
-  summary?: ProjectAnalysisSnapshot["analysis"]["summary"];
-  comparison?: ProjectAnalysisSnapshot["analysis"]["comparison"];
-  dailyTotals?: ProjectAnalysisSnapshot["analysis"]["dailyTotals"];
-  dailyUsageAnomalies?: ProjectAnalysisSnapshot["analysis"]["dailyUsageAnomalies"];
-  peakBreakdown?: ProjectAnalysisSnapshot["analysis"]["peakBreakdown"];
-  hourlyProfile?: ProjectAnalysisSnapshot["analysis"]["hourlyProfile"];
-  timeBehaviour?: ProjectAnalysisSnapshot["analysis"]["timeBehaviour"];
-  componentHourlyProfiles?: ProjectAnalysisSnapshot["analysis"]["componentHourlyProfiles"];
-  offHours?: ProjectAnalysisSnapshot["analysis"]["offHours"];
-  categories?: ProjectAnalysisSnapshot["analysis"]["categories"];
-  levels?: ProjectAnalysisSnapshot["analysis"]["childScopes"];
-  circuits?: ProjectAnalysisSnapshot["analysis"]["circuits"];
-  topCircuits?: ProjectAnalysisSnapshot["analysis"]["topCircuits"];
-  componentReconciliation?: ProjectAnalysisSnapshot["analysis"]["componentReconciliation"];
-  decisionPriorities?: ProjectAnalysisSnapshot["decisionPriorities"];
-  decisionLifecycle?: ProjectAnalysisSnapshot["decisionLifecycle"];
-  attention?: ProjectAnalysisSnapshot["analysis"]["attention"];
+  "trend-and-demand": {
+    summary: ProjectAnalysisSnapshot["analysis"]["summary"];
+    comparison: ProjectAnalysisSnapshot["analysis"]["comparison"];
+    dailyTotals: ProjectAnalysisSnapshot["analysis"]["dailyTotals"];
+    dailyUsageAnomalies: ProjectAnalysisSnapshot["analysis"]["dailyUsageAnomalies"];
+    peakBreakdown: ProjectAnalysisSnapshot["analysis"]["peakBreakdown"];
+  };
+  "time-behaviour": {
+    hourlyProfile: ProjectAnalysisSnapshot["analysis"]["hourlyProfile"];
+    timeBehaviour: ProjectAnalysisSnapshot["analysis"]["timeBehaviour"];
+    componentHourlyProfiles: ProjectAnalysisSnapshot["analysis"]["componentHourlyProfiles"];
+    offHours: ProjectAnalysisSnapshot["analysis"]["offHours"];
+  };
+  "circuit-concentration": {
+    categories: ProjectAnalysisSnapshot["analysis"]["categories"];
+    levels: ProjectAnalysisSnapshot["analysis"]["childScopes"];
+    circuits: ProjectAnalysisSnapshot["analysis"]["circuits"];
+    topCircuits: ProjectAnalysisSnapshot["analysis"]["topCircuits"];
+    componentReconciliation: ProjectAnalysisSnapshot["analysis"]["componentReconciliation"];
+    peakBreakdown: ProjectAnalysisSnapshot["analysis"]["peakBreakdown"];
+  };
+  "decision-priorities": {
+    decisionPriorities: ProjectAnalysisSnapshot["decisionPriorities"];
+    decisionLifecycle: ProjectAnalysisSnapshot["decisionLifecycle"];
+    attention: ProjectAnalysisSnapshot["analysis"]["attention"];
+  };
 };
 
-export type NgeeAnnSectionPack = {
+export type NgeeAnnSectionPack<SectionId extends NgeeAnnSectionId = NgeeAnnSectionId> = {
   contract: {
     id: "ngee-ann-section-pack";
     revision: "ngee-ann-section-pack-v1";
   };
-  sectionId: NgeeAnnSectionId;
+  sectionId: SectionId;
   audience: "facilities and energy managers";
   analysisGoal: string;
   binding: NgeeAnnSectionPackBinding;
   evidence: ProjectAnalysisSnapshot["evidence"];
-  facts: NgeeAnnSectionPackFacts;
+  facts: NgeeAnnSectionPackFacts[SectionId];
   dataQuality: ProjectAnalysisSnapshot["dataQuality"];
   limitations: string[];
   missingEvidence: string[];
@@ -60,7 +69,9 @@ export type NgeeAnnSectionPack = {
   };
 };
 
-export type NgeeAnnSectionPacks = Record<NgeeAnnSectionId, NgeeAnnSectionPack>;
+export type NgeeAnnSectionPacks = {
+  [SectionId in NgeeAnnSectionId]: NgeeAnnSectionPack<SectionId>;
+};
 
 const ANALYSIS_GOALS: Record<NgeeAnnSectionId, string> = {
   "trend-and-demand": "Identify decision-relevant changes in total use, daily demand, peak demand and unusual days without assuming their cause.",
@@ -72,6 +83,9 @@ const ANALYSIS_GOALS: Record<NgeeAnnSectionId, string> = {
 export const assembleNgeeAnnSectionPacks = (
   snapshot: ProjectAnalysisSnapshot,
 ): NgeeAnnSectionPacks => {
+  if (snapshot.renderer.key !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_RENDERER_REQUIRED");
+  }
   const binding: NgeeAnnSectionPackBinding = {
     workspaceId: snapshot.context.workspaceId,
     projectId: snapshot.context.projectId,
@@ -84,7 +98,9 @@ export const assembleNgeeAnnSectionPacks = (
     },
     rendererKey: snapshot.renderer.key,
   };
-  const common = (sectionId: NgeeAnnSectionId) => ({
+  const common = <SectionId extends NgeeAnnSectionId>(
+    sectionId: SectionId,
+  ): Omit<NgeeAnnSectionPack<SectionId>, "facts"> => ({
     contract: {
       id: "ngee-ann-section-pack" as const,
       revision: "ngee-ann-section-pack-v1" as const,
@@ -161,8 +177,14 @@ const limitations = (
     && snapshot.analysis.componentReconciliation.ratioPct !== 100) {
     result.push("Published component Circuits do not exactly reconcile to the official project total.");
   }
-  if (sectionId === "decision-priorities" && snapshot.decisionPriorities?.status !== "available") {
+  if (sectionId === "decision-priorities" && snapshot.decisionPriorities?.status === "unavailable") {
     result.push("The deterministic decision-priority projection is unavailable for this Snapshot.");
+  }
+  if (sectionId === "decision-priorities"
+    && (snapshot.decisionPriorities?.status === "partial"
+      || snapshot.decisionPriorities?.status === "suppressed")
+    && snapshot.decisionPriorities.limitation) {
+    result.push(snapshot.decisionPriorities.limitation.message);
   }
   return result;
 };
@@ -172,10 +194,12 @@ const missingEvidence = (
   sectionId: NgeeAnnSectionId,
 ): string[] => {
   const result: string[] = [];
-  if (sectionId === "trend-and-demand" && !snapshot.analysis.dailyUsageAnomalies) {
+  if (sectionId === "trend-and-demand" && (!snapshot.analysis.dailyUsageAnomalies
+    || snapshot.analysis.dailyUsageAnomalies.status === "unavailable")) {
     result.push("Daily anomaly classification is unavailable.");
   }
-  if (sectionId === "trend-and-demand" && !snapshot.analysis.peakBreakdown) {
+  if (sectionId === "trend-and-demand" && (!snapshot.analysis.peakBreakdown
+    || snapshot.analysis.peakBreakdown.status === "unavailable")) {
     result.push("Peak-interval contributor evidence is unavailable.");
   }
   if (sectionId === "time-behaviour" && !snapshot.analysis.timeBehaviour?.scopes.length) {

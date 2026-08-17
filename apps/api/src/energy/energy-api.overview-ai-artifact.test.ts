@@ -16,6 +16,7 @@ import {
   createPreschoolAdditionalAiInsightArtifactIdentity,
   resolvePinnedOverviewAiArtifactReadIdentity,
 } from "./overview-ai-artifact.js";
+import { projectOverviewAiGenerationBinding } from "./project-overview-ai-adapter.js";
 
 const { materializeEnergyProjectManifestMock } = vi.hoisted(() => ({
   materializeEnergyProjectManifestMock: vi.fn(),
@@ -779,6 +780,7 @@ describe("Overview AI Artifact API", () => {
           analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
           modelProfileId: identity.modelProfileId,
           modelProfileRevision: identity.modelProfileRevision,
+          generation: projectOverviewAiGenerationBinding(identity),
         },
         keyFindings: { status: "unavailable", reason: "Key Findings has not been generated." },
         sections: {
@@ -849,6 +851,7 @@ describe("Overview AI Artifact API", () => {
       }));
       expect(readExact).toHaveBeenCalledWith({ identity, user: expect.objectContaining({ id: "dev-user" }) });
       expect(generateMissing).not.toHaveBeenCalled();
+
     } finally {
       harness.close();
     }
@@ -1124,6 +1127,7 @@ describe("Overview AI Artifact API", () => {
           analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
           modelProfileId: identity.modelProfileId,
           modelProfileRevision: identity.modelProfileRevision,
+          generation: projectOverviewAiGenerationBinding(identity),
         },
         keyFindings: { status: "unavailable", reason: "Key Findings has not been generated." },
         sections: {
@@ -1195,6 +1199,48 @@ describe("Overview AI Artifact API", () => {
       }));
       expect(readExact).toHaveBeenCalledWith({ identity, user: expect.objectContaining({ id: "dev-user" }) });
       expect(generateMissing).not.toHaveBeenCalled();
+
+      readExact.mockResolvedValueOnce({
+        ...readModel,
+        binding: {
+          ...readModel.binding,
+          generation: {
+            ...readModel.binding.generation,
+            workflowRevision: "stale-workflow-v0",
+          },
+        },
+      });
+      await expect(handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/ngee-ann-polytechnic/overview-ai-artifact?scopeId=${encodeURIComponent(ngeeAnnProject.root_scope_id)}&from=${pin.from}&to=${pin.to}&dataSnapshotId=${pin.dataSnapshotId}&projectReleaseId=${pin.projectReleaseId}`),
+        ["projects", "ngee-ann-polytechnic", "overview-ai-artifact"],
+        context,
+      )).resolves.toMatchObject({
+        status: 500,
+        body: { success: false, error: { message: "ENERGYIQ_PROJECT_OVERVIEW_AI_READ_MODEL_IDENTITY_MISMATCH" } },
+      });
+
+      resolveIdentity.mockResolvedValueOnce({ ...identity, projectId: "preschool-demo" });
+      await expect(handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/ngee-ann-polytechnic/overview-ai-artifact?scopeId=${encodeURIComponent(ngeeAnnProject.root_scope_id)}&from=${pin.from}&to=${pin.to}&dataSnapshotId=${pin.dataSnapshotId}&projectReleaseId=${pin.projectReleaseId}`),
+        ["projects", "ngee-ann-polytechnic", "overview-ai-artifact"],
+        context,
+      )).resolves.toMatchObject({
+        status: 500,
+        body: { success: false, error: { message: "ENERGYIQ_PROJECT_OVERVIEW_AI_IDENTITY_MISMATCH" } },
+      });
+
+      generateMissing.mockResolvedValueOnce({
+        ...readModel,
+        binding: { ...readModel.binding, workspaceId: "other-workspace" },
+      });
+      await expect(handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", "ngee-ann-polytechnic", "overview-ai-artifact", "ensure"],
+        context,
+      )).resolves.toMatchObject({
+        status: 500,
+        body: { success: false, error: { message: "ENERGYIQ_PROJECT_OVERVIEW_AI_READ_MODEL_IDENTITY_MISMATCH" } },
+      });
     } finally {
       harness.close();
     }

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createNgeeAnnOverviewAiExecutiveArtifactIdentity,
+  createNgeeAnnOverviewAiSectionArtifactIdentity,
   createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolAdditionalAiInsightArtifactIdentity,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
@@ -9,6 +11,66 @@ import {
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
+
+describe("Ngee Ann current Overview AI identities", () => {
+  it("rotates exact Section and Executive artifacts with Ngee Ann contracts and Snapshot identity", () => {
+    const base = createOverviewAiArtifactIdentity({
+      workspaceId: "workspace-ngee",
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "ngee-ann-polytechnic",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: "ngee-release-v6",
+      analysisPeriodFrom: "2026-05-19T16:00:00.000Z",
+      analysisPeriodTo: "2026-06-16T16:00:00.000Z",
+      rendererKey: "ngee-ann-overview",
+      rendererVersion: "1",
+      modelProfileId: "workspace-default-model-profile",
+      modelProfileRevision: 8,
+    });
+
+    const section = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: base,
+      targetId: "time-behaviour",
+    });
+    const executive = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: base,
+      targetId: "sections:current-v1",
+    });
+
+    expect(base).toMatchObject({
+      rendererKey: "ngee-ann-overview",
+      analysisPackId: "ngee-ann-analysis-pack",
+      analysisPackRevision: "v1",
+    });
+    expect(section).toMatchObject({
+      artifactKind: "section-interpretation",
+      targetId: "time-behaviour",
+      identityContractRevision: "ngee-ann-section-v1",
+      analysisPackId: "ngee-ann-section-pack",
+      analysisPackRevision: "v1",
+      outputContractRevision: "energyiq-project-section-interpretation-v1",
+      validatorRevision: "energyiq-project-section-acceptance-v1",
+      workflowRevision: "energyiq-project-section-discover-publish-v1",
+      capabilityRevision: "pack-only-v1",
+      publicationRevision: "energyiq-project-section-publication-v1",
+    });
+    expect(executive).toMatchObject({
+      artifactKind: "executive-synthesis",
+      targetId: "sections:current-v1",
+      identityContractRevision: "ngee-ann-executive-v1",
+      analysisPackId: "ngee-ann-section-artifacts",
+      analysisPackRevision: "v1",
+      outputContractRevision: "energyiq-project-executive-synthesis-v1",
+      capabilityRevision: "section-artifacts-v1",
+    });
+
+    const snapshotB = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: { ...base, dataSnapshotId: "snapshot-b" },
+      targetId: "time-behaviour",
+    });
+    expect(snapshotB).not.toEqual(section);
+  });
+});
 
 describe("createOverviewAiArtifactIdentity", () => {
   it("is shared across users but changes with Snapshot or model binding revision", () => {

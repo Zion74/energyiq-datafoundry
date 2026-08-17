@@ -64,6 +64,35 @@ describe("assembleNgeeAnnSectionPacks", () => {
     expect(pack.facts.circuits).toHaveLength(48);
     expect(pack.facts.topCircuits).toHaveLength(5);
   });
+
+  it("fails closed for a Snapshot owned by another renderer", () => {
+    const source = snapshot("snapshot-wrong-renderer", 12_000, 160);
+    source.renderer = { ...source.renderer, key: "preschool-overview" };
+
+    expect(() => assembleNgeeAnnSectionPacks(source))
+      .toThrow("ENERGYIQ_NGEE_ANN_SECTION_PACK_RENDERER_REQUIRED");
+  });
+
+  it("distinguishes an honest empty priority set from unavailable Evidence", () => {
+    const source = snapshot("snapshot-statuses", 12_000, 160);
+    source.decisionPriorities = {
+      status: "empty",
+      limitation: null,
+      evidencePins: {} as never,
+      items: [],
+    };
+    source.analysis.peakBreakdown = {
+      status: "unavailable",
+      reason: { code: "PEAK_INTERVAL_FACTS_UNAVAILABLE", message: "Peak facts unavailable." },
+    };
+
+    const packs = assembleNgeeAnnSectionPacks(source);
+
+    expect(packs["decision-priorities"].limitations)
+      .not.toContain("The deterministic decision-priority projection is unavailable for this Snapshot.");
+    expect(packs["trend-and-demand"].missingEvidence)
+      .toContain("Peak-interval contributor evidence is unavailable.");
+  });
 });
 
 const snapshot = (

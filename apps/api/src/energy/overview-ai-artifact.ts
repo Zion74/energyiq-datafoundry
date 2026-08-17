@@ -56,6 +56,17 @@ export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArt
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
+  "ngee-ann-overview": {
+    analysisPackId: "ngee-ann-analysis-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-project-overview-ai-v1",
+    validatorRevision: "energyiq-project-overview-ai-v1",
+    workflowRevision: "energyiq-project-overview-ai-v1",
+    investigatorPromptRevision: "energyiq-project-overview-ai-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+  },
   "preschool-overview": {
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
@@ -67,6 +78,82 @@ const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",
   },
+};
+
+export const createNgeeAnnOverviewAiSectionArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (input.baseIdentity.rendererKey !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  }
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  return {
+    ...projectOverviewAiDerivedIdentityBase(input.baseIdentity),
+    artifactKind: "section-interpretation",
+    targetId: input.targetId,
+    identityContractRevision: "ngee-ann-section-v1",
+    analysisPackId: "ngee-ann-section-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-project-section-interpretation-v1",
+    validatorRevision: "energyiq-project-section-acceptance-v1",
+    workflowRevision: "energyiq-project-section-discover-publish-v1",
+    investigatorPromptRevision: "energyiq-project-section-discovery-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "pack-only-v1",
+    publicationRevision: "energyiq-project-section-publication-v1",
+  };
+};
+
+export const createNgeeAnnOverviewAiExecutiveArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (input.baseIdentity.rendererKey !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  }
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  return {
+    ...projectOverviewAiDerivedIdentityBase(input.baseIdentity),
+    artifactKind: "executive-synthesis",
+    targetId: input.targetId,
+    identityContractRevision: "ngee-ann-executive-v1",
+    analysisPackId: "ngee-ann-section-artifacts",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-project-executive-synthesis-v1",
+    validatorRevision: "energyiq-project-executive-acceptance-v1",
+    workflowRevision: "energyiq-project-executive-synthesis-v1",
+    investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "section-artifacts-v1",
+    publicationRevision: "energyiq-project-key-findings-v1",
+  };
+};
+
+const projectOverviewAiDerivedIdentityBase = (
+  baseIdentity: OverviewAiArtifactIdentityV13,
+): OverviewAiArtifactIdentityV13 => {
+  const {
+    artifactKind: _artifactKind,
+    targetId: _targetId,
+    identityContractRevision: _identityContractRevision,
+    capabilityRevision: _capabilityRevision,
+    publicationRevision: _publicationRevision,
+    canvasRevision: _canvasRevision,
+    methodSetId: _methodSetId,
+    methodSetRevision: _methodSetRevision,
+    methodSetFingerprint: _methodSetFingerprint,
+    ...identity
+  } = baseIdentity;
+  return identity;
 };
 
 export const createOverviewAiArtifactIdentity = (input: {

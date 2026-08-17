@@ -28,6 +28,25 @@ export type ProjectOverviewAiReadModel = {
     analysisPeriod: { from: string; to: string };
     modelProfileId: string;
     modelProfileRevision: number;
+    generation: {
+      rendererVersion: string;
+      analysisPackId: string;
+      analysisPackRevision: string;
+      outputContractRevision: string;
+      validatorRevision: string;
+      workflowRevision: string;
+      investigatorPromptRevision: string;
+      editorPromptRevision: string;
+      methodSkillId: string;
+      methodSkillRevision: string;
+      identityContractRevision?: string;
+      capabilityRevision?: string;
+      publicationRevision?: string;
+      canvasRevision?: string;
+      methodSetId?: string;
+      methodSetRevision?: string;
+      methodSetFingerprint?: string;
+    };
   };
   keyFindings: ProjectOverviewAiUnitStatus;
   sections: Record<string, ProjectOverviewAiUnitStatus>;
@@ -78,4 +97,45 @@ export const projectOverviewAiReadModelMatchesIdentity = (
   && readModel.binding.analysisPeriod.from === identity.analysisPeriodFrom
   && readModel.binding.analysisPeriod.to === identity.analysisPeriodTo
   && readModel.binding.modelProfileId === identity.modelProfileId
-  && readModel.binding.modelProfileRevision === identity.modelProfileRevision;
+  && readModel.binding.modelProfileRevision === identity.modelProfileRevision
+  && readModel.binding.generation.rendererVersion === identity.rendererVersion
+  && readModel.binding.generation.analysisPackId === identity.analysisPackId
+  && readModel.binding.generation.analysisPackRevision === identity.analysisPackRevision
+  && readModel.binding.generation.outputContractRevision === identity.outputContractRevision
+  && readModel.binding.generation.validatorRevision === identity.validatorRevision
+  && readModel.binding.generation.workflowRevision === identity.workflowRevision
+  && readModel.binding.generation.investigatorPromptRevision === identity.investigatorPromptRevision
+  && readModel.binding.generation.editorPromptRevision === identity.editorPromptRevision
+  && readModel.binding.generation.methodSkillId === identity.methodSkillId
+  && readModel.binding.generation.methodSkillRevision === identity.methodSkillRevision
+  && readModel.binding.generation.identityContractRevision === identity.identityContractRevision
+  && readModel.binding.generation.capabilityRevision === identity.capabilityRevision
+  && readModel.binding.generation.publicationRevision === identity.publicationRevision
+  && readModel.binding.generation.canvasRevision === identity.canvasRevision
+  && readModel.binding.generation.methodSetId === identity.methodSetId
+  && readModel.binding.generation.methodSetRevision === identity.methodSetRevision
+  && readModel.binding.generation.methodSetFingerprint === identity.methodSetFingerprint;
+
+export const projectOverviewAiGenerationBinding = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): ProjectOverviewAiReadModel["binding"]["generation"] => ({
+  rendererVersion: identity.rendererVersion,
+  analysisPackId: identity.analysisPackId,
+  analysisPackRevision: identity.analysisPackRevision,
+  outputContractRevision: identity.outputContractRevision,
+  validatorRevision: identity.validatorRevision,
+  workflowRevision: identity.workflowRevision,
+  investigatorPromptRevision: identity.investigatorPromptRevision,
+  editorPromptRevision: identity.editorPromptRevision,
+  methodSkillId: identity.methodSkillId,
+  methodSkillRevision: identity.methodSkillRevision,
+  ...(identity.identityContractRevision
+    ? { identityContractRevision: identity.identityContractRevision }
+    : {}),
+  ...(identity.capabilityRevision ? { capabilityRevision: identity.capabilityRevision } : {}),
+  ...(identity.publicationRevision ? { publicationRevision: identity.publicationRevision } : {}),
+  ...(identity.canvasRevision ? { canvasRevision: identity.canvasRevision } : {}),
+  ...(identity.methodSetId ? { methodSetId: identity.methodSetId } : {}),
+  ...(identity.methodSetRevision ? { methodSetRevision: identity.methodSetRevision } : {}),
+  ...(identity.methodSetFingerprint ? { methodSetFingerprint: identity.methodSetFingerprint } : {}),
+});
