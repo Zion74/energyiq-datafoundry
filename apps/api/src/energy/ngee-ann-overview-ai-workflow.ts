@@ -6,9 +6,13 @@ import type {
   UserRecord,
 } from "@datafoundry/metadata";
 
-import { overviewAiArtifactPinnedLocalPeriod, type OverviewAiArtifactIdentityV13 } from "./overview-ai-artifact.js";
+import {
+  overviewAiArtifactPinnedLocalPeriod,
+  requireCurrentNgeeAnnBaseIdentity,
+  requireOverviewAiModelRuntimeIdentity,
+  type OverviewAiArtifactIdentityV13,
+} from "./overview-ai-artifact.js";
 import { createNgeeAnnExecutiveSynthesizer, type NgeeAnnExecutiveRunner } from "./ngee-ann-executive-synthesis.js";
-import { requireCurrentNgeeAnnBaseIdentity } from "./ngee-ann-overview-ai-adapter.js";
 import { createNgeeAnnSectionInterpreter, type NgeeAnnSectionInterpreterRunner } from "./ngee-ann-section-interpreter.js";
 import {
   assembleNgeeAnnSectionPacks,
@@ -25,18 +29,24 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
   dataGateway: LocalDataGateway;
   runSection: NgeeAnnSectionInterpreterRunner;
   runExecutive: NgeeAnnExecutiveRunner;
+  assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
   resolvePacks?: (args: {
     identity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
   }) => Promise<NgeeAnnSectionPacks>;
 }) => {
+  const assertRuntimeIdentity = input.assertRuntimeIdentity
+    ?? ((identity: EnergyIqOverviewAiArtifactIdentity) =>
+      requireOverviewAiModelRuntimeIdentity(input.metadataStore, identity));
   const interpreter = createNgeeAnnSectionInterpreter({
     metadataStore: input.metadataStore,
     runSection: input.runSection,
+    assertRuntimeIdentity,
   });
   const synthesizer = createNgeeAnnExecutiveSynthesizer({
     metadataStore: input.metadataStore,
     runExecutive: input.runExecutive,
+    assertRuntimeIdentity,
   });
   const resolvePacks = input.resolvePacks ?? (async ({ identity, user }) => {
     const project = input.metadataStore.energyIq.getProject(identity.projectId);
@@ -76,6 +86,10 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
       executive?: EnergyIqOverviewAiArtifactRecord;
     }> {
       const baseIdentity = requireCurrentNgeeAnnBaseIdentity(identity);
+      if (retryTarget && retryTarget !== "executive-synthesis" && !isNgeeAnnSectionId(retryTarget)) {
+        throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_RETRY_TARGET_INVALID");
+      }
+      assertRuntimeIdentity(baseIdentity);
       const packs = await resolvePacks({ identity: baseIdentity, user });
       const retryTargets = retryTarget && isNgeeAnnSectionId(retryTarget) ? [retryTarget] : [];
       const sections = await interpreter.execute({ baseIdentity, packs, user, retryTargets });

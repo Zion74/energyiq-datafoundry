@@ -14,6 +14,7 @@ import {
   resolveCurrentAdditionalAiInsightMethodSet,
 } from "@datafoundry/contracts";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
 
@@ -186,6 +187,57 @@ export const createOverviewAiArtifactIdentity = (input: {
     modelProfileId: input.modelProfileId,
     modelProfileRevision: input.modelProfileRevision,
   };
+};
+
+export const requireCurrentNgeeAnnBaseIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): OverviewAiArtifactIdentityV13 => {
+  if (identity.rendererKey !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
+  }
+  let current: OverviewAiArtifactIdentityV13;
+  try {
+    current = createOverviewAiArtifactIdentity({
+      workspaceId: identity.workspaceId,
+      projectId: identity.projectId,
+      scopeId: identity.scopeId,
+      dataSnapshotId: identity.dataSnapshotId,
+      projectReleaseId: identity.projectReleaseId,
+      analysisPeriodFrom: identity.analysisPeriodFrom,
+      analysisPeriodTo: identity.analysisPeriodTo,
+      rendererKey: identity.rendererKey,
+      rendererVersion: identity.rendererVersion,
+      modelProfileId: identity.modelProfileId,
+      modelProfileRevision: identity.modelProfileRevision,
+    });
+  } catch {
+    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
+  }
+  if (!isDeepStrictEqual(current, identity)) {
+    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
+  }
+  return current;
+};
+
+export const requireOverviewAiModelRuntimeIdentity = (
+  metadataStore: MetadataStore,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
+  if (!modelBinding
+    || identity.modelProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+    || modelBinding.revision !== identity.modelProfileRevision) {
+    throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+  }
+  const modelResource = metadataStore.configResources.find({
+    workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
+    user_id: modelBinding.profile_owner_user_id,
+    kind: "model-profile",
+    id: modelBinding.profile_id,
+  });
+  if (!modelResource || modelResource.status !== "connected" || !modelResource.default_enabled) {
+    throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+  }
 };
 
 /**

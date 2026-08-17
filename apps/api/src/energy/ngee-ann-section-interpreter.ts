@@ -92,6 +92,7 @@ export type NgeeAnnSectionInterpreterRunner = (input: {
 export const createNgeeAnnSectionInterpreter = (input: {
   metadataStore: MetadataStore;
   runSection: NgeeAnnSectionInterpreterRunner;
+  assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
 }) => ({
   async execute({
     baseIdentity,
@@ -130,6 +131,7 @@ export const createNgeeAnnSectionInterpreter = (input: {
       const sessionId = `ngee-ann-section-${sectionId}-${randomUUID()}`;
       const runId = `ngee-ann-section-${sectionId}-${randomUUID()}`;
       try {
+        input.assertRuntimeIdentity?.(identity);
         const response = await input.runSection({
           prompt: buildNgeeAnnSectionPrompt(packs[sectionId]),
           identity,
@@ -148,6 +150,7 @@ export const createNgeeAnnSectionInterpreter = (input: {
           identity,
           runId,
         });
+        input.assertRuntimeIdentity?.(identity);
         current[sectionId] = store.complete({
           identity,
           workerId,

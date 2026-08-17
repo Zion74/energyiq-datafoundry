@@ -90,6 +90,18 @@ describe("Ngee Ann Executive Synthesis", () => {
     expect(ngeeAnnExecutiveTargetId(records)).not.toBe(ngeeAnnExecutiveTargetId(changed));
     expect(ngeeAnnExecutiveTargetId([])).toBe("sections:none-v1");
   });
+
+  it("rotates the Executive target when the same Section Artifact is retried successfully", () => {
+    const failed = { ...record("artifact:time", "hash-same"), status: "failed" as const, error_code: "PROVIDER_FAILED" };
+    const recovered = {
+      ...record("artifact:time", "hash-same"),
+      status: "available" as const,
+      run_id: "run:recovered",
+      result_json: JSON.stringify({ status: "available", summary: { text: "Recovered." } }),
+    };
+
+    expect(ngeeAnnExecutiveTargetId([failed])).not.toBe(ngeeAnnExecutiveTargetId([recovered]));
+  });
 });
 
 const baseIdentity = () => createOverviewAiArtifactIdentity({

@@ -74,7 +74,13 @@ export const ngeeAnnExecutiveTargetId = (
 ): string => {
   if (sectionRecords.length === 0) return "sections:none-v1";
   const basis = sectionRecords
-    .map(({ id, identity_hash }) => `${id}:${identity_hash}`)
+    .map(({ id, identity_hash, status, run_id, result_json, error_code }) => {
+      const valueDigest = createHash("sha256")
+        .update(result_json ?? error_code ?? "")
+        .digest("hex")
+        .slice(0, 16);
+      return `${id}:${identity_hash}:${status}:${run_id ?? "none"}:${valueDigest}`;
+    })
     .sort((left, right) => left.localeCompare(right))
     .join("|");
   return `sections:${createHash("sha256").update(basis).digest("hex").slice(0, 24)}`;
@@ -83,6 +89,7 @@ export const ngeeAnnExecutiveTargetId = (
 export const createNgeeAnnExecutiveSynthesizer = (input: {
   metadataStore: MetadataStore;
   runExecutive: NgeeAnnExecutiveRunner;
+  assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
 }) => ({
   async execute({
     baseIdentity,
@@ -112,6 +119,7 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
     const runId = `ngee-ann-executive-${randomUUID()}`;
     try {
       if (sources.length < 2) {
+        input.assertRuntimeIdentity?.(identity);
         return store.complete({
           identity,
           workerId,
@@ -120,6 +128,7 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
           resultJson: JSON.stringify(resultBase(identity, runId, sources, "empty", [])),
         });
       }
+      input.assertRuntimeIdentity?.(identity);
       const response = await input.runExecutive({
         prompt: buildNgeeAnnExecutivePrompt(sources),
         identity,
@@ -138,6 +147,7 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
         runId,
         sources,
       });
+      input.assertRuntimeIdentity?.(identity);
       return store.complete({
         identity,
         workerId,
@@ -146,7 +156,11 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
         resultJson: JSON.stringify(result),
       });
     } catch (error) {
-      return store.fail({ identity, workerId, errorCode: executiveErrorCode(error) });
+      try {
+        return store.fail({ identity, workerId, errorCode: executiveErrorCode(error) });
+      } catch {
+        return store.get(identity);
+      }
     }
   },
 });

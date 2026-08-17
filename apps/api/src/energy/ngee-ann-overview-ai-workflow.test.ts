@@ -26,6 +26,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     const workflow = createNgeeAnnOverviewAiWorkflow({
       metadataStore: { energyIq: { overviewAiArtifacts: store } } as unknown as MetadataStore,
       dataGateway: {} as never,
+      assertRuntimeIdentity: vi.fn(),
       resolvePacks: vi.fn().mockResolvedValue(packs()),
       runSection: async ({ identity, runId, sessionId }) => {
         sectionCalls.push(identity);

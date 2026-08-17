@@ -5,12 +5,11 @@ import type {
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
-import { isDeepStrictEqual } from "node:util";
-
 import {
   createNgeeAnnOverviewAiExecutiveArtifactIdentity,
   createNgeeAnnOverviewAiSectionArtifactIdentity,
   createOverviewAiArtifactIdentity,
+  requireCurrentNgeeAnnBaseIdentity,
   resolveCurrentOverviewAiArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
 } from "./overview-ai-artifact.js";
@@ -131,36 +130,6 @@ export const createNgeeAnnProjectOverviewAiAdapter = (input: {
       return readExact({ identity: baseIdentity, user });
     },
   };
-};
-
-export const requireCurrentNgeeAnnBaseIdentity = (
-  identity: EnergyIqOverviewAiArtifactIdentity,
-): OverviewAiArtifactIdentityV13 => {
-  if (identity.rendererKey !== "ngee-ann-overview") {
-    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
-  }
-  let current: OverviewAiArtifactIdentityV13;
-  try {
-    current = createOverviewAiArtifactIdentity({
-      workspaceId: identity.workspaceId,
-      projectId: identity.projectId,
-      scopeId: identity.scopeId,
-      dataSnapshotId: identity.dataSnapshotId,
-      projectReleaseId: identity.projectReleaseId,
-      analysisPeriodFrom: identity.analysisPeriodFrom,
-      analysisPeriodTo: identity.analysisPeriodTo,
-      rendererKey: identity.rendererKey,
-      rendererVersion: identity.rendererVersion,
-      modelProfileId: identity.modelProfileId,
-      modelProfileRevision: identity.modelProfileRevision,
-    });
-  } catch {
-    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
-  }
-  if (!isDeepStrictEqual(current, identity)) {
-    throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
-  }
-  return current;
 };
 
 const artifactUnit = (
