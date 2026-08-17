@@ -40,9 +40,24 @@ import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import { MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-workflow.js";
 import { MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-evaluation.js";
+import {
+  NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1,
+  NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1,
+} from "./energy/ngee-ann-overview-ai-structured-output.js";
 import { completeProtocolRun } from "./protocol-run-completion.js";
 
 describe("Overview AI server stage options", () => {
+  it("preserves the server-owned Ngee Ann Section and Executive schemas at the shared runtime seam", () => {
+    expect(resolveOverviewAiServerRunnerOptions({
+      stage: "section-interpreter",
+      structuredOutput: NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1,
+    })?.structuredOutput).toBe(NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1);
+    expect(resolveOverviewAiServerRunnerOptions({
+      stage: "executive-synthesis",
+      structuredOutput: NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1,
+    })?.structuredOutput).toBe(NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1);
+  });
+
   it("normalizes only typed local Additional structured-output failures", () => {
     expect(normalizeOverviewAiStageRuntimeError(
       "additional-insights-discovery",

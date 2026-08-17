@@ -115,6 +115,8 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import { createNgeeAnnProjectOverviewAiAdapter } from "./energy/ngee-ann-overview-ai-adapter.js";
+import { createNgeeAnnOverviewAiWorkflow } from "./energy/ngee-ann-overview-ai-workflow.js";
 import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
@@ -604,6 +606,41 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
+  const ngeeAnnOverviewAiWorkflow = createNgeeAnnOverviewAiWorkflow({
+    metadataStore,
+    dataGateway,
+    runSection: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "section-interpreter",
+        structuredOutput,
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "section-interpreter",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+    runExecutive: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "executive-synthesis",
+        structuredOutput,
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "executive-synthesis",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+  });
+  const ngeeAnnOverviewAiAdapter = createNgeeAnnProjectOverviewAiAdapter({
+    metadataStore,
+    dataGateway,
+    executeMissing: ({ identity, user, retryTarget }) => ngeeAnnOverviewAiWorkflow.execute({
+      identity,
+      user,
+      ...(retryTarget ? { retryTarget } : {}),
+    }).then(() => undefined),
+  });
   const additionalAiInsightsWorkflow = createPreschoolAdditionalAiInsightsWorkflow({
     metadataStore,
     resolveEvidenceCatalog: async ({ identity, user }) => {
@@ -765,7 +802,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         additionalAiInsightsWorkflow,
         additionalAiInsightsEvaluationWorkflow,
         overviewAiWorkflow,
-        projectOverviewAiAdapters: [],
+        projectOverviewAiAdapters: [ngeeAnnOverviewAiAdapter],
         templateChangeWorkflow,
         runCancelRegistry,
         userId: authContext.user.id,

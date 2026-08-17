@@ -133,7 +133,7 @@ export const createNgeeAnnProjectOverviewAiAdapter = (input: {
   };
 };
 
-const requireCurrentNgeeAnnBaseIdentity = (
+export const requireCurrentNgeeAnnBaseIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): OverviewAiArtifactIdentityV13 => {
   if (identity.rendererKey !== "ngee-ann-overview") {
