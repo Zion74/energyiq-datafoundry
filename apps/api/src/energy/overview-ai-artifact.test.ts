@@ -202,7 +202,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackId: "preschool-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
-      validatorRevision: "acceptance-validator-v13",
+      validatorRevision: "acceptance-validator-v14",
       workflowRevision: "discover-tools-accept-publish-v4",
       investigatorPromptRevision: "discovery-prompt-v11",
       capabilityRevision: "scoped-read-only-v1",

@@ -172,6 +172,7 @@ export function PreschoolAiSlot({
     return (
       <SectionedAiResult
         result={availableResult}
+        snapshot={snapshot}
         sectionId={sectionId}
         mode={mode}
         aiAnalystHref={aiAnalystHref}
@@ -242,6 +243,7 @@ export function PreschoolAiSlot({
 
 function SectionedAiResult({
   result,
+  snapshot,
   sectionId,
   mode,
   aiAnalystHref,
@@ -249,6 +251,7 @@ function SectionedAiResult({
   additionalMethodProposalClient,
 }: {
   result: PreschoolOverviewAiReadModelDto;
+  snapshot: EnergyProjectAnalysisSnapshotDto;
   sectionId: PreschoolAiSectionId;
   mode: "live" | "saved";
   aiAnalystHref?: string;
@@ -333,6 +336,7 @@ function SectionedAiResult({
         unit={unit}
         expectedSectionId={target}
         outerBinding={result.binding}
+        snapshot={snapshot}
         mode={mode}
         aiAnalystHref={aiAnalystHref}
       />
@@ -404,17 +408,21 @@ function KeyFindingsUnit({
   result: PreschoolExecutiveSynthesisV4AvailableResult;
   completedSectionCount: number;
 }) {
+  const summaryDuplicatesOnlyFinding = result.findings.length === 1
+    && normalizedAiHeadline(result.summary.text) === normalizedAiHeadline(result.findings[0]!.title);
   return (
     <div>
       <p className="mb-3 text-xs font-medium text-muted">
         Reviewed {completedSectionCount} of 4 Sections · Findings cite {result.sourceSectionArtifactIds.length} source {result.sourceSectionArtifactIds.length === 1 ? "Section" : "Sections"}
       </p>
-      <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3" aria-label="Key findings summary">
-        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
-        <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
-      </div>
+      {summaryDuplicatesOnlyFinding ? null : (
+        <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3" aria-label="Key findings summary">
+          <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
+          <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
+        </div>
+      )}
       {result.findings.length > 0 ? (
-        <div className="mt-4 grid gap-3 lg:grid-cols-2" aria-label="Key Findings" data-key-findings-grid="true">
+        <div className={`mt-4 grid gap-3 ${result.findings.length > 1 ? "lg:grid-cols-2" : ""}`} aria-label="Key Findings" data-key-findings-grid="true">
           {result.findings.map((finding) => (
             <article key={finding.id} className="rounded-xl border border-border bg-surface px-4 py-4 lg:px-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -452,12 +460,14 @@ function SectionUnit({
   unit,
   expectedSectionId,
   outerBinding,
+  snapshot,
   mode,
   aiAnalystHref,
 }: {
   unit: unknown;
   expectedSectionId: PreschoolOverviewAiSectionIdDto;
   outerBinding: PreschoolOverviewAiBindingDto;
+  snapshot: EnergyProjectAnalysisSnapshotDto;
   mode: "live" | "saved";
   aiAnalystHref?: string;
 }) {
@@ -471,9 +481,15 @@ function SectionUnit({
     return <Unavailable detail="This Section interpretation is unavailable. Other Sections and the verified Overview are unchanged." />;
   }
   if (unit.status === "empty") {
+    const planningReviewDetail = expectedSectionId === "planning-outlook"
+      ? planningHonestEmptyDetail(snapshot)
+      : null;
     return (
       <>
-        <EmptyValue title="No additional AI interpretation" detail="This Section Pack did not support a useful additional conclusion." />
+        <EmptyValue
+          title={planningReviewDetail ? "AI review complete" : "No additional AI interpretation"}
+          detail={planningReviewDetail ?? "This Section Pack did not support a useful additional conclusion."}
+        />
         {unit.result.limitation ? (
           <details className="mt-3 border-t border-border pt-3">
             <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Limitation</summary>
@@ -553,7 +569,7 @@ function SectionInterpretationV4Unit({
       {result.insights.length > 0 ? (
         <section className="mt-4" aria-label="Section insights">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Insights</p>
-          <div className="grid gap-3 lg:grid-cols-2" aria-label="Section AI insights">
+          <div className={`grid gap-3 ${result.insights.length > 1 ? "lg:grid-cols-2" : ""}`} aria-label="Section AI insights">
           {result.insights.map((insight) => {
             const exploreHref = insight.deepDiveQuestion && aiAnalystHref
               ? buildSectionInsightHref(aiAnalystHref, artifactId, result, insight)
@@ -613,6 +629,27 @@ function EmptyValue({ title, detail }: { title: string; detail: string }) {
     </div>
   );
 }
+
+const normalizedAiHeadline = (value: string): string => (value
+  .replaceAll(/[*_`]/gu, "")
+  .toLocaleLowerCase("en")
+  .match(/[\p{L}\p{N}]+/gu) ?? [])
+  .join(" ");
+
+const planningHonestEmptyDetail = (snapshot: EnergyProjectAnalysisSnapshotDto): string => {
+  const lifecycle = snapshot.preschoolPlanningLifecycle;
+  if (lifecycle?.status === "unavailable") {
+    return `AI reviewed the pinned planning inputs. ${lifecycle.reason.message}`;
+  }
+  if (lifecycle?.status === "available" && lifecycle.actual.completeDayCount === 0) {
+    return "AI reviewed the pinned planning inputs. Current Actual has no complete day yet, so no additional comparison was published.";
+  }
+  const operational = snapshot.preschoolOperational;
+  if (operational?.status === "available" && operational.planningOutlook.status === "unavailable") {
+    return `AI reviewed the pinned planning inputs. ${operational.planningOutlook.reason.message}`;
+  }
+  return "AI reviewed the pinned planning inputs, but the current Actual and Planning Baseline did not support a distinct additional conclusion.";
+};
 
 function SavedRunMarker({
   mode,

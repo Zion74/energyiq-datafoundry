@@ -83,6 +83,29 @@ describe("composePreschoolOverviewAiReadModel", () => {
     }
   });
 
+  it("does not present the previous Section acceptance revision as the current result", () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-section-validator-history-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedProject(metadata);
+      const baseIdentity = identity();
+      const historicalIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...sectionIdentityV4(baseIdentity, "centre-benchmark"),
+        validatorRevision: "acceptance-validator-v13",
+      };
+      metadata.energyIq.overviewAiArtifacts.queue({
+        identity: historicalIdentity,
+        triggeredBy: "dev-user",
+      });
+
+      expect(metadata.energyIq.overviewAiArtifacts.find(historicalIdentity)).not.toBeNull();
+      expect(composePreschoolOverviewAiReadModel({ metadataStore: metadata, baseIdentity })).toBeNull();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("restores the exact current Additional Insight Artifact independently of Section availability", () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-additional-current-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

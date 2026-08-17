@@ -383,6 +383,57 @@ describe("PreschoolAiSlot", () => {
     expect(summaryEvidence.textContent).not.toContain("section-standby-v4");
   });
 
+  it("uses the full reading width for one Key Finding and suppresses an exact duplicate Summary headline", async () => {
+    const result = v4ReadModelResult();
+    const executive = result.executive;
+    if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
+    executive.result.summary.text = `${executive.result.findings[0]!.title}.`;
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="page-synthesis"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]')!;
+    const grid = pageSlot.querySelector<HTMLElement>('[data-key-findings-grid="true"]')!;
+    expect(grid.className).not.toContain("lg:grid-cols-2");
+    expect(pageSlot.querySelector('[aria-label="Key findings summary"]')).toBeNull();
+    expect(pageSlot.querySelectorAll("article")).toHaveLength(1);
+    expect([...pageSlot.querySelectorAll("h4")]
+      .filter((heading) => heading.textContent === executive.result.findings[0]!.title)).toHaveLength(1);
+  });
+
+  it("keeps a responsive two-column grid when Key Findings contains multiple distinct cards", async () => {
+    const result = v4ReadModelResult();
+    const executive = result.executive;
+    if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
+    executive.result.findings.push({
+      ...executive.result.findings[0]!,
+      id: "key-finding-cross-section-2",
+      title: "A second cross-section pattern remains distinct",
+      text: "The same two Sections support a separately worded comparison for this layout fixture.",
+    });
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="page-synthesis"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    const grid = container.querySelector<HTMLElement>('[data-key-findings-grid="true"]')!;
+    expect(grid.className).toContain("lg:grid-cols-2");
+    expect(grid.querySelectorAll("article")).toHaveLength(2);
+  });
+
   it("keeps terminal Section coverage separate from Evidence-contributing source artifacts for saved v4 empty Key Findings", async () => {
     const result = v4ReadModelResult();
     const executive = result.executive;
@@ -503,6 +554,27 @@ describe("PreschoolAiSlot", () => {
     }
   });
 
+  it("uses the full reading width when a Section publishes only one Insight", async () => {
+    const result = v4ReadModelResult();
+    const standby = result.sections["standby-wastage"];
+    if (standby.status !== "available") throw new Error("v4 fixture missing");
+    standby.result.insights = standby.result.insights.slice(0, 1);
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="standby-wastage"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    const grid = container.querySelector<HTMLElement>('[aria-label="Section AI insights"]')!;
+    expect(grid.className).not.toContain("lg:grid-cols-2");
+    expect(grid.querySelectorAll("article")).toHaveLength(1);
+  });
+
   it("isolates saved v4 available-without-insights, empty and unavailable Section states", async () => {
     const startRun = vi.fn();
     const result = v4ReadModelResult();
@@ -559,6 +631,44 @@ describe("PreschoolAiSlot", () => {
     expect(unavailableSlot!.textContent).toContain("This Section interpretation is unavailable");
     expect(unavailableSlot!.querySelectorAll("article")).toHaveLength(0);
     expect(unavailableSlot!.textContent).not.toContain("Unusual opening-hour peaks recur");
+  });
+
+  it("explains a planning honest-empty as a completed review instead of a generic no-value result", async () => {
+    const snapshot = preschoolGoldenSnapshot();
+    snapshot.preschoolPlanningLifecycle = {
+      status: "unavailable",
+      reason: {
+        code: "CURRENT_ACTUAL_UNAVAILABLE",
+        message: "No complete current Actual day is available for the pinned monthly period.",
+      },
+    };
+    const result = v4ReadModelResult();
+    const benchmark = result.sections["centre-benchmark"];
+    if (benchmark.status !== "empty" || !("insights" in benchmark.result)) throw new Error("v4 fixture missing");
+    result.sections["planning-outlook"] = {
+      status: "empty",
+      artifactId: "section-planning-v4",
+      result: {
+        ...benchmark.result,
+        runId: "run-planning-v4",
+        sectionId: "planning-outlook",
+      },
+    };
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={snapshot}
+        sectionId="planning-outlook"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    const planningSlot = container.querySelector<HTMLElement>('[data-ai-section="planning-outlook"]')!;
+    expect(planningSlot.textContent).toContain("AI review complete");
+    expect(planningSlot.textContent).toContain("No complete current Actual day is available");
+    expect(planningSlot.textContent).not.toContain("did not support a useful additional conclusion");
   });
 
   it("rejects mismatched outer and inner saved statuses locally without hiding a valid sibling", async () => {

@@ -297,6 +297,38 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("recovers an Evidence-bearing conclusion when a paraphrased caveat is submitted as the whole Summary", () => {
+    const pack = packV2("standby-wastage", 1);
+    pack.limitations = ["Calendar-driven screening is provisional and does not confirm energy waste."];
+
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "This is provisional Calendar-based screening, not confirmed waste.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [{
+          title: "Priority signal at 30 kWh",
+          epistemicStatus: "observed",
+          text: "Verified energy use is 30 kWh.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        }],
+        limitation: "Calendar-driven screening is provisional and does not confirm energy waste.",
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-summary-paraphrased-caveat",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "Priority signal at 30 kWh." },
+      insights: [{ title: "Priority signal at 30 kWh" }],
+    });
+  });
+
   it("locally rejects a planning Insight that only restates the presented tariff limitation", () => {
     const pack = packV2("planning-outlook", 1);
     const limitation = "Forecast cost uses a reference tariff and is not an actual bill.";
@@ -650,6 +682,9 @@ describe("Preschool Section Interpreter v4", () => {
     "The pattern looks like a scheduling mismatch.",
     "The pattern suggests a scheduling mismatch.",
     "The pattern is consistent with a scheduling mismatch.",
+    "The recurrence points to a possible behavioural pattern.",
+    "The concentration may warrant an on-site control check.",
+    "The timing is worth confirming before a cause is assigned.",
   ])("downgrades observed wording that makes an inferred relationship: %s", (text) => {
     const pack = packV2("standby-wastage", 1);
     const result = materializePreschoolSectionResultV4({

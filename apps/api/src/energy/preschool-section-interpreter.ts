@@ -23,6 +23,7 @@ import {
   type PreschoolSectionInsightToolNameV4,
   type PreschoolSectionKeyPoint,
   type PreschoolSectionPack,
+  type PreschoolSectionPackEvidence,
   type PreschoolSectionSummaryV4,
   type PreschoolSectionToolAuditV4,
 } from "./preschool-overview-ai-contracts.js";
@@ -525,9 +526,11 @@ const calibrateCandidateEpistemicStatus = (
 const containsInferenceLanguage = (text: string): boolean =>
   /\b(?:could|might|appears?|apparently|likely|possibly|potential(?:ly)?|recommend(?:s|ed|ing)?|should|suggest(?:s|ed|ing)?|worth considering)\b/iu
     .test(text)
-  || /\blooks?\s+like\b|\bconsistent\s+with\b/iu.test(text)
+  || /\blooks?\s+like\b|\bconsistent\s+with\b|\bpoints?\s+to\b|\bpossib(?:le|ility)\b/iu.test(text)
+  || /\bworth\s+(?:confirming|checking|reviewing|investigating|validating)\b/iu.test(text)
   || /\bmay\s+(?:be|reflect|indicate|suggest|result|offer|mean|signal|help|need|show|point|support|capture)\b/iu
-    .test(text);
+    .test(text)
+  || /\bmay\s+warrant\b/iu.test(text);
 
 const preserveUsefulCandidateAfterUnsupportedNumericSentence = (
   discovery: PreschoolSectionDiscoveryV4,
@@ -607,7 +610,7 @@ const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({
       && summary.evidenceRefs.length > 0
       && evidenceRefsAreSupported(summary.evidenceRefs, pack)
       && citedEvidence.length > 0
-      && summaryLeadsWithConclusion(summary.text, pack.limitations)
+      && summaryLeadsWithConclusion(summary.text, pack.limitations, citedEvidence)
       && isSupportedNarrative(summary.text, citedEvidence, pack.evidence)
       ? { accepted: true as const }
       : { accepted: false as const };
@@ -660,18 +663,44 @@ const candidateRejectionCode = (
   return null;
 };
 
-const summaryLeadsWithConclusion = (text: string, limitations: string[]): boolean => {
+const summaryLeadsWithConclusion = (
+  text: string,
+  limitations: string[],
+  citedEvidence: PreschoolSectionPackEvidence[],
+): boolean => {
   const firstSentence = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(text)]
     .map(({ segment }) => segment.trim())
     .find(Boolean);
   return Boolean(firstSentence)
     && !summaryIsGenericPlaceholder(firstSentence!)
-    && !limitations.some((limitation) => narrativesAreNearEquivalent(firstSentence!, limitation));
+    && !limitations.some((limitation) => narrativesAreNearEquivalent(firstSentence!, limitation))
+    && !summaryIsUnanchoredCaveat(firstSentence!, citedEvidence);
 };
 
 const summaryIsGenericPlaceholder = (sentence: string): boolean =>
   /^(?:the\s+)?(?:verified\s+)?(?:section\s+)?(?:evidence|data|results?|information)\s+(?:is|are)\s+(?:available|provided)\.?$/iu
     .test(sentence.replaceAll(/[*_`]/gu, "").trim());
+
+const summaryIsUnanchoredCaveat = (
+  sentence: string,
+  citedEvidence: PreschoolSectionPackEvidence[],
+): boolean => {
+  if (!/\b(?:provisional|screening|not\s+confirmed|does\s+not\s+(?:confirm|prove)|not\s+(?:a\s+)?(?:bill|finding|conclusion))\b/iu
+    .test(sentence)) return false;
+  if (/\p{N}/u.test(sentence)) return false;
+  const sentenceTokens = narrativeTokens(sentence);
+  const evidenceTokens = narrativeTokens(citedEvidence.map((evidence) => [
+    evidence.label,
+    ...evidence.entityRefs,
+  ].join(" ")).join(" "));
+  const caveatTokens = new Set([
+    "calendar", "confirmed", "conclusion", "finding", "method", "provisional",
+    "screening", "waste",
+  ]);
+  return ![...sentenceTokens].some((token) => token.length > 2
+    && !caveatTokens.has(token)
+    && evidenceTokens.has(token));
+};
 
 const sentenceCount = (text: string): number => [...new Intl.Segmenter("en", { granularity: "sentence" })
   .segment(text)]
