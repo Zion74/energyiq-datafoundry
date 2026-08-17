@@ -253,7 +253,7 @@ const parseSummary = (
   evidenceIds: Set<string>,
   sourceText: string,
 ): { text: string; evidenceRefs: string[] } | null => isRecord(value)
-  && boundedString(value.text, 600)
+  && boundedString(value.text, 720)
   && validRefs(value.evidenceRefs, evidenceIds)
   && numbersSupported(value.text, sourceText)
   ? { text: value.text, evidenceRefs: [...value.evidenceRefs] }

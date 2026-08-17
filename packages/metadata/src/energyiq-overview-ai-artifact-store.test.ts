@@ -464,9 +464,11 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
 
       const readableIdentity = ngeeAnnExecutiveIdentity("snapshot-ngee-executive-readable");
       const readableResult = ngeeAnnExecutiveResult(readableIdentity);
-      readableResult.summary.text = `The accepted Sections support a current management conclusion. ${"The reasoning remains visible and linked to its exact sources. ".repeat(8)}`;
+      readableResult.summary.text = (`The accepted Sections support a current management conclusion. ${"The reasoning remains visible, specific, and linked to exact source Evidence. ".repeat(12)}`).slice(0, 656);
       readableResult.findings[0]!.title = "Peak demand and hourly concentration support one coordinated operational management question";
       readableResult.findings[0]!.text = `The accepted Sections support this cross-Section conclusion. ${"The explanation remains bounded without deleting a useful finding. ".repeat(8)}`;
+      expect(readableResult.summary.text.length).toBeGreaterThan(600);
+      expect(readableResult.summary.text.length).toBeLessThanOrEqual(720);
       expect(completeSectionV4(store, readableIdentity, readableResult))
         .toMatchObject({ status: "available" });
 
@@ -1044,11 +1046,11 @@ const ngeeAnnExecutiveIdentity = (
   ...sectionV3Identity(dataSnapshotId, "sections:test-v1"),
   rendererKey: "ngee-ann-overview",
   artifactKind: "executive-synthesis",
-  identityContractRevision: "ngee-ann-executive-v2",
+  identityContractRevision: "ngee-ann-executive-v3",
   analysisPackId: "ngee-ann-section-artifacts",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-executive-synthesis-v1",
-  validatorRevision: "energyiq-project-executive-acceptance-v2",
+  validatorRevision: "energyiq-project-executive-acceptance-v3",
   workflowRevision: "energyiq-project-executive-synthesis-v1",
   investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
   capabilityRevision: "section-artifacts-v1",

@@ -119,6 +119,44 @@ describe("Ngee Ann Executive Synthesis", () => {
     expect(result.findings).toEqual([expect.objectContaining({ id: "finding:readable-long-form" })]);
   });
 
+  it("keeps an evidence-linked management summary beyond the old 600-character transport cut-off", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:readable-summary",
+    });
+    const summaryText = (`The accepted Sections support a current management conclusion. ${"The reasoning remains visible, specific, and linked to exact source Evidence. ".repeat(12)}`).slice(0, 656);
+    const findings = Array.from({ length: 5 }, (_, index) => ({
+      id: `finding:${index + 1}`,
+      title: `Supported cross-Section angle ${index + 1}`,
+      text: "The 138.8 kW peak and the daytime pattern support a bounded management question.",
+      epistemicStatus: "inferred",
+      sectionIds: ["trend-and-demand", "time-behaviour"],
+      sourceInsightIds: ["insight:trend", "insight:time"],
+      evidenceRefs: ["evidence:trend", "evidence:time"],
+    }));
+
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-readable-summary",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: { text: summaryText, evidenceRefs: ["evidence:trend", "evidence:time"] },
+        findings,
+      }),
+    });
+
+    expect(summaryText.length).toBeGreaterThan(600);
+    expect(summaryText.length).toBeLessThanOrEqual(720);
+    expect(result.summary?.text).toBe(summaryText);
+    expect(result.findings.map(({ id }) => id)).toEqual([
+      "finding:1",
+      "finding:2",
+      "finding:3",
+    ]);
+  });
+
   it("rotates the Executive target when any contributing Section Artifact changes", () => {
     const records = [record("artifact:trend", "hash-a"), record("artifact:time", "hash-b")];
     const changed = [record("artifact:trend", "hash-a"), record("artifact:time-v2", "hash-c")];

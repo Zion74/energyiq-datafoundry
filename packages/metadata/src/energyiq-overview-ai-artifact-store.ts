@@ -1124,7 +1124,8 @@ const requireExecutiveSynthesisResult = (
   db: DatabaseSync,
 ): void => {
   if (identity.identityContractRevision === "ngee-ann-executive-v1"
-    || identity.identityContractRevision === "ngee-ann-executive-v2") {
+    || identity.identityContractRevision === "ngee-ann-executive-v2"
+    || identity.identityContractRevision === "ngee-ann-executive-v3") {
     requireProjectExecutiveSynthesisResultV1(parsed, identity);
     return;
   }
@@ -1147,9 +1148,12 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-artifacts"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
-    || (identity.identityContractRevision === "ngee-ann-executive-v2"
-      ? identity.validatorRevision !== "energyiq-project-executive-acceptance-v2"
-      : identity.validatorRevision !== "energyiq-project-executive-acceptance-v1")
+    || !((identity.identityContractRevision === "ngee-ann-executive-v3"
+      && identity.validatorRevision === "energyiq-project-executive-acceptance-v3")
+      || (identity.identityContractRevision === "ngee-ann-executive-v2"
+        && identity.validatorRevision === "energyiq-project-executive-acceptance-v2")
+      || (identity.identityContractRevision === "ngee-ann-executive-v1"
+        && identity.validatorRevision === "energyiq-project-executive-acceptance-v1"))
     || identity.workflowRevision !== "energyiq-project-executive-synthesis-v1"
     || identity.investigatorPromptRevision !== "energyiq-project-executive-prompt-v1"
     || identity.capabilityRevision !== "section-artifacts-v1"
@@ -1176,7 +1180,10 @@ const requireProjectExecutiveSynthesisResultV1 = (
     }
     return;
   }
-  if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(summary)) {
+  if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(
+    summary,
+    identity.identityContractRevision === "ngee-ann-executive-v3" ? 720 : 600,
+  )) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
@@ -1202,9 +1209,9 @@ const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(val
   && value.evidenceRefs.every(nonEmptyString)
   && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
 
-const validProjectExecutiveSummaryV1 = (value: unknown): boolean => isRecord(value)
+const validProjectExecutiveSummaryV1 = (value: unknown, maxTextLength: number): boolean => isRecord(value)
   && nonEmptyString(value.text)
-  && value.text.length <= 600
+  && value.text.length <= maxTextLength
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
