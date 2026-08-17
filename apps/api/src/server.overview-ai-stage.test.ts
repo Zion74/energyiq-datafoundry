@@ -297,6 +297,9 @@ describe("Overview AI server stage options", () => {
         throw new Error("Expected server-owned Additional tools and capability");
       }
       runtime = await createDataFoundry({
+        ...(trusted.additionalAiInsightSubmission
+          ? { additionalAiInsightSubmission: true }
+          : {}),
         analysisRequirementsMode: "omit",
         dataGateway: {} as never,
         emitter: { emit: () => undefined },
@@ -341,7 +344,10 @@ describe("Overview AI server stage options", () => {
       const tools = await runtime.agent.listTools() as Record<string, {
         execute?: (input: unknown, options: unknown) => Promise<unknown>;
       }>;
-      expect(Object.keys(tools).sort()).toEqual([...toolNames].sort());
+      expect(Object.keys(tools).sort()).toEqual([
+        ...toolNames,
+        "energyiq_additional_insights_submit",
+      ].sort());
       await expect(tools["energy.evidence.read"]?.execute?.(
         { factIds: [catalog.facts[0]!.id] },
         { agent: { toolCallId: "additional-evidence-read" } },

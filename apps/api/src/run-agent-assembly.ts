@@ -64,6 +64,7 @@ type CreateRunAgentContextInput = {
 };
 
 type CreateRunAgentAssemblyInput = {
+  additionalAiInsightSubmission?: boolean;
   analysisContractGrounder?: AnalysisContractGrounder;
   analysisRequirementsMode?: "default" | "omit";
   overviewAiCandidateSubmission?: boolean;
@@ -170,6 +171,9 @@ export const createRunAgentAssembly = async (
     workspaceDir,
     sessionDir
   } = await createDataFoundry({
+    ...(input.additionalAiInsightSubmission
+      ? { additionalAiInsightSubmission: true }
+      : {}),
     ...(input.analysisContractGrounder
       ? { analysisContractGrounder: input.analysisContractGrounder }
       : {}),
