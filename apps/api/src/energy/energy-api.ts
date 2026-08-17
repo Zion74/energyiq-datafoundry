@@ -1351,6 +1351,25 @@ export const handleEnergyApiRequest = async (
           }),
         };
       }
+      if (segments[3] === "overview-comparison-candidates" && segments.length === 4 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            items: context.metadataStore.energyIq.savedAnalyses
+              .listProject(projectId)
+              .flatMap((record) => {
+                try {
+                  const candidate = toEnergySavedOverviewComparisonCandidate(record);
+                  return candidate ? [candidate] : [];
+                } catch (error) {
+                  if (error instanceof Error
+                    && error.message === "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID") return [];
+                  throw error;
+                }
+              }),
+          }),
+        };
+      }
       if (segments.length === 3 && request.method === "POST") {
         const body = requireRecord(await readJsonBody(request));
         const query = parseQueryContextRequest({ ...body, projectId });
@@ -1891,6 +1910,26 @@ const toEnergySavedAnalysisDetail = (
     ...(aiArtifact ? { aiArtifact } : {}),
     templateRevision,
     catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+  };
+};
+
+const toEnergySavedOverviewComparisonCandidate = (
+  record: EnergyIqSavedAnalysisRecord,
+) => {
+  const snapshot = parseSavedAnalysisSnapshot(record);
+  if (!snapshot) return null;
+  const aiArtifact = parseStoredSavedAnalysisAiArtifact(record, snapshot);
+  return {
+    ...toEnergySavedAnalysisSummary(record),
+    analysis: { summary: snapshot.analysis.summary },
+    snapshot: {
+      context: snapshot.context,
+      dataSnapshot: snapshot.dataSnapshot,
+      projectRelease: { id: snapshot.projectRelease.id },
+      recipe: snapshot.recipe,
+      renderer: snapshot.renderer,
+    },
+    ...(aiArtifact ? { aiArtifact } : {}),
   };
 };
 

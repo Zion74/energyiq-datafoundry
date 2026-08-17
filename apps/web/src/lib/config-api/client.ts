@@ -54,6 +54,7 @@ import type {
   EnergyScopeAnalysisDto,
   EnergySavedAnalysisDetailDto,
   EnergySavedAnalysisAiArtifactInputDto,
+  EnergySavedOverviewComparisonCandidateDto,
   EnergySavedAnalysisSummaryDto,
   EnergyTariffScheduleEntryInputDto,
   EnergyTariffScheduleRevisionDto,
@@ -588,6 +589,14 @@ export const configApi = {
   listEnergySavedAnalyses(projectId: string): Promise<{ items: EnergySavedAnalysisSummaryDto[] }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
+    );
+  },
+
+  listEnergySavedOverviewComparisonCandidates(
+    projectId: string,
+  ): Promise<{ items: EnergySavedOverviewComparisonCandidateDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/overview-comparison-candidates`,
     );
   },
 

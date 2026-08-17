@@ -2,6 +2,7 @@ import type {
   EnergyProjectAnalysisSnapshotDto,
   EnergySavedAnalysisAiArtifactInputDto,
   EnergySavedAnalysisDetailDto,
+  EnergySavedOverviewComparisonCandidateDto,
   EnergySavedAnalysisSummaryDto,
   PreschoolOverviewAiSectionIdDto,
 } from "../../../lib/config-api";
@@ -54,10 +55,13 @@ type OverviewVersionIdentity = {
   period: { from: string; to: string; timezone: string };
 };
 
-export const orderPreviousOverviewCandidates = (input: {
-  items: readonly EnergySavedAnalysisSummaryDto[];
+type OverviewComparableSnapshot = EnergyProjectAnalysisSnapshotDto
+  | EnergySavedOverviewComparisonCandidateDto["snapshot"];
+
+export const orderPreviousOverviewCandidates = <T extends EnergySavedAnalysisSummaryDto>(input: {
+  items: readonly T[];
   current: EnergyProjectAnalysisSnapshotDto;
-}): EnergySavedAnalysisSummaryDto[] => input.items
+}): T[] => input.items
   .filter((item) => item.projectId === input.current.context.projectId
     && item.scopeId === input.current.context.scopeId
     && item.resource === input.current.context.resource
@@ -67,7 +71,7 @@ export const orderPreviousOverviewCandidates = (input: {
     || right.id.localeCompare(left.id));
 
 export const isCompatiblePreviousOverview = (
-  previous: EnergySavedAnalysisDetailDto,
+  previous: EnergySavedOverviewComparisonCandidateDto | EnergySavedAnalysisDetailDto,
   current: EnergyProjectAnalysisSnapshotDto,
 ): boolean => Boolean(previous.snapshot
   && previous.projectId === current.context.projectId
@@ -92,7 +96,7 @@ export const isCompatiblePreviousOverview = (
   && previous.snapshot.renderer.contractVersion === current.renderer.contractVersion);
 
 export const buildOverviewChangeSummary = (input: {
-  previous: EnergySavedAnalysisDetailDto;
+  previous: EnergySavedOverviewComparisonCandidateDto;
   current: EnergyProjectAnalysisSnapshotDto;
   currentAiArtifact: EnergySavedAnalysisAiArtifactInputDto | null;
 }): OverviewChangeSummary | null => {
@@ -179,7 +183,7 @@ export const buildOverviewChangeSummary = (input: {
   };
 };
 
-const identityFromSnapshot = (snapshot: EnergyProjectAnalysisSnapshotDto): OverviewVersionIdentity => ({
+const identityFromSnapshot = (snapshot: OverviewComparableSnapshot): OverviewVersionIdentity => ({
   snapshotId: snapshot.dataSnapshot.id,
   projectReleaseId: snapshot.projectRelease.id,
   period: {
@@ -220,7 +224,7 @@ const optionalMetric = (
 
 const extractAiState = (
   artifact: EnergySavedAnalysisAiArtifactInputDto | undefined | null,
-  expected: EnergyProjectAnalysisSnapshotDto,
+  expected: OverviewComparableSnapshot,
 ): {
   keyFindings: string[];
   keyFindingEntries: NarrativeFinding[];
@@ -500,7 +504,7 @@ const versionedUnitBasis = (unit: unknown): { value: unknown; exact: boolean } =
 
 const matchesArtifactIdentity = (
   artifact: EnergySavedAnalysisAiArtifactInputDto,
-  expected: EnergyProjectAnalysisSnapshotDto,
+  expected: OverviewComparableSnapshot,
 ): boolean => {
   if (artifact.snapshotId !== expected.dataSnapshot.id
     || artifact.projectReleaseId !== expected.projectRelease.id
@@ -517,7 +521,7 @@ const matchesArtifactIdentity = (
 };
 
 const sameWindowLength = (
-  previous: EnergyProjectAnalysisSnapshotDto,
+  previous: OverviewComparableSnapshot,
   current: EnergyProjectAnalysisSnapshotDto,
 ): boolean => {
   const previousDuration = Date.parse(previous.context.primaryPeriod.endExclusive)
@@ -531,7 +535,7 @@ const sameWindowLength = (
 };
 
 const chronologicallyPrecedes = (
-  previous: EnergyProjectAnalysisSnapshotDto,
+  previous: OverviewComparableSnapshot,
   current: EnergyProjectAnalysisSnapshotDto,
 ): boolean => {
   const previousEnd = Date.parse(previous.context.primaryPeriod.endExclusive);

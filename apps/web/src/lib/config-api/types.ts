@@ -2652,6 +2652,17 @@ export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
   catalog: EnergyComponentRevisionDto[];
 };
 
+export type EnergySavedOverviewComparisonCandidateDto = EnergySavedAnalysisSummaryDto & {
+  analysis: Pick<EnergySavedAnalysisDetailDto["analysis"], "summary">;
+  snapshot: Pick<
+    NonNullable<EnergySavedAnalysisDetailDto["snapshot"]>,
+    "context" | "dataSnapshot" | "recipe" | "renderer"
+  > & {
+    projectRelease: Pick<NonNullable<EnergySavedAnalysisDetailDto["snapshot"]>["projectRelease"], "id">;
+  };
+  aiArtifact?: EnergySavedAnalysisAiArtifactDto;
+};
+
 export type EnergyProjectNodeDto = {
   id: string;
   project_id: string;

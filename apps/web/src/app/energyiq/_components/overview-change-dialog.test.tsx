@@ -71,6 +71,36 @@ describe("OverviewChangeDialog", () => {
     expect(onOpenPrevious).toHaveBeenCalledWith("saved-a");
   });
 
+  it("uses the lightweight comparison projection without downloading full Saved Overview details", async () => {
+    const current = snapshot("snapshot-b", "release-b", 1_100);
+    const previousSummary = summary("saved-a", "snapshot-a", 4);
+    const previous = detail(previousSummary, snapshot("snapshot-a", "release-a", 1_000));
+    const client = {
+      listEnergySavedOverviewComparisonCandidates: vi.fn().mockResolvedValue({ items: [previous] }),
+      listEnergySavedAnalyses: vi.fn().mockRejectedValue(new Error("full Saved list should not be read")),
+      getEnergySavedAnalysis: vi.fn().mockRejectedValue(new Error("full Saved detail should not be read")),
+    };
+
+    await act(async () => {
+      root.render(
+        <OverviewChangeDialog
+          projectId="preschool-demo"
+          currentSnapshot={current}
+          currentAiArtifact={null}
+          client={client}
+          onClose={vi.fn()}
+          onOpenPrevious={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Snapshot A");
+    expect(container.textContent).toContain("snapshot-a");
+    expect(client.listEnergySavedOverviewComparisonCandidates).toHaveBeenCalledWith("preschool-demo");
+    expect(client.listEnergySavedAnalyses).not.toHaveBeenCalled();
+    expect(client.getEnergySavedAnalysis).not.toHaveBeenCalled();
+  });
+
   it("shows which Key Findings were retained, updated, added, or removed", async () => {
     const current = snapshot("snapshot-b", "release-b", 1_100);
     const previousSummary = summary("saved-a", "snapshot-a", 1);

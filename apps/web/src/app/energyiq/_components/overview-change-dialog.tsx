@@ -6,7 +6,7 @@ import {
   configApi,
   type EnergyProjectAnalysisSnapshotDto,
   type EnergySavedAnalysisAiArtifactInputDto,
-  type EnergySavedAnalysisDetailDto,
+  type EnergySavedOverviewComparisonCandidateDto,
 } from "../../../lib/config-api";
 import {
   buildOverviewChangeSummary,
@@ -20,7 +20,7 @@ import {
 export type OverviewChangeDialogClient = Pick<
   typeof configApi,
   "listEnergySavedAnalyses" | "getEnergySavedAnalysis"
->;
+> & Partial<Pick<typeof configApi, "listEnergySavedOverviewComparisonCandidates">>;
 
 export function OverviewChangeDialog({
   projectId,
@@ -39,7 +39,7 @@ export function OverviewChangeDialog({
   returnFocusRef?: RefObject<HTMLElement | null>;
   client?: OverviewChangeDialogClient;
 }) {
-  const [previous, setPrevious] = useState<EnergySavedAnalysisDetailDto | null>(null);
+  const [previous, setPrevious] = useState<EnergySavedOverviewComparisonCandidateDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchLimited, setSearchLimited] = useState(false);
@@ -91,7 +91,17 @@ export function OverviewChangeDialog({
     setError(null);
     setSearchLimited(false);
     setPrevious(null);
-    void client.listEnergySavedAnalyses(projectId)
+    const lightweightRead = client.listEnergySavedOverviewComparisonCandidates;
+    const readPrevious = lightweightRead
+      ? lightweightRead.call(client, projectId).then(({ items }) => {
+          const candidates = orderPreviousOverviewCandidates({ items, current: currentSnapshot });
+          const limited = candidates.length > MAX_CLIENT_COMPARISON_CANDIDATES;
+          const detail = candidates
+            .slice(0, MAX_CLIENT_COMPARISON_CANDIDATES)
+            .find((candidate) => isCompatiblePreviousOverview(candidate, currentSnapshot)) ?? null;
+          return { detail, limited };
+        })
+      : client.listEnergySavedAnalyses(projectId)
       .then(async ({ items }) => {
         const candidates = orderPreviousOverviewCandidates({ items, current: currentSnapshot });
         const limited = candidates.length > MAX_CLIENT_COMPARISON_CANDIDATES;
@@ -103,7 +113,8 @@ export function OverviewChangeDialog({
           isActive: () => active,
         });
         return { detail, limited };
-      })
+      });
+    void readPrevious
       .then(({ detail, limited }) => {
         if (active) {
           setPrevious(detail);
@@ -399,7 +410,7 @@ const findLatestCompatibleOverview = async (input: {
   currentSnapshot: EnergyProjectAnalysisSnapshotDto;
   candidates: ReturnType<typeof orderPreviousOverviewCandidates>;
   isActive: () => boolean;
-}): Promise<EnergySavedAnalysisDetailDto | null> => {
+}): Promise<EnergySavedOverviewComparisonCandidateDto | null> => {
   const batchSize = 4;
   for (let offset = 0; offset < input.candidates.length; offset += batchSize) {
     if (!input.isActive()) return null;
@@ -415,7 +426,7 @@ const findLatestCompatibleOverview = async (input: {
       }
       if (isCompatiblePreviousOverview(detail.value, input.currentSnapshot)) {
         if (earlierReadFailure) throw earlierReadFailure;
-        return detail.value;
+        return detail.value as EnergySavedOverviewComparisonCandidateDto;
       }
     }
     if (earlierReadFailure) throw earlierReadFailure;

@@ -165,6 +165,7 @@ export type {
   EnergySavedAnalysisDetailDto,
   EnergySavedAnalysisAiArtifactDto,
   EnergySavedAnalysisAiArtifactInputDto,
+  EnergySavedOverviewComparisonCandidateDto,
   EnergySavedAnalysisSummaryDto,
   EnergySavedAnalysisViewStateDto,
   EnergyRole,

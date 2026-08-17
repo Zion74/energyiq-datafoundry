@@ -303,6 +303,48 @@ describe("saved analysis decision-quality boundary", () => {
           },
         },
       });
+      const comparisonCandidates = await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", project.id, "saved-analyses", "overview-comparison-candidates"],
+        context,
+      );
+      expect(comparisonCandidates.status, JSON.stringify(comparisonCandidates.body)).toBe(200);
+      expect(comparisonCandidates.body).toMatchObject({
+        success: true,
+        data: {
+          items: [{
+            id: expect.any(String),
+            dataSnapshotId: project.data_snapshot_id,
+            analysis: {
+              summary: {
+                usageKwh: expect.any(Number),
+                averageDailyUsageKwh: expect.any(Number),
+                peakKw: expect.any(Number),
+              },
+            },
+            snapshot: {
+              context: {
+                projectId: project.id,
+                scopeId: project.root_scope_id,
+                primaryPeriod: {
+                  start: expect.any(String),
+                  endExclusive: expect.any(String),
+                },
+              },
+              dataSnapshot: { id: project.data_snapshot_id },
+              projectRelease: { id: templateRevision.revision_id },
+              renderer: { key: "preschool-overview" },
+            },
+            aiArtifact: {
+              snapshotId: project.data_snapshot_id,
+              projectReleaseId: templateRevision.revision_id,
+            },
+          }],
+        },
+      });
+      const comparisonPayload = JSON.stringify(comparisonCandidates.body);
+      expect(comparisonPayload).not.toContain("childScopes");
+      expect(comparisonPayload).not.toContain("catalog");
       const first = metadata.energyIq.savedAnalyses.listProject(project.id)[0];
       expect(first?.template_revision_id).toBe(templateRevision.revision_id);
       const frozenAnalysisJson = first?.analysis_json;
