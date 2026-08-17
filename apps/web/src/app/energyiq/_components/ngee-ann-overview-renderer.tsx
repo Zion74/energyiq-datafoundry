@@ -7,6 +7,7 @@ import type {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
+import { NgeeAnnProjectAiSlots } from "./ngee-ann-project-ai-slots";
 import { NgeeAnnCircuitRanking } from "./ngee-ann-circuit-ranking";
 import { NgeeAnnDailyTrendSection } from "./ngee-ann-daily-trend-section";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
@@ -261,7 +262,7 @@ export function NgeeAnnOverviewRenderer({
       />
 
       <div id="ngee-ann-ai-analysis" className="scroll-mt-28 border-b border-border">
-        <NgeeAnnAiSlot
+        {aiSlotMode === "saved" ? <NgeeAnnAiSlot
           snapshot={state.snapshot}
           decisionPriorities={view.decisionPriorities}
           aiAnalystHref={aiAnalystHref}
@@ -278,7 +279,7 @@ export function NgeeAnnOverviewRenderer({
               result,
             }),
           } : {})}
-        />
+        /> : <NgeeAnnProjectAiSlots snapshot={state.snapshot} />}
       </div>
 
       <div id="ngee-ann-evidence" data-overview-section="true" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">

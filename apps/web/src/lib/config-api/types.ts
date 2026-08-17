@@ -2136,6 +2136,32 @@ export type EnergyOverviewAiArtifactDto = {
   };
 };
 
+export type EnergyProjectOverviewAiUnitStatusDto =
+  | { status: "missing" }
+  | { status: "queued" | "running"; artifactId?: string }
+  | { status: "available"; artifactId: string; completedAt?: string; result: Record<string, unknown> }
+  | { status: "empty"; artifactId: string; completedAt?: string }
+  | { status: "failed" | "unavailable"; artifactId?: string; completedAt?: string; reason: string };
+
+export type EnergyProjectOverviewAiReadModelDto = {
+  contract: "energyiq-project-overview-ai-read-model@1";
+  rendererKey: EnergyProjectRendererKeyDto;
+  binding: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    analysisPeriod: { from: string; to: string };
+    modelProfileId: string;
+    modelProfileRevision: number;
+    generation: Record<string, unknown>;
+  };
+  keyFindings: EnergyProjectOverviewAiUnitStatusDto;
+  sections: Record<string, EnergyProjectOverviewAiUnitStatusDto>;
+  additionalInsights: EnergyProjectOverviewAiUnitStatusDto;
+};
+
 export type EnergyProjectOverviewAdminReadinessStatusDto =
   | "ready"
   | "generating"

@@ -29,6 +29,7 @@ import type {
   EnergyOperationalPolicyConfigurationDto,
   EnergyProjectAnalysisResolutionDto,
   EnergyOverviewAiArtifactDto,
+  EnergyProjectOverviewAiReadModelDto,
   EnergyProjectOverviewAdminStateDto,
   EnergyProjectHarnessConfigurationDto,
   EnergyProjectAiOperationsDto,
@@ -678,6 +679,16 @@ export const configApi = {
   ): Promise<EnergyOverviewAiArtifactDto> {
     const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
+    );
+  },
+
+  getEnergyProjectOverviewAiReadModel(
+    projectId: string,
+    scopeId: string,
+  ): Promise<EnergyProjectOverviewAiReadModelDto> {
+    const params = overviewAiArtifactParams(scopeId);
+    return requestEnvelope<EnergyProjectOverviewAiReadModelDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
     );
   },

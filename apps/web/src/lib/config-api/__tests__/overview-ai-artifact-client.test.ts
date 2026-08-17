@@ -57,6 +57,28 @@ describe("Overview AI Artifact client controls", () => {
     );
   });
 
+  it("restores the project Overview AI read model through GET only", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      data: {
+        contract: "energyiq-project-overview-ai-read-model@1",
+        rendererKey: "ngee-ann-overview",
+        binding: {},
+        keyFindings: { status: "missing" },
+        sections: {},
+        additionalInsights: { status: "missing" },
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await configApi.getEnergyProjectOverviewAiReadModel("ngee-ann-polytechnic", "project");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/projects/ngee-ann-polytechnic/overview-ai-artifact?scopeId=project"),
+      expect.not.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("sends only the selected failed Section as the retry target", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       success: true,

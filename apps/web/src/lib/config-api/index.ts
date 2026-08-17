@@ -84,6 +84,8 @@ export type {
   EnergyProjectAnalysisScopeMetadataDto,
   EnergyProjectAnalysisSnapshotDto,
   EnergyOverviewAiArtifactDto,
+  EnergyProjectOverviewAiReadModelDto,
+  EnergyProjectOverviewAiUnitStatusDto,
   EnergyProjectOverviewAdminReadinessItemDto,
   EnergyProjectOverviewAdminReadinessStatusDto,
   EnergyProjectOverviewAdminStateDto,

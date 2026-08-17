@@ -18,6 +18,17 @@ vi.mock("./ngee-ann-ai-run", async () => {
   };
 });
 
+vi.mock("../../../lib/config-api", async () => {
+  const actual = await vi.importActual<typeof import("../../../lib/config-api")>("../../../lib/config-api");
+  return {
+    ...actual,
+    configApi: {
+      ...actual.configApi,
+      getEnergyProjectOverviewAiReadModel: vi.fn(() => new Promise<never>(() => undefined)),
+    },
+  };
+});
+
 type GoldenSnapshot = ReturnType<typeof ngeeAnnGoldenSnapshot>;
 type DailyAnomalyRow = Extract<
   NonNullable<GoldenSnapshot["analysis"]["dailyUsageAnomalies"]>,
@@ -419,13 +430,13 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Inspect Level 7 in Project Explorer");
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
-    expect(markup).toContain("AI energy analyst");
-    expect(markup).toContain("Inspecting scoped data");
+    expect(markup).toContain("AI interpretation");
+    expect(markup).toContain("Restoring saved AI analysis");
     expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
     expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Key Highlights"));
     expect(markup.indexOf("Circuit Category Analysis")).toBeLessThan(markup.indexOf("Personalized Recommendations"));
-    expect(markup.indexOf("Personalized Recommendations")).toBeLessThan(markup.indexOf("AI energy analyst"));
-    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
+    expect(markup.indexOf('id="ngee-ann-recommendations"')).toBeLessThan(markup.indexOf('id="ngee-ann-ai-analysis"'));
+    expect(markup.indexOf('id="ngee-ann-ai-analysis"')).toBeLessThan(markup.indexOf('id="ngee-ann-evidence"'));
 
     const container = document.createElement("div");
     container.innerHTML = markup;

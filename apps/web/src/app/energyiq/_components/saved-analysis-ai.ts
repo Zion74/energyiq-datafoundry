@@ -9,24 +9,10 @@ export async function runSavedAnalysisAiForSnapshot(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): Promise<EnergySavedAnalysisAiArtifactInputDto | null> {
   if (snapshot.renderer.key === "ngee-ann-overview") {
-    const [{ buildNgeeAnnOverviewViewModel }, { buildNgeeAnnAiRunInput, getOrStartNgeeAnnAiRun }] = await Promise.all([
-      import("./ngee-ann-overview-view-model"),
-      import("./ngee-ann-ai-run"),
-    ]);
-    const input = buildNgeeAnnAiRunInput(
-      snapshot,
-      buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities,
-    );
-    if (!input) return null;
-    const result = await getOrStartNgeeAnnAiRun(input);
-    if (result.status !== "available") return null;
-    return {
-      contract: "energyiq-saved-ai-result@1",
-      rendererKey: "ngee-ann-overview",
-      snapshotId: snapshot.dataSnapshot.id,
-      projectReleaseId: snapshot.projectRelease.id,
-      result,
-    };
+    // Ngee Ann live analysis now restores server-persisted Project artifacts.
+    // Until Saved @2 accepts that exact read model, saving must not revive the
+    // legacy browser runner or create Provider work as a side effect.
+    return null;
   }
 
   if (snapshot.renderer.key === "preschool-overview") {
