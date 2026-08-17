@@ -60,10 +60,10 @@ export type ProjectOverviewAiAdapter = {
 };
 
 export const findProjectOverviewAiAdapter = (
-  adapters: readonly ProjectOverviewAiAdapter[],
+  adapters: readonly ProjectOverviewAiAdapter[] | undefined,
   rendererKey: ProjectRendererKey | null,
 ): ProjectOverviewAiAdapter | null => rendererKey
-  ? adapters.find((adapter) => adapter.rendererKey === rendererKey) ?? null
+  ? adapters?.find((adapter) => adapter.rendererKey === rendererKey) ?? null
   : null;
 
 export const projectOverviewAiReadModelMatchesIdentity = (
