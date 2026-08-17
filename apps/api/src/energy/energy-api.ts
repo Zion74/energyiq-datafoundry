@@ -45,6 +45,7 @@ import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
 import {
   executeEnergyScopeAnalysisWithLatestAvailable,
+  resolveEnergyCurrentOverviewPeriodBasis,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyLatestAvailableDay,
   selectEnergyLatestCompleteDay,
@@ -101,11 +102,15 @@ type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestComplete
 const resolveExplorerAnchoredWindow = async (
   input: ExplorerPeriodSelectionInput & {
     analysisWindow: "latest-complete-day" | "current-overview-28d";
+    rendererKey?: string;
   },
 ): Promise<{ localFrom: string; localTo: string }> => {
   if (input.analysisWindow === "current-overview-28d") {
     try {
-      const selected = await selectEnergyCurrentOverviewPeriod(input);
+      const selected = await selectEnergyCurrentOverviewPeriod({
+        ...input,
+        periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.rendererKey),
+      });
       return {
         localFrom: selected.period.localFrom,
         localTo: selected.cutoffLocalDate,
@@ -1570,6 +1575,9 @@ export const handleEnergyApiRequest = async (
             dataGateway: context.dataGateway,
             userId: context.userId,
             context: preliminaryRun.context,
+            ...(preliminaryRun.projectRelease
+              ? { rendererKey: preliminaryRun.projectRelease.renderer.key }
+              : {}),
             analysisWindow: query.analysisWindow === "current-overview-28d"
               ? "current-overview-28d"
               : "latest-complete-day",

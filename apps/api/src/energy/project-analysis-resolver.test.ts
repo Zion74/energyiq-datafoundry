@@ -597,7 +597,7 @@ describe("ProjectAnalysisResolver", () => {
           scopeId: "level-6",
           resource: "electricity" as const,
           analysisWindow: "current-overview-28d" as const,
-          from: "2026-05-20",
+          from: "2026-06-01",
           to: "2026-06-16",
           expectedDataSnapshotId: current.snapshot.context.dataSnapshotId,
           expectedProjectReleaseId: current.snapshot.projectRelease.id,
@@ -638,6 +638,71 @@ describe("ProjectAnalysisResolver", () => {
       })).rejects.toThrow("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
     } finally {
       vi.restoreAllMocks();
+      metadata.close();
+      removeTemporaryFixture(root);
+    }
+  }, 30_000);
+
+  it("keeps the Preschool current Overview on its rolling 28-day window after Ngee Ann adopts month-to-date", async () => {
+    const root = mkdtempSync(join(tmpdir(), "project-analysis-preschool-current-window-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializePreschoolGoldenFixture(databasePath, metadata, {
+        transformIntervalFacts: (facts) => facts.map((fact) => ({
+          ...fact,
+          intervalStart: shiftFixtureIsoDate(fact.intervalStart, 67),
+          intervalEnd: shiftFixtureIsoDate(fact.intervalEnd, 67),
+          localDate: "2026-07-07",
+          dayType: "weekday" as const,
+        })),
+      });
+
+      const current = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        request: {
+          projectId: PRESCHOOL_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          analysisWindow: "current-overview-28d",
+        },
+        databasePath,
+      });
+      expect(current.status).toBe("ready");
+      if (current.status !== "ready") throw new Error("Expected current Preschool analysis");
+
+      const pinned = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        request: {
+          projectId: PRESCHOOL_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          analysisWindow: "current-overview-28d",
+          from: "2026-06-10",
+          to: "2026-07-07",
+          expectedDataSnapshotId: current.snapshot.context.dataSnapshotId,
+          expectedProjectReleaseId: current.snapshot.projectRelease.id,
+        },
+        databasePath,
+      });
+
+      expect(pinned.status).toBe("ready");
+      if (pinned.status !== "ready") throw new Error("Expected pinned Preschool analysis");
+      expect(pinned.snapshot.context).toMatchObject({
+        from: "2026-06-09T16:00:00.000Z",
+        to: "2026-07-07T16:00:00.000Z",
+        dataSnapshotId: current.snapshot.context.dataSnapshotId,
+        projectReleaseId: current.snapshot.projectRelease.id,
+      });
+    } finally {
       metadata.close();
       removeTemporaryFixture(root);
     }

@@ -1138,6 +1138,7 @@ describe("EnergyScopeAnalysis", () => {
         userId: "dev-user",
         context,
         databasePath,
+        periodBasis: "calendar_month_to_date",
       });
       expect(currentOverview).toEqual({
         periodBasis: "calendar_month_to_date",

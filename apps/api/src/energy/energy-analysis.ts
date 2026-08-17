@@ -677,7 +677,7 @@ export type EnergyLatestCompletePeriodSelection = {
 };
 
 export type EnergyCurrentOverviewPeriodSelection = {
-  periodBasis: "calendar_month_to_date";
+  periodBasis: EnergyCurrentOverviewPeriodBasis;
   periodDays: number;
   cutoffLocalDate: string;
   intervalMinutes: number;
@@ -688,6 +688,10 @@ export type EnergyCurrentOverviewPeriodSelection = {
     to: string;
   };
 };
+
+export type EnergyCurrentOverviewPeriodBasis =
+  | "rolling_28_days"
+  | "calendar_month_to_date";
 
 type MeterAggregate = {
   meterNodeId: string;
@@ -838,6 +842,7 @@ const GOLDEN_SELECTION_POLICY =
   "highest current coverage, then previous-period coverage, then fewest quality events, then latest" as const;
 
 const LATEST_COMPLETE_PERIOD_DAYS = 7 as const;
+const CURRENT_OVERVIEW_PERIOD_DAYS = 28 as const;
 
 type EnergyPeriodSelectionInput = {
   metadataStore: MetadataStore;
@@ -977,7 +982,7 @@ export const resolveEnergyLatestAvailablePeriod = async (
 };
 
 export const selectEnergyCurrentOverviewPeriod = async (
-  input: EnergyPeriodSelectionInput,
+  input: EnergyPeriodSelectionInput & { periodBasis: EnergyCurrentOverviewPeriodBasis },
 ): Promise<EnergyCurrentOverviewPeriodSelection> => {
   const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
     input,
@@ -990,6 +995,7 @@ export const selectEnergyCurrentOverviewPeriod = async (
     sql: currentOverviewPeriodSelectionSql(
       scoped.viewName,
       aggregateMeterNodeIds,
+      input.periodBasis,
       input.context.timezone,
     ),
     limit: 1,
@@ -999,7 +1005,7 @@ export const selectEnergyCurrentOverviewPeriod = async (
     throw new Error("ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND");
   }
   return {
-    periodBasis: "calendar_month_to_date",
+    periodBasis: input.periodBasis,
     periodDays: numberAt(row, 6),
     cutoffLocalDate: stringAt(row, 0),
     intervalMinutes: numberAt(row, 5),
@@ -1010,6 +1016,14 @@ export const selectEnergyCurrentOverviewPeriod = async (
       to: isoAt(row, 4),
     },
   };
+};
+
+export const resolveEnergyCurrentOverviewPeriodBasis = (
+  rendererKey: string | undefined,
+): EnergyCurrentOverviewPeriodBasis => {
+  if (rendererKey === "ngee-ann-overview") return "calendar_month_to_date";
+  if (rendererKey === "preschool-overview") return "rolling_28_days";
+  throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
 };
 
 const prepareEnergyPeriodSelection = async (
@@ -5114,22 +5128,30 @@ const latestAvailableDaySelectionSql = (
 const currentOverviewPeriodSelectionSql = (
   viewName: string,
   meterNodeIds: string[],
+  periodBasis: EnergyCurrentOverviewPeriodBasis,
   timezone: string,
-): string => `
+): string => {
+  const localFromExpression = periodBasis === "rolling_28_days"
+    ? `local_date - INTERVAL ${CURRENT_OVERVIEW_PERIOD_DAYS - 1} DAY`
+    : "DATE_TRUNC('month', local_date)";
+  const periodDaysExpression = periodBasis === "rolling_28_days"
+    ? String(CURRENT_OVERVIEW_PERIOD_DAYS)
+    : "DATE_DIFF('day', DATE_TRUNC('month', local_date), local_date) + 1";
+  return `
   SELECT
     STRFTIME(local_date, '%Y-%m-%d') AS cutoff_local_date,
-    STRFTIME(DATE_TRUNC('month', local_date), '%Y-%m-%d') AS local_from,
+    STRFTIME(${localFromExpression}, '%Y-%m-%d') AS local_from,
     STRFTIME(local_date + INTERVAL 1 DAY, '%Y-%m-%d') AS local_to_exclusive,
     EPOCH_MS(TIMEZONE(
       ${sqlLiteral(timezone)},
-      CAST(DATE_TRUNC('month', local_date) AS TIMESTAMP)
+      CAST(${localFromExpression} AS TIMESTAMP)
     )) AS from_ms,
     EPOCH_MS(TIMEZONE(
       ${sqlLiteral(timezone)},
       CAST(local_date + INTERVAL 1 DAY AS TIMESTAMP)
     )) AS to_ms,
     interval_minutes,
-    DATE_DIFF('day', DATE_TRUNC('month', local_date), local_date) + 1 AS period_days
+    ${periodDaysExpression} AS period_days
   FROM (
     SELECT
       local_date,
@@ -5150,6 +5172,7 @@ const currentOverviewPeriodSelectionSql = (
   ORDER BY local_date DESC
   LIMIT 1
 `;
+};
 
 const goldenDaySelectionSql = (
   viewName: string,
