@@ -221,6 +221,43 @@ describe("createEnergyQueryContextItem", () => {
         },
         preschoolOperational: {
           status: "available",
+          analysisReady: {
+            contract: {
+              id: "preschool-operational-analysis-ready",
+              version: "1",
+              maximumCellCount: 22_320,
+              eventCapturePolicy: "all qualifying events; no ranking or Top-N truncation",
+              recurrenceGrain: "operating-state x Centre x local-hour x Circuit",
+              minimumPatternComparableObservationCount: 4,
+              similarCentreBasis: "same published centreType",
+            },
+            eventCatalog: {
+              status: "complete",
+              boundedCellCount: 100,
+              totalEventCount: 1_000,
+              capturedEventCount: 1_000,
+              truncated: false,
+              events: Array.from({ length: 1_000 }, (_, index) => ({
+                id: `must-not-inline-operational-event-${index}`,
+              })),
+            },
+            recurrence: {
+              status: "complete",
+              rows: Array.from({ length: 22_320 }, (_, index) => ({
+                key: `must-not-inline-operational-recurrence-${index}`,
+              })),
+            },
+            contextAvailability: {
+              mustRunSchedule: {
+                status: "unknown",
+                reason: "MUST_RUN_SCHEDULE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+              },
+              equipmentState: {
+                status: "unknown",
+                reason: "EQUIPMENT_STATE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+              },
+            },
+          },
           sop: {
             status: "provisional",
             baselineScore: 100,
@@ -239,7 +276,11 @@ describe("createEnergyQueryContextItem", () => {
     const content = String(item.content);
 
     expect(item.sourceType).toBe("project-analysis-snapshot");
+    expect(content).toContain('"projectId":"project-1"');
+    expect(content).toContain('"scopeId":"level-7"');
     expect(content).toContain('"dataSnapshotId":"snapshot-v1"');
+    expect(content).toContain('"dataCutoff":"2026-07-08T16:00:00.000Z"');
+    expect(content).toContain('"businessCalendarVersion":"calendar-v1"');
     expect(content).toContain("preschool.benchmark.cohorts.active%20aging%20center.eui.p50");
     expect(content).toContain('"cohort":"Active Aging Center","sampleSize":"8"');
     expect(content).toContain('"sourceCircuitCount":2');
@@ -248,6 +289,11 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).not.toContain("do-not-copy-complete-metadata-evidence");
     expect(content).not.toContain("internal-source-circuit-a");
     expect(content).not.toContain('"centreCode":"A","standbySpikeCount":0');
+    expect(content).not.toContain("must-not-inline-operational-event");
+    expect(content).not.toContain("must-not-inline-operational-recurrence");
+    expect(content).toContain('"capturedEventCount":1000');
+    expect(content).toContain('"rowCount":22320');
+    expect(content).toContain("EQUIPMENT_STATE_NOT_PROVIDED_BY_CANONICAL_INPUTS");
     expect(content).not.toContain('"evidenceRefs"');
     expect(content.match(/preschool-benchmark/gu)).toHaveLength(1);
     expect(content.length).toBeLessThan(15_000);

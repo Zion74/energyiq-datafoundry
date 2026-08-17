@@ -250,8 +250,26 @@ const compactPreschoolOperational = (
   projection: ProjectAnalysisSnapshot["preschoolOperational"],
 ): unknown => {
   if (!projection || projection.status === "unavailable") return projection;
+  const { analysisReady, ...boundedProjection } = projection;
   return {
-    ...projection,
+    ...boundedProjection,
+    ...(analysisReady ? {
+      analysisReady: {
+        contract: analysisReady.contract,
+        eventCatalog: {
+          status: analysisReady.eventCatalog.status,
+          boundedCellCount: analysisReady.eventCatalog.boundedCellCount,
+          totalEventCount: analysisReady.eventCatalog.totalEventCount,
+          capturedEventCount: analysisReady.eventCatalog.capturedEventCount,
+          truncated: analysisReady.eventCatalog.truncated,
+        },
+        recurrence: {
+          status: analysisReady.recurrence.status,
+          rowCount: analysisReady.recurrence.rows.length,
+        },
+        contextAvailability: analysisReady.contextAvailability,
+      },
+    } : {}),
     sop: {
       ...projection.sop,
       scoredCentreCount: projection.sop.centres.length,
