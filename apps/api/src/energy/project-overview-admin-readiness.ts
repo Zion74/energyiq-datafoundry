@@ -391,7 +391,20 @@ const adapterUnitItem = (
   id: string,
   label: string,
   unit: ProjectOverviewAiUnitStatus,
-): ProjectOverviewAdminReadinessItem => unitItem(id, label, unit as PreschoolOverviewAiUnitStatus<unknown>);
+): ProjectOverviewAdminReadinessItem => {
+  if (unit.status === "missing") return missingItem(id, label);
+  if (unit.status === "failed") {
+    return {
+      id,
+      label,
+      status: "needs-attention",
+      detail: readableReason(unit.reason),
+      artifactId: unit.artifactId,
+      ...(unit.completedAt ? { completedAt: unit.completedAt } : {}),
+    };
+  }
+  return unitItem(id, label, unit as PreschoolOverviewAiUnitStatus<unknown>);
+};
 
 const retryTargetForItem = (
   item: ProjectOverviewAdminReadinessItem,

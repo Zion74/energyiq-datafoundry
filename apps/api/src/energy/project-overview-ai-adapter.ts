@@ -11,9 +11,11 @@ export type ProjectOverviewAiSectionDefinition = {
 };
 
 export type ProjectOverviewAiUnitStatus =
+  | { status: "missing" }
   | { status: "queued" | "running"; artifactId?: string }
   | { status: "available"; artifactId: string; completedAt?: string; result: unknown }
   | { status: "empty"; artifactId: string; completedAt?: string }
+  | { status: "failed"; reason: string; artifactId: string; completedAt?: string }
   | { status: "unavailable"; reason: string; artifactId?: string; completedAt?: string };
 
 export type ProjectOverviewAiReadModel = {
