@@ -735,6 +735,9 @@ const savedAnalysisForJuly = (input: { omitTariff?: boolean } = {}): EnergyIqSav
   const analysis = mayAnalysis(1);
   const planningOutlook = recoverPreschoolPlanningOutlookFromCompleteWeeks(analysis);
   if (planningOutlook.status !== "provisional") throw new Error("Expected recoverable May plan");
+  if (!planningOutlook.tariffReference || !planningOutlook.costEstimate) {
+    throw new Error("Expected recoverable May tariff and cost plan");
+  }
   const projectedKwh = planningOutlook.weeklyBaseline.averageKwh * (31 / 7);
   const rate = planningOutlook.tariffReference.beforeGstSgdPerKwh;
   Reflect.set(planningOutlook, "targetPeriod", {

@@ -489,6 +489,7 @@ export function PreschoolOverviewRenderer({
               <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
               <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
                 <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Coverage" value={view.operational.coverage} />
                 <ReadinessRow label="Spike rule" value={view.operational.threshold} />
                 <ReadinessRow label="Tariff" value={view.operational.standby.provisionalCostNote} />
                 <ReadinessRow label="Reconciliation" value={view.operational.standby.reconciliation} />
@@ -547,6 +548,7 @@ export function PreschoolOverviewRenderer({
               <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
               <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
                 <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Coverage" value={view.operational.coverage} />
                 <ReadinessRow label="Spike rule" value={view.operational.threshold} />
                 <ReadinessRow label="Tariff" value={view.operational.operating.provisionalCostNote} />
                 <ReadinessRow label="Reconciliation" value={view.operational.operating.reconciliation} />

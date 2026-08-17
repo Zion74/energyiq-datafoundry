@@ -9,6 +9,53 @@ import { PRESCHOOL_OVERVIEW_SECTIONS, PreschoolOverviewRenderer } from "./presch
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
+  it("renders partial operational coverage and withholds cost when no accepted tariff covers the window", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
+    snapshot.preschoolOperational.contract = {
+      id: "preschool-operational-behaviour",
+      version: "4",
+      spikeThresholdPct: 50,
+    };
+    snapshot.preschoolOperational.coverage = {
+      status: "partial",
+      expectedCellCount: 20_160,
+      observedCellCount: 20_130,
+      missingCellCount: 30,
+      completeLocalDayCount: 27,
+      partialLocalDayCount: 1,
+      missingLocalHourCount: 1,
+    };
+    snapshot.preschoolOperational.energy.provisionalStandbyCostBeforeGstSgd = null;
+    snapshot.preschoolOperational.energy.provisionalOperatingCostBeforeGstSgd = null;
+    snapshot.preschoolOperational.standbyAppliances.applianceGroups.forEach((row) => {
+      row.provisionalCostBeforeGstSgd = null;
+    });
+    snapshot.preschoolOperational.operatingAppliances.applianceGroups.forEach((row) => {
+      row.provisionalCostBeforeGstSgd = null;
+    });
+    snapshot.preschoolOperational.standbyAppliances.appliances.forEach((row) => {
+      row.provisionalCostBeforeGstSgd = null;
+    });
+    snapshot.preschoolOperational.operatingAppliances.appliances.forEach((row) => {
+      row.provisionalCostBeforeGstSgd = null;
+    });
+    delete snapshot.preschoolOperational.tariffReference;
+
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+      />,
+    );
+
+    expect(markup).toContain("27 complete local days · 1 partial day · 1 missing whole-portfolio hour");
+    expect(markup).toContain("No accepted tariff covers the full analysis period; energy remains available and cost is withheld.");
+    expect(markup).toContain("Unavailable");
+    expect(markup).not.toContain("S$846.40");
+    expect(markup).not.toContain("S$5,949.78");
+  });
+
   it("renders the customer reading flow from Overall metrics through At a glance and Key Findings", () => {
     const snapshot = preschoolGoldenSnapshot();
     const markup = renderToStaticMarkup(

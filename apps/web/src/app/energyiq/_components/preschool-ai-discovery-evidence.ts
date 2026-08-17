@@ -297,7 +297,12 @@ function validPreschoolSnapshotPins(snapshot: EnergyProjectAnalysisSnapshotDto):
     || appliances.evidence.hierarchyRevisionId !== context.hierarchyRevisionId
     || appliances.evidence.meterMappingRevisionId !== context.meterMappingRevisionId
     || (operational !== null && (
-      operational.contract.id !== "preschool-may-2026-operational-behaviour"
+      !(
+        (operational.contract.id === "preschool-may-2026-operational-behaviour"
+          && (operational.contract.version === "2" || operational.contract.version === "3"))
+        || (operational.contract.id === "preschool-operational-behaviour"
+          && operational.contract.version === "4")
+      )
       || operational.period.start !== primaryPeriod.start
       || operational.period.endExclusive !== primaryPeriod.endExclusive
       || operational.period.timezone !== context.timezone

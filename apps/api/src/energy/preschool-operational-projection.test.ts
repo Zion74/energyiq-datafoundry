@@ -17,6 +17,7 @@ import type { ProjectAnalysisPayload } from "./project-analysis-metadata.js";
 import type { PublishedProjectRelease } from "./project-analysis-resolver.js";
 import {
   buildPreschoolOperationalProjection,
+  buildPreschoolPlanningOutlook,
   loadPreschoolOperationalProjection,
   type PreschoolOperationalCell,
 } from "./preschool-operational-projection.js";
@@ -79,7 +80,11 @@ describe("Preschool operational projection", () => {
 
     expect(projection.status).toBe("available");
     if (projection.status !== "available") throw new Error("Expected available projection");
-    expect(projection.contract.version).toBe("3");
+    expect(projection.contract).toEqual({
+      id: "preschool-operational-behaviour",
+      version: "4",
+      spikeThresholdPct: 50,
+    });
     expect(projection.energy).toEqual({
       totalKwh: 24_921.8123,
       standbyKwh: 3_103.784,
@@ -618,7 +623,7 @@ describe("Preschool operational projection", () => {
     expect(cells).toHaveLength(20_160);
     expect(projection.status).toBe("available");
     if (projection.status !== "available") throw new Error(projection.reason.message);
-    expect(projection.contract.version).toBe("3");
+    expect(projection.contract.version).toBe("4");
     expect(projection.period).toEqual({ start, endExclusive, timezone: "Asia/Singapore" });
     expect(projection.hourlyProfile).toMatchObject({
       completeDayCount: 28,
@@ -667,7 +672,7 @@ describe("Preschool operational projection", () => {
     });
   });
 
-  it("does not generalise Operational beyond the accepted May/June fixture range", () => {
+  it("derives Operational from a later exact 28-day Snapshot window without a demo-date whitelist", () => {
     const cells = rollingWindowCells("2026-07-01", 28);
     const dataSnapshotId = "preschool-snapshot-arbitrary-july-window";
     const julyCalendar = calendar();
@@ -692,10 +697,64 @@ describe("Preschool operational projection", () => {
       cells,
     });
 
-    expect(projection).toMatchObject({
-      status: "unavailable",
-      reason: { code: "PRESCHOOL_OPERATIONAL_CONTRACT_UNSUPPORTED" },
+    expect(projection.status).toBe("available");
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    expect(projection.period).toEqual({
+      start: "2026-06-30T16:00:00.000Z",
+      endExclusive: "2026-07-28T16:00:00.000Z",
+      timezone: "Asia/Singapore",
     });
+    expect(projection.hourlyProfile.completeDayCount).toBe(28);
+    expect(projection.analysisReady?.eventCatalog.boundedCellCount).toBe(20_160);
+    expect(projection.tariffReference).toBeUndefined();
+    expect(projection.energy.provisionalStandbyCostBeforeGstSgd).toBeNull();
+    expect(projection.energy.provisionalOperatingCostBeforeGstSgd).toBeNull();
+    expect(projection.standbyAppliances.provisionalCostBeforeGstSgd).toBeNull();
+    expect(projection.operatingAppliances.provisionalCostBeforeGstSgd).toBeNull();
+  });
+
+  it("keeps a later rolling window useful when one complete Centre-hour is missing and reports partial coverage", () => {
+    const fullCells = rollingWindowCells("2026-06-10", 28);
+    const cells = fullCells.filter((cell) => !(cell.localDate === "2026-07-01" && cell.localHour === 0));
+    const dataSnapshotId = "preschool-snapshot-july-one-hour-gap";
+    const julyCalendar = calendar();
+    julyCalendar.entries[0]!.effective_to = "2026-07-08";
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId,
+      period: {
+        start: "2026-06-09T16:00:00.000Z",
+        endExclusive: "2026-07-07T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysisForCells(cells, dataSnapshotId),
+      calendar: julyCalendar,
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: null,
+      })),
+      cells,
+    });
+
+    expect(fullCells).toHaveLength(20_160);
+    expect(cells).toHaveLength(20_130);
+    expect(projection.status).toBe("available");
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    expect(projection.coverage).toEqual({
+      status: "partial",
+      expectedCellCount: 20_160,
+      observedCellCount: 20_130,
+      missingCellCount: 30,
+      completeLocalDayCount: 27,
+      partialLocalDayCount: 1,
+      missingLocalHourCount: 1,
+    });
+    expect(projection.hourlyProfile.completeDayCount).toBe(27);
+    expect(projection.hourlyProfile.rows.find((row) => row.localHour === 0)?.observedDayCount).toBe(27);
+    expect(projection.hourlyProfile.rows.find((row) => row.localHour === 1)?.observedDayCount).toBe(28);
   });
 
   it("accepts release-scoped Circuit identities and exposes user-facing Appliance aliases", () => {
@@ -808,6 +867,114 @@ describe("Preschool operational projection", () => {
     expect(estimateSeries.scopes[0]?.buckets.monthly).toHaveLength(1);
     expect(estimateSeries.scopes[0]?.buckets.daily.reduce((total, bucket) => total + bucket.estimatedKwh, 0)).toBeCloseTo(3525, 2);
     expect(estimateSeries.scopes[0]?.estimatedCostBeforeGstSgd).toBe(961.2675);
+  });
+
+  it("derives a July energy outlook from the four complete June weeks in the same Snapshot", () => {
+    const julyAnalysis = planningAnalysis();
+    julyAnalysis.dailyTotals.scopes.forEach((scope) => {
+      scope.rows.forEach((row) => {
+        row.localDate = row.localDate.replace("2026-05-", "2026-06-");
+        row.from = row.from.replace("2026-05-", "2026-06-");
+        row.to = row.to.replace("2026-05-", "2026-06-");
+      });
+    });
+
+    const outlook = buildPreschoolPlanningOutlook(julyAnalysis, {
+      start: "2026-07-01",
+      endExclusive: "2026-08-01",
+      timezone: "Asia/Singapore",
+      targetDayCount: 31,
+    });
+
+    expect(outlook).toMatchObject({
+      status: "provisional",
+      targetPeriod: {
+        start: "2026-07-01",
+        endInclusive: "2026-07-31",
+        endExclusive: "2026-08-01",
+        days: 31,
+      },
+      sourceWeeks: [
+        { start: "2026-06-01", endInclusive: "2026-06-07", usageKwh: 728 },
+        { start: "2026-06-08", endInclusive: "2026-06-14", usageKwh: 777 },
+        { start: "2026-06-15", endInclusive: "2026-06-21", usageKwh: 826 },
+        { start: "2026-06-22", endInclusive: "2026-06-28", usageKwh: 875 },
+      ],
+      weeklyBaseline: { averageKwh: 801.5, minimumKwh: 728, maximumKwh: 875 },
+      usageEstimate: { projectedKwh: 3_549.5, lowerKwh: 3_224, upperKwh: 3_875 },
+      evidence: { dataSnapshotId: "preschool-snapshot-may-2026" },
+    });
+    if (outlook.status !== "provisional") throw new Error(outlook.reason.message);
+    expect(outlook.tariffReference).toBeUndefined();
+    expect(outlook.costEstimate).toBeUndefined();
+    expect(outlook.limitations).toContain(
+      "No release-pinned tariff covers the target period; energy remains available and cost is withheld.",
+    );
+  });
+
+  it("keeps the planning energy baseline independent from the Operational Calendar projection", () => {
+    const planningOnlyAnalysis = planningAnalysis();
+    planningOnlyAnalysis.offHours = { status: "unavailable" } as typeof planningOnlyAnalysis.offHours;
+
+    const outlook = buildPreschoolPlanningOutlook(planningOnlyAnalysis, {
+      start: "2026-06-01",
+      endExclusive: "2026-07-01",
+      timezone: "Asia/Singapore",
+      targetDayCount: 30,
+    });
+
+    expect(outlook.status).toBe("provisional");
+  });
+
+  it("keeps the rolling Operational window separate from the exact same-Snapshot planning source window", () => {
+    const cells = rollingWindowCells("2026-06-10", 28);
+    const dataSnapshotId = "preschool-snapshot-july-current-with-june-planning-source";
+    const planningSourceAnalysis = planningAnalysis();
+    planningSourceAnalysis.provenance.dataSnapshotId = dataSnapshotId;
+    planningSourceAnalysis.dailyTotals.scopes.forEach((scope) => {
+      scope.rows.forEach((row) => {
+        row.localDate = row.localDate.replace("2026-05-", "2026-06-");
+        row.from = row.from.replace("2026-05-", "2026-06-");
+        row.to = row.to.replace("2026-05-", "2026-06-");
+      });
+    });
+    const julyCalendar = calendar();
+    julyCalendar.entries[0]!.effective_to = "2026-07-08";
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId,
+      period: {
+        start: "2026-06-09T16:00:00.000Z",
+        endExclusive: "2026-07-07T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysisForCells(cells, dataSnapshotId),
+      planningAnalysis: planningSourceAnalysis,
+      planningTargetPeriod: {
+        start: "2026-07-01",
+        endExclusive: "2026-08-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 31,
+      },
+      calendar: julyCalendar,
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: null,
+      })),
+      cells,
+    });
+
+    expect(projection.status).toBe("available");
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    expect(projection.planningOutlook).toMatchObject({
+      status: "provisional",
+      targetPeriod: { start: "2026-07-01", endExclusive: "2026-08-01" },
+      sourceWeeks: [{ start: "2026-06-01" }, { start: "2026-06-08" }, { start: "2026-06-15" }, { start: "2026-06-22" }],
+      evidence: { dataSnapshotId },
+    });
   });
 
   it("classifies each worst Spike from the published Calendar without assuming every exception is a public holiday", () => {
@@ -1016,7 +1183,7 @@ describe("Preschool operational projection", () => {
       if (projection.status !== "available") throw new Error(projection.reason.message);
       expect(projection).toMatchObject({
         status: "available",
-        contract: { version: "3" },
+        contract: { id: "preschool-operational-behaviour", version: "4" },
         period: {
           start: "2026-05-10T16:00:00.000Z",
           endExclusive: "2026-06-07T16:00:00.000Z",
@@ -1137,7 +1304,7 @@ describe("Preschool operational projection", () => {
 
       if (projection.status !== "available") throw new Error(projection.reason.message);
       expect(projection.status).toBe("available");
-      expect(projection.contract.version).toBe("3");
+      expect(projection.contract.version).toBe("4");
       expect(projection.spikes.standby).toMatchObject({ count: 7, centreCount: 3 });
       expect(projection.spikes.operating).toMatchObject({ count: 21, centreCount: 14 });
       expect(projection.sop.breachingCentreCodes).toEqual(["L", "E", "N"]);

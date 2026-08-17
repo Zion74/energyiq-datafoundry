@@ -1428,13 +1428,13 @@ export type PreschoolBenchmarkProjectionDto = {
 
 export type PreschoolOperationalApplianceCompositionDto = {
   totalKwh: number;
-  provisionalCostBeforeGstSgd: number;
+  provisionalCostBeforeGstSgd: number | null;
   reconciliationGapKwh: number;
   applianceGroups: Array<{
     name: string;
     usageKwh: number;
     sharePct: number;
-    provisionalCostBeforeGstSgd: number;
+    provisionalCostBeforeGstSgd: number | null;
     sourceAliases: string[];
   }>;
   appliances: Array<{
@@ -1442,7 +1442,7 @@ export type PreschoolOperationalApplianceCompositionDto = {
     applianceGroup: string;
     usageKwh: number;
     sharePct: number;
-    provisionalCostBeforeGstSgd: number;
+    provisionalCostBeforeGstSgd: number | null;
     centreCount: number;
     sourceCircuitIds: string[];
   }>;
@@ -1451,8 +1451,8 @@ export type PreschoolOperationalApplianceCompositionDto = {
 export type PreschoolOperationalProjectionDto = {
   status: "available";
   contract: {
-    id: "preschool-may-2026-operational-behaviour";
-    version: "2" | "3";
+    id: "preschool-may-2026-operational-behaviour" | "preschool-operational-behaviour";
+    version: "2" | "3" | "4";
     spikeThresholdPct: 50;
   };
   period: {
@@ -1460,16 +1460,25 @@ export type PreschoolOperationalProjectionDto = {
     endExclusive: string;
     timezone: string;
   };
+  coverage?: {
+    status: "complete" | "partial";
+    expectedCellCount: number;
+    observedCellCount: number;
+    missingCellCount: number;
+    completeLocalDayCount: number;
+    partialLocalDayCount: number;
+    missingLocalHourCount: number;
+  };
   energy: {
     totalKwh: number;
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
     operatingSharePct: number;
-    provisionalStandbyCostBeforeGstSgd: number;
-    provisionalOperatingCostBeforeGstSgd: number;
+    provisionalStandbyCostBeforeGstSgd: number | null;
+    provisionalOperatingCostBeforeGstSgd: number | null;
   };
-  tariffReference: {
+  tariffReference?: {
     sourceName: "SP Group";
     sourceUrl: string;
     appendixUrl: string;
@@ -1483,12 +1492,13 @@ export type PreschoolOperationalProjectionDto = {
   operatingAppliances: PreschoolOperationalApplianceCompositionDto;
   hourlyProfile: {
     completeDayCount: number;
-    unit: "mean kWh per complete day";
+    unit: "mean kWh per complete day" | "mean kWh per observed day";
     rows: Array<{
       localHour: number;
       operatingKwh: number;
       closedHourKwh: number;
       totalKwh: number;
+      observedDayCount?: number;
     }>;
   };
   planningOutlook: {
@@ -1520,14 +1530,14 @@ export type PreschoolOperationalProjectionDto = {
       lowerKwh: number;
       upperKwh: number;
     };
-    costEstimate: {
+    costEstimate?: {
       currency: "SGD";
       currentPeriodBeforeGstSgd: number;
       projectedBeforeGstSgd: number;
       lowerBeforeGstSgd: number;
       upperBeforeGstSgd: number;
     };
-    tariffReference: {
+    tariffReference?: {
       sourceName: "SP Group";
       sourceUrl: string;
       appendixUrl: string;
@@ -1646,7 +1656,8 @@ export type PreschoolPlanningEstimateSeriesDto = {
   contract: {
     id: "preschool-june-2026-estimate-series" | "preschool-monthly-estimate-series";
     version: "1" | "2";
-    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total"
+      | "same-weekday mean from four complete weeks, scaled to the Saved Plan total";
   };
   scopes: Array<{
     scopeId: string;
@@ -1654,7 +1665,7 @@ export type PreschoolPlanningEstimateSeriesDto = {
     scopeType: string;
     scopeRole: "portfolio" | "centre";
     estimatedKwh: number;
-    estimatedCostBeforeGstSgd: number;
+    estimatedCostBeforeGstSgd: number | null;
     buckets: Record<"daily" | "weekly" | "monthly", Array<{
       start: string;
       endExclusive: string;

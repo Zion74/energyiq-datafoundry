@@ -288,6 +288,7 @@ export type PreschoolOverviewViewModel = {
   };
   operational: {
     status: "available";
+    coverage: string;
     hourlyProfile: {
       completeDayCount: number;
       unit: string;
@@ -463,7 +464,9 @@ export function buildPreschoolOverviewViewModel(
     ? Reflect.get(snapshot.preschoolOperational.contract, "version")
     : null;
   const hasCurrentOperationalContract = snapshot.preschoolOperational?.status === "available"
-    && (operationalContractVersion === "2" || operationalContractVersion === "3")
+    && (operationalContractVersion === "2"
+      || operationalContractVersion === "3"
+      || operationalContractVersion === "4")
     && Reflect.get(snapshot.preschoolOperational, "operatingAppliances") !== undefined;
   const periodLabel = formatAnalysisWindowLabel(
     snapshot.context.from,
@@ -474,10 +477,21 @@ export function buildPreschoolOverviewViewModel(
   const planningLifecycle = snapshot.preschoolPlanningLifecycle?.status === "available"
     ? snapshot.preschoolPlanningLifecycle
     : null;
+  const operationalTariffReference = snapshot.preschoolOperational?.status === "available"
+    ? snapshot.preschoolOperational.tariffReference ?? null
+    : null;
+  const operationalCostLabel = (value: number | null): string => (
+    operationalTariffReference && value !== null
+      ? `S$${formatNumber(value, 2)}`
+      : "Unavailable"
+  );
+  const operationalCostNote = operationalTariffReference
+    ? `${operationalTariffReference.sourceName} ${formatNumber(operationalTariffReference.beforeGstSgdPerKwh, 4)} SGD/kWh before GST reference · estimate only, not a bill`
+    : "No accepted tariff covers the full analysis period; energy remains available and cost is withheld.";
   const provisionalRate = planningReference?.tariffReference?.beforeGstSgdPerKwh ?? null;
   const estimatedCost = analysis.cost.status === "available"
     ? `${currencySymbol(analysis.cost.currency)}${formatNumber(analysis.cost.amount, 2)}`
-    : planningReference
+    : planningReference?.costEstimate
       ? `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 2)}`
       : "Unavailable";
   const centreTypeOrder = ["Senior Care Center", "Active Aging Center", "Preschool"];
@@ -564,7 +578,7 @@ export function buildPreschoolOverviewViewModel(
             planningReference.targetPeriod.start,
             shiftLocalDate(planningReference.targetPeriod.endInclusive, 1),
           ),
-          method: "Average of four complete Monday–Sunday weeks from the accepted May Snapshot.",
+          method: "Average of four complete Monday–Sunday weeks from the accepted Snapshot.",
           sourceWeeks: planningReference.sourceWeeks.map((week) => ({
             label: `${formatShortDate(week.start)}–${formatShortDate(week.endInclusive)}`,
             usageKwh: week.usageKwh,
@@ -574,13 +588,13 @@ export function buildPreschoolOverviewViewModel(
           weeklyAverage: `${formatNumber(planningReference.weeklyBaseline.averageKwh, 0)} kWh/week`,
           projectedUsage: `${formatNumber(planningReference.usageEstimate.projectedKwh, 0)} kWh`,
           projectedRange: `${formatNumber(planningReference.usageEstimate.lowerKwh, 0)}–${formatNumber(planningReference.usageEstimate.upperKwh, 0)} kWh`,
-          currentPeriodCost: planningReference.tariffReference
+          currentPeriodCost: planningReference.tariffReference && planningReference.costEstimate
             ? `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 0)}`
             : "Unavailable",
-          projectedCost: planningReference.tariffReference
+          projectedCost: planningReference.tariffReference && planningReference.costEstimate
             ? `S$${formatNumber(planningReference.costEstimate.projectedBeforeGstSgd, 0)}`
             : "Unavailable",
-          projectedCostRange: planningReference.tariffReference
+          projectedCostRange: planningReference.tariffReference && planningReference.costEstimate
             ? `S$${formatNumber(planningReference.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(planningReference.costEstimate.upperBeforeGstSgd, 0)}`
             : "Unavailable",
           tariffRate: planningReference.tariffReference
@@ -644,6 +658,11 @@ export function buildPreschoolOverviewViewModel(
     operational: snapshot.preschoolOperational?.status === "available" && hasCurrentOperationalContract
       ? {
           status: "available",
+          coverage: snapshot.preschoolOperational.coverage
+            ? snapshot.preschoolOperational.coverage.status === "complete"
+              ? `${snapshot.preschoolOperational.coverage.completeLocalDayCount} / ${snapshot.preschoolOperational.coverage.completeLocalDayCount} complete local days`
+              : `${snapshot.preschoolOperational.coverage.completeLocalDayCount} complete local days · ${snapshot.preschoolOperational.coverage.partialLocalDayCount} partial day · ${snapshot.preschoolOperational.coverage.missingLocalHourCount} missing whole-portfolio hour`
+            : `${snapshot.preschoolOperational.hourlyProfile.completeDayCount} complete local days · historical projection`,
           hourlyProfile: {
             completeDayCount: snapshot.preschoolOperational.hourlyProfile.completeDayCount,
             unit: snapshot.preschoolOperational.hourlyProfile.unit,
@@ -659,8 +678,8 @@ export function buildPreschoolOverviewViewModel(
           },
           standby: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.standbyKwh, 2)} kWh`,
-            provisionalCost: `S$${formatNumber(snapshot.preschoolOperational.energy.provisionalStandbyCostBeforeGstSgd, 2)}`,
-            provisionalCostNote: `${snapshot.preschoolOperational.tariffReference.sourceName} ${formatNumber(snapshot.preschoolOperational.tariffReference.beforeGstSgdPerKwh, 4)} SGD/kWh before GST reference · estimate only, not a bill`,
+            provisionalCost: operationalCostLabel(snapshot.preschoolOperational.energy.provisionalStandbyCostBeforeGstSgd),
+            provisionalCostNote: operationalCostNote,
             share: `${formatNumber(snapshot.preschoolOperational.energy.standbySharePct, 1)}%`,
             spikeCount: snapshot.preschoolOperational.spikes.standby.count,
             centreCount: snapshot.preschoolOperational.spikes.standby.centreCount,
@@ -670,7 +689,7 @@ export function buildPreschoolOverviewViewModel(
               energy: `${formatNumber(group.usageKwh, 2)} kWh`,
               share: `${formatNumber(group.sharePct, 1)}%`,
               sharePct: group.sharePct,
-              provisionalCost: `S$${formatNumber(group.provisionalCostBeforeGstSgd, 2)}`,
+              provisionalCost: operationalCostLabel(group.provisionalCostBeforeGstSgd),
               sourceAliases: group.sourceAliases,
             })),
             appliances: snapshot.preschoolOperational.standbyAppliances.appliances.map((appliance) => ({
@@ -679,15 +698,15 @@ export function buildPreschoolOverviewViewModel(
               energy: `${formatNumber(appliance.usageKwh, 2)} kWh`,
               share: `${formatNumber(appliance.sharePct, 1)}%`,
               sharePct: appliance.sharePct,
-              provisionalCost: `S$${formatNumber(appliance.provisionalCostBeforeGstSgd, 2)}`,
+              provisionalCost: operationalCostLabel(appliance.provisionalCostBeforeGstSgd),
               centreCount: appliance.centreCount,
             })),
             reconciliation: `${formatNumber(Math.abs(snapshot.preschoolOperational.standbyAppliances.reconciliationGapKwh), 4)} kWh reconciliation gap`,
           },
           operating: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.operatingKwh, 2)} kWh`,
-            provisionalCost: `S$${formatNumber(snapshot.preschoolOperational.energy.provisionalOperatingCostBeforeGstSgd, 2)}`,
-            provisionalCostNote: `${snapshot.preschoolOperational.tariffReference.sourceName} ${formatNumber(snapshot.preschoolOperational.tariffReference.beforeGstSgdPerKwh, 4)} SGD/kWh before GST reference · planning estimate only, not a bill`,
+            provisionalCost: operationalCostLabel(snapshot.preschoolOperational.energy.provisionalOperatingCostBeforeGstSgd),
+            provisionalCostNote: operationalCostNote,
             share: `${formatNumber(snapshot.preschoolOperational.energy.operatingSharePct, 1)}%`,
             spikeCount: snapshot.preschoolOperational.spikes.operating.count,
             centreCount: snapshot.preschoolOperational.spikes.operating.centreCount,
@@ -697,7 +716,7 @@ export function buildPreschoolOverviewViewModel(
               energy: `${formatNumber(group.usageKwh, 2)} kWh`,
               share: `${formatNumber(group.sharePct, 1)}%`,
               sharePct: group.sharePct,
-              provisionalCost: `S$${formatNumber(group.provisionalCostBeforeGstSgd, 2)}`,
+              provisionalCost: operationalCostLabel(group.provisionalCostBeforeGstSgd),
               sourceAliases: group.sourceAliases,
             })),
             appliances: snapshot.preschoolOperational.operatingAppliances.appliances.map((appliance) => ({
@@ -706,7 +725,7 @@ export function buildPreschoolOverviewViewModel(
               energy: `${formatNumber(appliance.usageKwh, 2)} kWh`,
               share: `${formatNumber(appliance.sharePct, 1)}%`,
               sharePct: appliance.sharePct,
-              provisionalCost: `S$${formatNumber(appliance.provisionalCostBeforeGstSgd, 2)}`,
+              provisionalCost: operationalCostLabel(appliance.provisionalCostBeforeGstSgd),
               centreCount: appliance.centreCount,
             })),
             reconciliation: `${formatNumber(Math.abs(snapshot.preschoolOperational.operatingAppliances.reconciliationGapKwh), 4)} kWh reconciliation gap`,
@@ -927,7 +946,7 @@ function buildEstimateOnlyForecastView(
     statusDetail: "No complete local-day Actual is available for this scope yet.",
     actualThrough: "Actual not started",
     expectedFullMonthEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
-    expectedFullMonthCost: plan.tariffReference
+    expectedFullMonthCost: plan.tariffReference && scope.estimatedCostBeforeGstSgd !== null
       ? `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`
       : "Unavailable",
     consumedSoFar: "Awaiting first complete day",
@@ -1523,7 +1542,7 @@ function buildPreschoolDecisionSummary(
         supportingMetrics: [
           {
             label: `Estimated ${planningMonth} cost`,
-            valueLabel: planning.tariffReference
+            valueLabel: planning.tariffReference && planning.costEstimate
               ? `S$${formatNumber(planning.costEstimate.projectedBeforeGstSgd, 0)}`
               : "Unavailable",
           },

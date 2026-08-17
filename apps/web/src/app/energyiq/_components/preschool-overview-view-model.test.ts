@@ -4,6 +4,58 @@ import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import { buildPreschoolOverviewViewModel } from "./preschool-overview-view-model";
 
 describe("Preschool Overview ViewModel", () => {
+  it("keeps a partially covered rolling operational window visible without inventing an out-of-period tariff", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
+    snapshot.preschoolOperational.contract = {
+      id: "preschool-operational-behaviour",
+      version: "4",
+      spikeThresholdPct: 50,
+    };
+    snapshot.preschoolOperational.coverage = {
+      status: "partial",
+      expectedCellCount: 20_160,
+      observedCellCount: 20_130,
+      missingCellCount: 30,
+      completeLocalDayCount: 27,
+      partialLocalDayCount: 1,
+      missingLocalHourCount: 1,
+    };
+    snapshot.preschoolOperational.hourlyProfile.completeDayCount = 27;
+    snapshot.preschoolOperational.hourlyProfile.unit = "mean kWh per observed day";
+    snapshot.preschoolOperational.energy.provisionalStandbyCostBeforeGstSgd = null;
+    snapshot.preschoolOperational.energy.provisionalOperatingCostBeforeGstSgd = null;
+    snapshot.preschoolOperational.standbyAppliances.provisionalCostBeforeGstSgd = null;
+    snapshot.preschoolOperational.operatingAppliances.provisionalCostBeforeGstSgd = null;
+    for (const composition of [
+      snapshot.preschoolOperational.standbyAppliances,
+      snapshot.preschoolOperational.operatingAppliances,
+    ]) {
+      composition.applianceGroups.forEach((row) => { row.provisionalCostBeforeGstSgd = null; });
+      composition.appliances.forEach((row) => { row.provisionalCostBeforeGstSgd = null; });
+    }
+    delete snapshot.preschoolOperational.tariffReference;
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.operational).toMatchObject({
+      status: "available",
+      coverage: "27 complete local days · 1 partial day · 1 missing whole-portfolio hour",
+      hourlyProfile: {
+        completeDayCount: 27,
+        unit: "mean kWh per observed day",
+      },
+      standby: {
+        provisionalCost: "Unavailable",
+        provisionalCostNote: "No accepted tariff covers the full analysis period; energy remains available and cost is withheld.",
+      },
+      operating: {
+        provisionalCost: "Unavailable",
+        provisionalCostNote: "No accepted tariff covers the full analysis period; energy remains available and cost is withheld.",
+      },
+    });
+  });
+
   it("labels a rolling current window with its actual date range", () => {
     const snapshot = preschoolGoldenSnapshot();
     snapshot.context.from = "2026-05-10T16:00:00.000Z";

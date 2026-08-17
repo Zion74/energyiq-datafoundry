@@ -14,6 +14,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
 import {
+  executeEnergyScopeAnalysis,
   executeEnergyScopeAnalysisWithLatestAvailable,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyLatestCompleteDay,
@@ -45,9 +46,11 @@ import {
 } from "./preschool-appliance-projection.js";
 import {
   loadPreschoolOperationalProjection,
+  resolvePreschoolPlanningSourcePeriod,
   type PreschoolOperationalProjection,
 } from "./preschool-operational-projection.js";
 import {
+  buildPreschoolMonthlyActualContext,
   loadPreschoolPlanningLifecycle,
   resolvePreschoolMonthlyTargetPeriod,
   type PreschoolMonthlyTargetPeriod,
@@ -439,6 +442,46 @@ export const resolveProjectAnalysis = async (input: {
               analysis,
             })
           : undefined;
+      let preschoolPlanningAnalysis: ProjectAnalysisPayload | undefined;
+      if (preschoolRoot && preschoolMonthlyOutlookTargetPeriod) {
+        try {
+          const planningSourcePeriod = resolvePreschoolPlanningSourcePeriod(
+            preschoolMonthlyOutlookTargetPeriod,
+          );
+          const planningContext = buildPreschoolMonthlyActualContext(
+            releasedContext,
+            planningSourcePeriod,
+          );
+          const planningScopeAnalysis = await executeEnergyScopeAnalysis({
+            metadataStore: input.metadataStore,
+            dataGateway: input.dataGateway,
+            userId: input.user.id,
+            context: planningContext,
+            projectReleaseId: projectRelease.id,
+            ruleRevisions: [],
+            includeTimeBehaviour: false,
+            includeMeterOperationalBreakdown: false,
+            includeImmediateChildDailyTotals: true,
+            profile: "explorer",
+            databasePath: analysisDatabasePath,
+          });
+          preschoolPlanningAnalysis = projectAnalysisPayload({
+            analysis: planningScopeAnalysis,
+            metadata: resolveProjectAnalysisMetadata({
+              metadataStore: input.metadataStore,
+              projectId: planningContext.projectId,
+              hierarchyRevisionId: planningContext.hierarchyRevisionId,
+              timezone: planningContext.timezone,
+              period: { start: planningContext.from, endExclusive: planningContext.to },
+              analysis: planningScopeAnalysis,
+            }),
+          });
+        } catch {
+          // Planning is an independent deterministic projection. Missing
+          // source weeks must not suppress Sections 3/4.
+          preschoolPlanningAnalysis = undefined;
+        }
+      }
       const preschoolOperational = preschoolRoot
           ? await loadPreschoolOperationalProjection({
               metadataStore: input.metadataStore,
@@ -447,6 +490,7 @@ export const resolveProjectAnalysis = async (input: {
               projectRelease,
               context: releasedContext,
               analysis,
+              ...(preschoolPlanningAnalysis ? { planningAnalysis: preschoolPlanningAnalysis } : {}),
               ...(preschoolMonthlyOutlookTargetPeriod
                 ? { planningTargetPeriod: preschoolMonthlyOutlookTargetPeriod }
                 : {}),
