@@ -58,6 +58,40 @@ describe("NgeeAnnProjectAiSlots", () => {
     expect(container.textContent).toContain("does not match this Snapshot");
     expect(container.textContent).not.toContain("Peak demand and time behaviour should be read together");
   });
+
+  it("renders accepted Additional Insights as distinct exploratory cards", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const model = readModel(snapshot);
+    model.additionalInsights = {
+      status: "available",
+      artifactId: "artifact:additional",
+      result: {
+        status: "available",
+        findings: [{
+          id: "additional:off-hours-load",
+          title: "Off-hours use may be driven by equipment load",
+          text: "**Evidence signal:** Off-hours use is 37.9%.\n\n**AI angle:** Test whether plug and equipment loads dominate it.",
+          epistemicStatus: "inferred",
+          evidenceRefs: ["evidence:off-hours", "evidence:load-share"],
+          deepDiveQuestion: "How much off-hours use belongs to load rather than lighting?",
+        }],
+      },
+    };
+
+    await act(async () => {
+      root.render(<NgeeAnnProjectAiSlots snapshot={snapshot} restore={vi.fn().mockResolvedValue(model)} />);
+    });
+
+    expect(container.textContent).toContain("Additional AI Insights");
+    expect(container.textContent).toContain("Off-hours use may be driven by equipment load");
+    expect(container.textContent).toContain("Evidence signal:");
+    expect(container.textContent).toContain("AI angle:");
+    expect(container.textContent).toContain("Inferred");
+    expect(container.textContent).toContain("Explore further");
+    expect(container.textContent).toContain("How much off-hours use belongs to load rather than lighting?");
+    expect(container.textContent).toContain("Evidence · 2");
+    expect(container.textContent).not.toContain("Additional AI InsightsAvailable.");
+  });
 });
 
 const readModel = (snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>): EnergyProjectOverviewAiReadModelDto => ({

@@ -94,7 +94,7 @@ export function NgeeAnnProjectAiSlots({
               <SectionInterpretation key={sectionId} label={label} unit={model.sections[sectionId] ?? { status: "missing" }} />
             ))}
           </div>
-          <AdditionalStatus unit={model.additionalInsights} />
+          <AdditionalInsights unit={model.additionalInsights} />
         </div>
       )}
     </section>
@@ -156,8 +156,46 @@ function SectionInterpretation({ label, unit }: { label: string; unit: EnergyPro
   );
 }
 
-function AdditionalStatus({ unit }: { unit: EnergyProjectOverviewAiUnitStatusDto }) {
-  return <UnitStatus title="Additional AI Insights" unit={unit} />;
+function AdditionalInsights({ unit }: { unit: EnergyProjectOverviewAiUnitStatusDto }) {
+  if (unit.status !== "available") return <UnitStatus title="Additional AI Insights" unit={unit} />;
+  const findings = Array.isArray(unit.result.findings) ? unit.result.findings.filter(isRecord) : [];
+  if (findings.length === 0) return <UnitStatus title="Additional AI Insights" unit={unit} />;
+
+  return <section aria-labelledby="ngee-ann-additional-insights" className="border-t border-border pt-5">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="max-w-3xl">
+        <h4 id="ngee-ann-additional-insights" className="text-base font-semibold text-foreground">
+          Additional AI Insights
+        </h4>
+        <p className="mt-1 text-sm leading-6 text-muted">
+          New cross-section angles that passed the local Evidence and novelty checks. Treat inferred ideas as leads to verify, not confirmed causes.
+        </p>
+      </div>
+      <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+        Exploratory
+      </span>
+    </div>
+    <div className={findings.length > 1 ? "mt-4 grid gap-4 xl:grid-cols-2" : "mt-4 grid gap-4"}>
+      {findings.map((finding, index) => {
+        const title = string(finding.title);
+        const text = string(finding.text);
+        const deepDiveQuestion = string(finding.deepDiveQuestion);
+        return <article key={string(finding.id) ?? `additional:${index}`} className="min-w-0 rounded-xl border border-primary/20 bg-primary/5 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h5 className="max-w-3xl text-base font-semibold leading-6 text-foreground">{title}</h5>
+            <span className="rounded-full bg-surface px-2 py-0.5 text-[10px] font-semibold text-primary">
+              {epistemicLabel(finding.epistemicStatus)}
+            </span>
+          </div>
+          {text ? <SafeAiMarkdown className="mt-3 max-w-[75ch] text-sm leading-6 text-foreground">{text}</SafeAiMarkdown> : null}
+          {deepDiveQuestion ? <p className="mt-4 border-t border-primary/15 pt-3 text-sm leading-6 text-muted">
+            <span className="font-semibold text-foreground">Explore further:</span> {deepDiveQuestion}
+          </p> : null}
+          <EvidenceRefs value={finding.evidenceRefs} />
+        </article>;
+      })}
+    </div>
+  </section>;
 }
 
 function UnitStatus({ title, unit }: { title: string; unit: EnergyProjectOverviewAiUnitStatusDto }) {
