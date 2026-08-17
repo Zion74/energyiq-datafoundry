@@ -45,15 +45,22 @@ export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifac
   targetId: string;
 };
 
-export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
+export type ProjectAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v21";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
   capabilityRevision: "scoped-read-only-v1";
   publicationRevision: "additional-insights-v2";
   canvasRevision: "energyiq-insight-canvas-v2";
+};
+
+export type PreschoolAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
+  identityContractRevision: "additional-insights-v21";
+};
+
+export type NgeeAnnAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
+  identityContractRevision: "ngee-ann-additional-insights-v1";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -267,6 +274,9 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
   methodSet?: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
 }): PreschoolAdditionalAiInsightArtifactIdentity => {
+  if (input.baseIdentity.rendererKey !== "preschool-overview") {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_RENDERER_INVALID");
+  }
   const methodSet = input.methodSet
     ?? resolveCurrentAdditionalAiInsightMethodSet(input.baseIdentity.workspaceId);
   if (methodSet.methods.some(({ workspaceId }) => workspaceId !== input.baseIdentity.workspaceId)) {
@@ -279,6 +289,42 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
     artifactKind: "autonomous-insights",
     identityContractRevision: "additional-insights-v21",
     analysisPackId: "preschool-additional-insights-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-additional-ai-insights-v2",
+    validatorRevision: "additional-insights-acceptance-v17",
+    workflowRevision: "additional-insights-discover-accept-publish-v20",
+    investigatorPromptRevision: "additional-insights-discovery-v10",
+    editorPromptRevision: "additional-insights-publication-v2",
+    methodSkillId: "energyiq-open-discovery",
+    methodSkillRevision: "1.0.0",
+    methodSetId: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+    methodSetRevision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+    methodSetFingerprint: `sha256:${createHash("sha256").update(canonicalMethods).digest("hex")}`,
+    capabilityRevision: "scoped-read-only-v1",
+    publicationRevision: "additional-insights-v2",
+    canvasRevision: "energyiq-insight-canvas-v2",
+  };
+};
+
+export const createNgeeAnnAdditionalAiInsightArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  methodSet?: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
+}): NgeeAnnAdditionalAiInsightArtifactIdentity => {
+  if (input.baseIdentity.rendererKey !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_RENDERER_INVALID");
+  }
+  const methodSet = input.methodSet
+    ?? resolveCurrentAdditionalAiInsightMethodSet(input.baseIdentity.workspaceId);
+  if (methodSet.methods.some(({ workspaceId }) => workspaceId !== input.baseIdentity.workspaceId)) {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_INVALID");
+  }
+  const canonicalMethods = canonicalInsightMethodSetJson(methodSet.methods);
+  if (canonicalMethods === null) throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_INVALID");
+  return {
+    ...input.baseIdentity,
+    artifactKind: "autonomous-insights",
+    identityContractRevision: "ngee-ann-additional-insights-v1",
+    analysisPackId: "ngee-ann-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
     validatorRevision: "additional-insights-acceptance-v17",
@@ -318,6 +364,30 @@ export const isCurrentPreschoolAdditionalAiInsightArtifactIdentity = (
   && identity.capabilityRevision === "scoped-read-only-v1"
   && identity.publicationRevision === "additional-insights-v2"
   && identity.canvasRevision === "energyiq-insight-canvas-v2";
+
+export const isCurrentProjectAdditionalAiInsightArtifactIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): identity is ProjectAdditionalAiInsightArtifactIdentity =>
+  isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)
+  || (identity.rendererKey === "ngee-ann-overview"
+    && identity.artifactKind === "autonomous-insights"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v1"
+    && identity.analysisPackId === "ngee-ann-additional-insights-pack"
+    && identity.analysisPackRevision === "v1"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v17"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v20"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v10"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.methodSkillId === "energyiq-open-discovery"
+    && identity.methodSkillRevision === "1.0.0"
+    && identity.methodSetId === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID
+    && identity.methodSetRevision === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION
+    && typeof identity.methodSetFingerprint === "string"
+    && /^sha256:[0-9a-f]{64}$/u.test(identity.methodSetFingerprint)
+    && identity.capabilityRevision === "scoped-read-only-v1"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2");
 
 export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;

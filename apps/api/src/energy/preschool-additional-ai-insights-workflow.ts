@@ -25,7 +25,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   createPreschoolAdditionalAiInsightArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
-  type PreschoolAdditionalAiInsightArtifactIdentity,
+  type ProjectAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import {
   createPreschoolAdditionalAiInsightRuntime,
@@ -48,7 +48,7 @@ export type PreschoolAdditionalAiInsightsDiscoveryRunner = (input: {
   sessionId: string;
   user: UserRecord;
   workspaceId: string;
-  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  identity: ProjectAdditionalAiInsightArtifactIdentity;
   toolNames: readonly PreschoolAdditionalAiInsightToolName[];
   invokeTool(input: PreschoolAdditionalAiInsightToolInvocation): Promise<PreschoolAdditionalAiInsightToolResult>;
   modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
@@ -78,7 +78,7 @@ export type PreschoolAdditionalAiPresentedClaims = {
 };
 
 export const createPreschoolAdditionalAiPresentedClaims = (input: {
-  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  identity: ProjectAdditionalAiInsightArtifactIdentity;
   catalog: AnalysisContextEvidenceCatalog;
   readModel: unknown;
 }): PreschoolAdditionalAiPresentedClaims => {
@@ -124,7 +124,7 @@ export const createPreschoolAdditionalAiPresentedClaims = (input: {
       });
     }
   }
-  const executive = input.readModel.executive;
+  const executive = input.readModel.executive ?? input.readModel.keyFindings;
   if (isAvailablePresentedExecutiveUnit(executive, binding)) {
     pushPresentedClaim(claims, {
       id: "key-findings:summary",
@@ -233,7 +233,7 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
     user: UserRecord;
   }): Promise<EnergyIqOverviewAiArtifactRecord>;
   evaluateAttempt(input: {
-    identity: PreschoolAdditionalAiInsightArtifactIdentity;
+    identity: ProjectAdditionalAiInsightArtifactIdentity;
     user: UserRecord;
     runId: string;
     sessionId: string;
@@ -244,17 +244,23 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
 
 export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
   metadataStore: MetadataStore;
+  createArtifactIdentity?: (input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+    methodSet: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
+  }) => ProjectAdditionalAiInsightArtifactIdentity;
   resolveEvidenceCatalog(args: {
-    identity: PreschoolAdditionalAiInsightArtifactIdentity;
+    identity: ProjectAdditionalAiInsightArtifactIdentity;
     user: UserRecord;
   }): Promise<AnalysisContextEvidenceCatalog>;
   resolvePresentedClaims(args: {
-    identity: PreschoolAdditionalAiInsightArtifactIdentity;
+    identity: ProjectAdditionalAiInsightArtifactIdentity;
     catalog: AnalysisContextEvidenceCatalog;
     user: UserRecord;
   }): Promise<PreschoolAdditionalAiPresentedClaims>;
   runDiscovery: PreschoolAdditionalAiInsightsDiscoveryRunner;
 }): PreschoolAdditionalAiInsightsWorkflow => {
+  const createArtifactIdentity = input.createArtifactIdentity
+    ?? createPreschoolAdditionalAiInsightArtifactIdentity;
   const evaluateAttempt: PreschoolAdditionalAiInsightsWorkflow["evaluateAttempt"] = async ({
     identity,
     user,
@@ -281,7 +287,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     }
     if (identity.methodSetId !== methodSet.id
       || identity.methodSetRevision !== methodSet.revision
-      || identity.methodSetFingerprint !== createPreschoolAdditionalAiInsightArtifactIdentity({
+      || identity.methodSetFingerprint !== createArtifactIdentity({
         baseIdentity: identity,
         methodSet,
       }).methodSetFingerprint) {
@@ -367,7 +373,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
         workspaceId: baseIdentity.workspaceId,
       }),
     ));
-    const identity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity, methodSet });
+    const identity = createArtifactIdentity({ baseIdentity, methodSet });
     requireModelRuntimeIdentity(input.metadataStore, identity);
     const queued = input.metadataStore.energyIq.overviewAiArtifacts.queue({
       identity,
@@ -402,7 +408,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
 
 const requireModelRuntimeIdentity = (
   metadataStore: MetadataStore,
-  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  identity: ProjectAdditionalAiInsightArtifactIdentity,
   trustedSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot,
 ): void => {
   if (trustedSnapshot) {
@@ -586,7 +592,7 @@ const parseDiscoveryCandidates = (answer: string): DiscoveryCandidate[] | null =
 };
 
 const publishAdditionalArtifact = (input: {
-  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  identity: ProjectAdditionalAiInsightArtifactIdentity;
   methodSet: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
   catalog: AnalysisContextEvidenceCatalog;
   presentedClaims: PreschoolAdditionalAiPresentedClaims;
@@ -715,7 +721,7 @@ const acceptCandidate = (
   auditsById: Map<string, ReturnType<ReturnType<typeof createPreschoolAdditionalAiInsightRuntime>["audits"]>[number]>,
   coreMethod: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"][number],
   directionMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
-  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  identity: ProjectAdditionalAiInsightArtifactIdentity,
   canvasEvidenceFacts: readonly InsightCanvasEvidenceFact[],
   knownCentreCodes: readonly string[],
 ): AdditionalAiInsightFinding | null => {
@@ -1369,7 +1375,7 @@ const acceptCandidateCanvas = (input: {
   candidate: DiscoveryCandidate;
   candidateValue: Record<string, unknown>;
   publishedText: string;
-  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  identity: ProjectAdditionalAiInsightArtifactIdentity;
   evidenceFacts: readonly InsightCanvasEvidenceFact[];
 }): Extract<AdditionalAiInsightFinding["canvas"], { contractRevision: "energyiq-insight-canvas-v2" }> | undefined => {
   if (input.candidateValue.canvas === undefined) return undefined;
@@ -1413,7 +1419,7 @@ const acceptCandidateCanvas = (input: {
 };
 
 const projectCanvasEvidenceFacts = (
-  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  identity: ProjectAdditionalAiInsightArtifactIdentity,
   catalog: AnalysisContextEvidenceCatalog,
 ): InsightCanvasEvidenceFact[] => catalog.facts.flatMap((fact) => {
   if (typeof fact.value !== "number" || !Number.isFinite(fact.value) || !nonEmptyString(fact.unit)) return [];
@@ -1472,7 +1478,7 @@ const alertIsAcceptable = (
 };
 
 const buildDiscoveryPrompt = (input: {
-  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  identity: ProjectAdditionalAiInsightArtifactIdentity;
   catalog: AnalysisContextEvidenceCatalog;
   presentedClaims: PreschoolAdditionalAiPresentedClaims;
   methodResources: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["resources"];
@@ -1535,7 +1541,7 @@ const requireMethodResources = (
 
 const requirePresentedClaims = (
   value: PreschoolAdditionalAiPresentedClaims,
-  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  identity: ProjectAdditionalAiInsightArtifactIdentity,
 ): PreschoolAdditionalAiPresentedClaims => {
   const expected = {
     workspaceId: identity.workspaceId,

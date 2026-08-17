@@ -115,7 +115,10 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
-import { createNgeeAnnProjectOverviewAiAdapter } from "./energy/ngee-ann-overview-ai-adapter.js";
+import {
+  composeNgeeAnnOverviewAiReadModel,
+  createNgeeAnnProjectOverviewAiAdapter,
+} from "./energy/ngee-ann-overview-ai-adapter.js";
 import { createNgeeAnnOverviewAiWorkflow } from "./energy/ngee-ann-overview-ai-workflow.js";
 import { NGEE_ANN_SECTION_MESSAGE_MAX_CHARS } from "./energy/ngee-ann-section-interpreter.js";
 import {
@@ -131,8 +134,11 @@ import {
 } from "./energy/preschool-additional-ai-insights-workflow.js";
 import { composePreschoolOverviewAiReadModel } from "./energy/preschool-overview-ai-read-model.js";
 import {
+  createNgeeAnnAdditionalAiInsightArtifactIdentity,
+  isCurrentProjectAdditionalAiInsightArtifactIdentity,
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
+  projectCurrentOverviewAiArtifactBaseIdentity,
 } from "./energy/overview-ai-artifact.js";
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import type {
@@ -247,7 +253,7 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
     structuredOutput: input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? input.identity?.rendererKey === "ngee-ann-overview"
-        && input.identity.identityContractRevision === "ngee-ann-section-v3"
+        && input.identity.identityContractRevision === "ngee-ann-section-v4"
         ? NGEE_ANN_SECTION_MESSAGE_MAX_CHARS
         : PACK_V2_SECTION_MESSAGE_MAX_CHARS
       : input.stage === "additional-insights-discovery"
@@ -261,7 +267,7 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
           trustedStageTools,
           ...(input.stage === "additional-insights-discovery"
             && input.identity
-            && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)
+            && isCurrentProjectAdditionalAiInsightArtifactIdentity(input.identity)
             ? { trustedStageCapability: "energyiq-additional-insight-discovery" as const }
             : {}),
         }
@@ -636,15 +642,6 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
-  const ngeeAnnOverviewAiAdapter = createNgeeAnnProjectOverviewAiAdapter({
-    metadataStore,
-    dataGateway,
-    executeMissing: ({ identity, user, retryTarget }) => ngeeAnnOverviewAiWorkflow.execute({
-      identity,
-      user,
-      ...(retryTarget ? { retryTarget } : {}),
-    }).then(() => undefined),
-  });
   const additionalAiInsightsWorkflow = createPreschoolAdditionalAiInsightsWorkflow({
     metadataStore,
     resolveEvidenceCatalog: async ({ identity, user }) => {
@@ -693,6 +690,75 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         stage: "additional-insights-discovery",
         ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
       });
+    },
+  });
+  const ngeeAnnAdditionalAiInsightsWorkflow = createPreschoolAdditionalAiInsightsWorkflow({
+    metadataStore,
+    createArtifactIdentity: createNgeeAnnAdditionalAiInsightArtifactIdentity,
+    resolveEvidenceCatalog: async ({ identity, user }) => {
+      const project = metadataStore.energyIq.getProject(identity.projectId);
+      const period = overviewAiArtifactPinnedLocalPeriod({ identity, timezone: project.timezone });
+      const resolution = await resolveProjectAnalysis({
+        metadataStore,
+        dataGateway,
+        user,
+        workspaceId: identity.workspaceId,
+        bypassCache: true,
+        request: {
+          projectId: identity.projectId,
+          scopeId: identity.scopeId,
+          resource: "electricity",
+          period: "Custom",
+          from: period.from,
+          to: period.to,
+          expectedDataSnapshotId: identity.dataSnapshotId,
+          expectedProjectReleaseId: identity.projectReleaseId,
+        },
+      });
+      if (resolution.status !== "ready") throw new Error("OVERVIEW_AI_SNAPSHOT_NOT_READY");
+      return createProjectAnalysisContextEvidenceCatalog(resolution.snapshot);
+    },
+    resolvePresentedClaims: async ({ identity, catalog }) => createPreschoolAdditionalAiPresentedClaims({
+      identity,
+      catalog,
+      readModel: composeNgeeAnnOverviewAiReadModel({
+        metadataStore,
+        baseIdentity: projectCurrentOverviewAiArtifactBaseIdentity(identity),
+      }),
+    }),
+    runDiscovery: ({ toolNames, invokeTool, ...stageInput }) => {
+      const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-discovery");
+      if (!structuredOutput) throw new Error("PROJECT_ADDITIONAL_AI_STRUCTURED_OUTPUT_REQUIRED");
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "additional-insights-discovery",
+        identity: stageInput.identity,
+        structuredOutput,
+        additionalInsightTools: toolNames,
+        invokeAdditionalInsightTool: invokeTool,
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "additional-insights-discovery",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+  });
+  const ngeeAnnOverviewAiAdapter = createNgeeAnnProjectOverviewAiAdapter({
+    metadataStore,
+    dataGateway,
+    async executeMissing({ identity, user, retryTarget }) {
+      if (retryTarget === "additional-ai-insights") {
+        await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
+        return;
+      }
+      await ngeeAnnOverviewAiWorkflow.execute({
+        identity,
+        user,
+        ...(retryTarget ? { retryTarget } : {}),
+      });
+      if (!retryTarget) {
+        await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
+      }
     },
   });
   const additionalAiInsightsEvaluationWorkflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
@@ -1061,9 +1127,10 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
         }
       : {}),
     run_config: {
-      protocol: (input.stage === "additional-insights-discovery"
-        || input.stage === "additional-insights-transition")
-        && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)
+      protocol: ((input.stage === "additional-insights-discovery"
+        && isCurrentProjectAdditionalAiInsightArtifactIdentity(input.identity))
+        || (input.stage === "additional-insights-transition"
+          && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)))
         ? { id: "general-task", version: "1" }
         : { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,

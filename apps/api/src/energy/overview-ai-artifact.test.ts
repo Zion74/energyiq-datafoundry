@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createNgeeAnnAdditionalAiInsightArtifactIdentity,
   createNgeeAnnOverviewAiExecutiveArtifactIdentity,
   createNgeeAnnOverviewAiSectionArtifactIdentity,
   createPreschoolOverviewAiExecutiveArtifactIdentityV4,
@@ -9,6 +10,7 @@ import {
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
+  isCurrentProjectAdditionalAiInsightArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
 
@@ -76,6 +78,17 @@ describe("Ngee Ann current Overview AI identities", () => {
       baseIdentity: base,
       targetId: "trend-and-demand",
     }).investigatorPromptRevision).toBe("energyiq-project-section-discovery-v2");
+
+    const additional = createNgeeAnnAdditionalAiInsightArtifactIdentity({ baseIdentity: base });
+    expect(additional).toMatchObject({
+      rendererKey: "ngee-ann-overview",
+      artifactKind: "autonomous-insights",
+      identityContractRevision: "ngee-ann-additional-insights-v1",
+      analysisPackId: "ngee-ann-additional-insights-pack",
+      outputContractRevision: "energyiq-additional-ai-insights-v2",
+      methodSetId: "preschool-additional-insights-current",
+    });
+    expect(isCurrentProjectAdditionalAiInsightArtifactIdentity(additional)).toBe(true);
   });
 });
 

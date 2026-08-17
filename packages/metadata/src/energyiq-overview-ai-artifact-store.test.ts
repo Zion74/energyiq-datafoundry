@@ -1217,6 +1217,17 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       );
       expect(availableArtifact).toMatchObject({ status: "available" });
 
+      const ngeeAnnIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...additionalIdentity("snapshot-additional-ngee-ann"),
+        rendererKey: "ngee-ann-overview",
+        identityContractRevision: "ngee-ann-additional-insights-v1",
+        analysisPackId: "ngee-ann-additional-insights-pack",
+      };
+      expect(metadata.energyIq.overviewAiArtifacts.queue({
+        identity: ngeeAnnIdentity,
+        triggeredBy: "dev-user",
+      })).toMatchObject({ status: "queued" });
+
       const historicalV3Identity = historicalAdditionalIdentityV3(availableIdentity);
       expect(() => metadata.energyIq.overviewAiArtifacts.queue({
         identity: historicalV3Identity,

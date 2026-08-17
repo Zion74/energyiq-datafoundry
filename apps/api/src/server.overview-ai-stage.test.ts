@@ -61,7 +61,7 @@ describe("Overview AI server stage options", () => {
   it("reserves the larger complete-projection message budget only for the exact Ngee Ann Section identity", () => {
     const identity = {
       rendererKey: "ngee-ann-overview",
-      identityContractRevision: "ngee-ann-section-v3",
+      identityContractRevision: "ngee-ann-section-v4",
     } as EnergyIqOverviewAiArtifactIdentity;
     expect(resolveOverviewAiServerRunnerOptions({
       stage: "section-interpreter",
@@ -212,6 +212,40 @@ describe("Overview AI server stage options", () => {
         enabledMcpServerIds: [],
         enabledSkillIds: [],
         skillPolicy: { allowedToolNames: [] },
+      },
+    });
+
+    const ngeeAnnIdentity = ngeeAnnAdditionalIdentity();
+    const ngeeAnnTrusted = resolveOverviewAiServerRunnerOptions({
+      stage: "additional-insights-discovery",
+      identity: ngeeAnnIdentity,
+      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
+      additionalInsightTools: toolNames,
+      invokeAdditionalInsightTool,
+    });
+    expect(ngeeAnnTrusted).toMatchObject({
+      trustedStageCapability: "energyiq-additional-insight-discovery",
+      conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
+    });
+    const ngeeAnnRun = buildOverviewAiStageRunInput({
+      stage: "additional-insights-discovery",
+      prompt: "Open Ngee Ann discovery.",
+      identity: ngeeAnnIdentity,
+      workspaceId: ngeeAnnIdentity.workspaceId,
+      user: { id: "dev-user" } as never,
+      runId: "ngee-ann-additional-run",
+      sessionId: "ngee-ann-additional-session",
+    });
+    expect(ngeeAnnRun.forwardedProps).toMatchObject({
+      externalContext: {
+        source: "energyiq",
+        projectId: "ngee-ann-polytechnic",
+        expectedDataSnapshotId: "snapshot-current",
+        expectedProjectReleaseId: "release-current",
+        overviewAiStage: "additional-insights-discovery",
+      },
+      run_config: {
+        protocol: { id: "general-task", version: "1" },
       },
     });
   });
@@ -1350,6 +1384,15 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "additional-insights-v2",
   canvasRevision: "energyiq-insight-canvas-v2",
+});
+
+const ngeeAnnAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
+  ...additionalIdentity(),
+  projectId: "ngee-ann-polytechnic",
+  scopeId: "ngee-ann-polytechnic",
+  rendererKey: "ngee-ann-overview",
+  analysisPackId: "ngee-ann-additional-insights-pack",
+  identityContractRevision: "ngee-ann-additional-insights-v1",
 });
 
 const historicalAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({

@@ -1,4 +1,5 @@
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
+import { resolveCurrentAdditionalAiInsightMethodSet } from "@datafoundry/contracts";
 import type {
   EnergyIqOverviewAiArtifactIdentity,
   EnergyIqOverviewAiArtifactRecord,
@@ -6,6 +7,7 @@ import type {
   UserRecord,
 } from "@datafoundry/metadata";
 import {
+  createNgeeAnnAdditionalAiInsightArtifactIdentity,
   createNgeeAnnOverviewAiExecutiveArtifactIdentity,
   createNgeeAnnOverviewAiSectionArtifactIdentity,
   createOverviewAiArtifactIdentity,
@@ -73,47 +75,10 @@ export const createNgeeAnnProjectOverviewAiAdapter = (input: {
   }: {
     identity: EnergyIqOverviewAiArtifactIdentity;
     user: UserRecord;
-  }): Promise<ProjectOverviewAiReadModel> => {
-    const baseIdentity = requireCurrentNgeeAnnBaseIdentity(identity);
-    const store = input.metadataStore.energyIq.overviewAiArtifacts;
-    const sectionRecords = NGEE_ANN_SECTION_IDS.map((sectionId) => {
-      const sectionIdentity = createNgeeAnnOverviewAiSectionArtifactIdentity({
-        baseIdentity,
-        targetId: sectionId,
-      });
-      return { sectionId, record: store.find(sectionIdentity) };
-    });
-    const sections = Object.fromEntries(sectionRecords.map(({ sectionId, record }) => [
-      sectionId,
-      artifactUnit(record),
-    ])) as Record<NgeeAnnSectionId, ProjectOverviewAiUnitStatus>;
-    const executiveIdentity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
-      baseIdentity,
-      targetId: ngeeAnnExecutiveTargetId(sectionRecords.flatMap(({ record }) => record ? [record] : [])),
-    });
-
-    return {
-      contract: "energyiq-project-overview-ai-read-model@1",
-      rendererKey: "ngee-ann-overview",
-      binding: {
-        workspaceId: baseIdentity.workspaceId,
-        projectId: baseIdentity.projectId,
-        scopeId: baseIdentity.scopeId,
-        dataSnapshotId: baseIdentity.dataSnapshotId,
-        projectReleaseId: baseIdentity.projectReleaseId,
-        analysisPeriod: {
-          from: baseIdentity.analysisPeriodFrom,
-          to: baseIdentity.analysisPeriodTo,
-        },
-        modelProfileId: baseIdentity.modelProfileId,
-        modelProfileRevision: baseIdentity.modelProfileRevision,
-        generation: projectOverviewAiGenerationBinding(baseIdentity),
-      },
-      keyFindings: artifactUnit(store.find(executiveIdentity)),
-      sections,
-      additionalInsights: { status: "missing" },
-    };
-  };
+  }): Promise<ProjectOverviewAiReadModel> => composeNgeeAnnOverviewAiReadModel({
+    metadataStore: input.metadataStore,
+    baseIdentity: identity,
+  });
 
   return {
     rendererKey: "ngee-ann-overview",
@@ -129,6 +94,58 @@ export const createNgeeAnnProjectOverviewAiAdapter = (input: {
       });
       return readExact({ identity: baseIdentity, user });
     },
+  };
+};
+
+export const composeNgeeAnnOverviewAiReadModel = (input: {
+  metadataStore: MetadataStore;
+  baseIdentity: EnergyIqOverviewAiArtifactIdentity;
+}): ProjectOverviewAiReadModel => {
+  const baseIdentity = requireCurrentNgeeAnnBaseIdentity(input.baseIdentity);
+  const store = input.metadataStore.energyIq.overviewAiArtifacts;
+  const sectionRecords = NGEE_ANN_SECTION_IDS.map((sectionId) => {
+    const sectionIdentity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity,
+      targetId: sectionId,
+    });
+    return { sectionId, record: store.find(sectionIdentity) };
+  });
+  const sections = Object.fromEntries(sectionRecords.map(({ sectionId, record }) => [
+    sectionId,
+    artifactUnit(record),
+  ])) as Record<NgeeAnnSectionId, ProjectOverviewAiUnitStatus>;
+  const executiveIdentity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+    baseIdentity,
+    targetId: ngeeAnnExecutiveTargetId(sectionRecords.flatMap(({ record }) => record ? [record] : [])),
+  });
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(
+    baseIdentity.workspaceId,
+    input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+      workspaceId: baseIdentity.workspaceId,
+    }),
+  );
+  const additionalIdentity = createNgeeAnnAdditionalAiInsightArtifactIdentity({ baseIdentity, methodSet });
+
+  return {
+    contract: "energyiq-project-overview-ai-read-model@1",
+    rendererKey: "ngee-ann-overview",
+    binding: {
+      workspaceId: baseIdentity.workspaceId,
+      projectId: baseIdentity.projectId,
+      scopeId: baseIdentity.scopeId,
+      dataSnapshotId: baseIdentity.dataSnapshotId,
+      projectReleaseId: baseIdentity.projectReleaseId,
+      analysisPeriod: {
+        from: baseIdentity.analysisPeriodFrom,
+        to: baseIdentity.analysisPeriodTo,
+      },
+      modelProfileId: baseIdentity.modelProfileId,
+      modelProfileRevision: baseIdentity.modelProfileRevision,
+      generation: projectOverviewAiGenerationBinding(baseIdentity),
+    },
+    keyFindings: artifactUnit(store.find(executiveIdentity)),
+    sections,
+    additionalInsights: artifactUnit(store.find(additionalIdentity)),
   };
 };
 

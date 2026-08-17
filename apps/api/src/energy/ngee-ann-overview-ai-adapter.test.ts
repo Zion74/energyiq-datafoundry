@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createNgeeAnnAdditionalAiInsightArtifactIdentity,
   createNgeeAnnOverviewAiSectionArtifactIdentity,
   createOverviewAiArtifactIdentity,
 } from "./overview-ai-artifact.js";
@@ -31,12 +32,17 @@ describe("createNgeeAnnProjectOverviewAiAdapter", () => {
     records.set(key(trend), availableRecord(trend, "available"));
     records.set(key(time), availableRecord(time, "empty"));
     records.set(key(circuit), failedRecord(circuit));
+    const additional = createNgeeAnnAdditionalAiInsightArtifactIdentity({ baseIdentity: identity });
+    records.set(key(additional), availableRecord(additional, "available"));
     const find = vi.fn((candidate: EnergyIqOverviewAiArtifactIdentity) => records.get(key(candidate)));
     const queue = vi.fn();
     const executeMissing = vi.fn();
     const adapter = createNgeeAnnProjectOverviewAiAdapter({
       metadataStore: {
-        energyIq: { overviewAiArtifacts: { find, queue } },
+        energyIq: {
+          overviewAiArtifacts: { find, queue },
+          insightMethodGovernance: { listPublishedWorkspaceMethodResources: vi.fn().mockReturnValue([]) },
+        },
       } as unknown as MetadataStore,
       dataGateway: {} as never,
       resolveBaseIdentity: vi.fn().mockResolvedValue(identity),
@@ -59,9 +65,9 @@ describe("createNgeeAnnProjectOverviewAiAdapter", () => {
         "circuit-concentration": { status: "failed", reason: "NGEE_SECTION_FAILED" },
         "decision-priorities": { status: "missing" },
       },
-      additionalInsights: { status: "missing" },
+      additionalInsights: { status: "available" },
     });
-    expect(find).toHaveBeenCalledTimes(5);
+    expect(find).toHaveBeenCalledTimes(6);
     expect(queue).not.toHaveBeenCalled();
     expect(executeMissing).not.toHaveBeenCalled();
   });
@@ -79,7 +85,10 @@ describe("createNgeeAnnProjectOverviewAiAdapter", () => {
     });
     const adapter = createNgeeAnnProjectOverviewAiAdapter({
       metadataStore: {
-        energyIq: { overviewAiArtifacts: { find } },
+        energyIq: {
+          overviewAiArtifacts: { find },
+          insightMethodGovernance: { listPublishedWorkspaceMethodResources: vi.fn().mockReturnValue([]) },
+        },
       } as unknown as MetadataStore,
       dataGateway: {} as never,
       resolveBaseIdentity: vi.fn().mockResolvedValue(identity),
@@ -105,7 +114,10 @@ describe("createNgeeAnnProjectOverviewAiAdapter", () => {
     const identity = baseIdentity();
     const adapter = createNgeeAnnProjectOverviewAiAdapter({
       metadataStore: {
-        energyIq: { overviewAiArtifacts: { find: vi.fn() } },
+        energyIq: {
+          overviewAiArtifacts: { find: vi.fn() },
+          insightMethodGovernance: { listPublishedWorkspaceMethodResources: vi.fn().mockReturnValue([]) },
+        },
       } as unknown as MetadataStore,
       dataGateway: {} as never,
       resolveBaseIdentity: vi.fn().mockResolvedValue(identity),
