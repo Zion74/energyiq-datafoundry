@@ -17,6 +17,7 @@ import {
   buildOverviewAiStageRunInput,
   collectOverviewAiStageEvents,
   collectOverviewAiText,
+  collectOverviewAiValueStageAnswer,
   createPreschoolAdditionalAiInsightTrustedStageTools,
   createPreschoolSectionTrustedStageTools,
   normalizeOverviewAiStageRuntimeError,
@@ -172,11 +173,12 @@ describe("Overview AI server stage options", () => {
     });
     expect(currentRuntime.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
     expect(trusted).toMatchObject({
+      additionalAiInsightSubmission: true,
       disableTools: false,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
       trustedStageCapability: "energyiq-additional-insight-discovery",
     });
-    expect(trusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
+    expect(trusted?.structuredOutput).toBeUndefined();
     expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
     expect(Object.keys(createPreschoolAdditionalAiInsightTrustedStageTools({
       toolNames,
@@ -227,6 +229,8 @@ describe("Overview AI server stage options", () => {
       trustedStageCapability: "energyiq-additional-insight-discovery",
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
     });
+    expect(ngeeAnnTrusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
+    expect(ngeeAnnTrusted).not.toHaveProperty("additionalAiInsightSubmission");
     const ngeeAnnRun = buildOverviewAiStageRunInput({
       stage: "additional-insights-discovery",
       prompt: "Open Ngee Ann discovery.",
@@ -1352,6 +1356,32 @@ describe("Overview AI server stage options", () => {
       { type: "TEXT_MESSAGE_CONTENT", delta: `Ordinary preamble.\n${finalObject}` },
     ], "additional-insights-discovery")).toBe(`Ordinary preamble.\n${finalObject}`);
   });
+
+  it("accepts only a native Additional submission when the v22 submit boundary is enabled", () => {
+    const payload = { candidates: [{ id: "candidate-native" }] };
+    const literalDsml = "[]. Let me construct the JSON. <｜｜DSML｜｜tool_calls>";
+
+    expect(collectOverviewAiValueStageAnswer([
+      { type: "TEXT_MESSAGE_CONTENT", delta: literalDsml },
+    ], "additional-insights-discovery", true)).toBe("{}");
+    expect(collectOverviewAiValueStageAnswer([
+      {
+        type: "TOOL_CALL_START",
+        toolCallId: "submit-1",
+        toolCallName: "energyiq_additional_insights_submit",
+      },
+      {
+        type: "TOOL_CALL_RESULT",
+        toolCallId: "submit-1",
+        toolCallName: "energyiq_additional_insights_submit",
+        result: {
+          ok: true,
+          resultType: "additional-ai-insight-submission",
+          payload,
+        },
+      },
+    ], "additional-insights-discovery", true)).toBe(JSON.stringify(payload));
+  });
 });
 
 const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
@@ -1371,13 +1401,13 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   modelProfileRevision: 7,
   outputContractRevision: "energyiq-additional-ai-insights-v2",
   validatorRevision: "additional-insights-acceptance-v17",
-  workflowRevision: "additional-insights-discover-accept-publish-v20",
-  investigatorPromptRevision: "additional-insights-discovery-v10",
+  workflowRevision: "additional-insights-discover-accept-publish-v21",
+  investigatorPromptRevision: "additional-insights-discovery-v11",
   editorPromptRevision: "additional-insights-publication-v2",
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v21",
+  identityContractRevision: "additional-insights-v22",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,
@@ -1393,6 +1423,7 @@ const ngeeAnnAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   rendererKey: "ngee-ann-overview",
   analysisPackId: "ngee-ann-additional-insights-pack",
   identityContractRevision: "ngee-ann-additional-insights-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v20",
   investigatorPromptRevision: "additional-insights-discovery-v11",
 });
 

@@ -1515,14 +1515,24 @@ const buildDiscoveryPrompt = (input: {
   productLabel: string;
   entityGuidance: string;
 }): string => {
+  const nativeSubmission = input.identity.rendererKey === "preschool-overview"
+    && input.identity.identityContractRevision === "additional-insights-v22";
+  const candidateShape = "{candidates:[{id,title,observation,angle,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}";
   const prompt = [
     `You are the Additional AI Insights discovery stage for ${input.productLabel}.`,
     ...input.methodResources.map(({ method, content }) => [
       `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
       content,
     ].join("\n")),
-    "Return JSON only: {candidates:[{id,title,observation,angle,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
-    "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
+    ...(nativeSubmission
+      ? [
+          `Call energyiq_additional_insights_submit once with the final Candidate envelope shaped as ${candidateShape}.`,
+          "After a successful submission, stop immediately and do not emit the Candidate envelope as Assistant text. If the tool rejects only the root envelope, correct it once and resubmit the complete envelope.",
+        ]
+      : [
+          `Return JSON only: ${candidateShape}.`,
+          "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
+        ]),
     "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate. Every cited audit must overlap the candidate Evidence; the candidate may additionally cite exact Current Catalog Evidence that was not returned by that audit because the server validates every Evidence ref independently.",
     "For page readability, observation should be one short Evidence-backed sentence. angle should be 1 to 2 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
     `Separate correctness from exploration. observation states only facts directly supported by the candidate Evidence. angle states the genuinely useful relationship, counterexample, hypothesis, or low-risk experiment. An inferred or speculative angle may freely interpret cited facts and ${input.entityGuidance} and may go beyond what the Evidence proves, but it must use transparent possibility language and must not introduce uncited precise numbers, uncited named entities, dates, confirmed causes, savings, or outcomes.`,

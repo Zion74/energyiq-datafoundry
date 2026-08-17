@@ -158,6 +158,7 @@ import type {
 } from "./energy/preschool-additional-ai-insight-runtime.js";
 import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
+import { collectAdditionalAiInsightSubmission } from "./energy/additional-ai-insight-submission.js";
 export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 
 type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
@@ -171,8 +172,9 @@ type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> 
 type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutput>>;
 
 type OverviewAiTrustedRuntimeOverride = {
-  structuredOutput: OverviewAiStructuredOutput;
+  structuredOutput?: OverviewAiStructuredOutput | undefined;
   conversationMessageMaxChars: number;
+  additionalAiInsightSubmission?: true;
   disableTools?: false;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
   trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
@@ -241,6 +243,9 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
       && input.stage !== "additional-insights-discovery"
       && input.stage !== "additional-insights-transition")
     || !input.structuredOutput) return undefined;
+  const nativeAdditionalSubmission = input.stage === "additional-insights-discovery"
+    && input.identity !== undefined
+    && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity);
   const trustedStageTools = input.stage === "section-interpreter"
     && input.sectionInsightTools && input.invokeSectionInsightTool
     ? createPreschoolSectionTrustedStageTools({
@@ -255,7 +260,7 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
         })
     : undefined;
   return {
-    structuredOutput: input.structuredOutput,
+    structuredOutput: nativeAdditionalSubmission ? undefined : input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? input.identity?.rendererKey === "ngee-ann-overview"
         && input.identity.identityContractRevision === "ngee-ann-section-v4"
@@ -274,6 +279,9 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
             && input.identity
             && isCurrentProjectAdditionalAiInsightArtifactIdentity(input.identity)
             ? { trustedStageCapability: "energyiq-additional-insight-discovery" as const }
+            : {}),
+          ...(nativeAdditionalSubmission
+            ? { additionalAiInsightSubmission: true as const }
             : {}),
         }
       : {}),
@@ -387,8 +395,9 @@ export const resolveOverviewAiAgentRuntimeOptions = (
   disableTools?: boolean;
   excludedToolNames: readonly string[];
   overviewAiCandidateSubmission: boolean;
+  additionalAiInsightSubmission?: boolean;
   reasoningModel: false;
-  structuredOutput?: OverviewAiStructuredOutput;
+  structuredOutput?: OverviewAiStructuredOutput | undefined;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
   trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
 } => ({
@@ -583,7 +592,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       metadataStore,
     );
     return {
-      answer: collectOverviewAiText(completed.events, stageInput.stage),
+      answer: collectOverviewAiValueStageAnswer(
+        completed.events,
+        stageInput.stage,
+        stageInput.trustedRuntimeOverride?.additionalAiInsightSubmission === true,
+      ),
       runId: completed.completedRun.runId,
       sessionId: completed.completedRun.sessionId,
     };
@@ -1125,6 +1138,14 @@ export const collectOverviewAiText = (
     return answer;
   }
 };
+
+export const collectOverviewAiValueStageAnswer = (
+  events: ReadonlyArray<Record<string, unknown>>,
+  stage: PreschoolOverviewAiStage,
+  additionalAiInsightSubmission: boolean,
+): string => additionalAiInsightSubmission
+  ? JSON.stringify(collectAdditionalAiInsightSubmission(events) ?? {})
+  : collectOverviewAiText(events, stage);
 
 export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
   threadId: input.sessionId,
@@ -1684,6 +1705,9 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
                 ...(overviewAiStageOptions.disableTools ? { disableTools: true } : {}),
                 ...(overviewAiStageOptions.overviewAiCandidateSubmission
                   ? { overviewAiCandidateSubmission: true }
+                  : {}),
+                ...(overviewAiStageOptions.additionalAiInsightSubmission
+                  ? { additionalAiInsightSubmission: true }
                   : {}),
                 ...(overviewAiStageOptions.excludedToolNames.length > 0
                   ? { excludedToolNames: overviewAiStageOptions.excludedToolNames }

@@ -44,6 +44,7 @@ const createEnergyIqAgent = async (
   options: {
     dataGateway?: unknown;
     emittedEvents?: unknown[];
+    additionalAiInsightSubmission?: boolean;
     overviewAiCandidateSubmission?: boolean;
     disableTools?: boolean;
     structuredOutput?: CreateDataFoundryInput["structuredOutput"];
@@ -78,6 +79,7 @@ const createEnergyIqAgent = async (
       provider_id: "openai-compatible",
     },
     ...(options.overviewAiCandidateSubmission ? { overviewAiCandidateSubmission: true } : {}),
+    ...(options.additionalAiInsightSubmission ? { additionalAiInsightSubmission: true } : {}),
     runContext: {
       user_id: "user-1",
       workspace_id: "workspace-1",
@@ -109,6 +111,27 @@ const createEnergyIqAgent = async (
 };
 
 describe("EnergyIQ agent policy follows the enabled tool set", () => {
+  it("registers the transport-only Additional submission tool with the five scoped read tools", async () => {
+    const runtime = await createEnergyIqAgent(
+      ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+      {
+        additionalAiInsightSubmission: true,
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        trustedStageCapability: "energyiq-additional-insight-discovery",
+        trustedStageTools: createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1),
+      },
+    );
+
+    try {
+      expect(Object.keys(await runtime.agent.listTools()).sort()).toEqual([
+        ...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+        "energyiq_additional_insights_submit",
+      ].sort());
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
   it("rejects Additional discovery when candidate submission is appended after selected-tool validation", async () => {
     await expect(createEnergyIqAgent(
       ["inspect_schema", "run_sql_readonly", "protocol_handoff"],

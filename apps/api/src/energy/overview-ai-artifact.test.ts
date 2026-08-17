@@ -263,13 +263,13 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v21",
+      identityContractRevision: "additional-insights-v22",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
       validatorRevision: "additional-insights-acceptance-v17",
-      workflowRevision: "additional-insights-discover-accept-publish-v20",
-      investigatorPromptRevision: "additional-insights-discovery-v10",
+      workflowRevision: "additional-insights-discover-accept-publish-v21",
+      investigatorPromptRevision: "additional-insights-discovery-v11",
       editorPromptRevision: "additional-insights-publication-v2",
       methodSkillId: "energyiq-open-discovery",
       methodSkillRevision: "1.0.0",
@@ -285,8 +285,9 @@ describe("createOverviewAiArtifactIdentity", () => {
     expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)).toBe(true);
     expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity({
       ...identity,
-      identityContractRevision: "additional-insights-v19",
-      workflowRevision: "additional-insights-discover-accept-publish-v19",
+      identityContractRevision: "additional-insights-v21",
+      workflowRevision: "additional-insights-discover-accept-publish-v20",
+      investigatorPromptRevision: "additional-insights-discovery-v10",
     })).toBe(false);
     for (const [field, value] of [
       ["analysisPackId", "other-pack"],

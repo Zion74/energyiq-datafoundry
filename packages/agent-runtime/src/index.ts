@@ -71,6 +71,10 @@ import {
   OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
 } from "./tools/overview-ai-candidate-submission-tool.js";
 import {
+  ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME,
+  createAdditionalAiInsightSubmissionTool,
+} from "./tools/additional-ai-insight-submission-tool.js";
+import {
   maybeIngestSessionFileOutput,
   maybeIngestSessionFileToolResult
 } from "./tools/session-output-ingest.js";
@@ -225,6 +229,11 @@ export {
 export { resolvePythonRuntime } from "./tools/python-runtime.js";
 export { createDataFoundryToolRegistry, type ToolRegistry } from "./tools/data-tools.js";
 export {
+  ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME,
+  additionalAiInsightSubmissionSchema,
+  createAdditionalAiInsightSubmissionTool,
+} from "./tools/additional-ai-insight-submission-tool.js";
+export {
   createOverviewAiCandidateSubmissionTool,
   overviewAiCandidateSubmissionSchema,
   OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
@@ -270,6 +279,8 @@ export type CreateDataFoundryInput = {
   analysisRequirementsMode?: "default" | "omit";
   /** Strict, run-local Candidate submission; enabled only for the Overview Investigator Stage. */
   overviewAiCandidateSubmission?: boolean;
+  /** Gross-envelope submission for Additional Insights; candidates remain locally and independently reviewed. */
+  additionalAiInsightSubmission?: boolean;
   /** Server-owned stage guard; removes named tools after normal policy selection. */
   excludedToolNames?: readonly string[];
   /** Server-owned stage guard for bounded value transforms that must never invoke tools. */
@@ -344,8 +355,13 @@ const assertTrustedStageFinalTools = (
   capability: TrustedStageCapability | undefined,
   toolNames: readonly string[],
 ): void => {
+  const additionalDiscoveryToolNames = [
+    ...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+    ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME,
+  ];
   if (capability === "energyiq-additional-insight-discovery"
-    && !sameToolNames(toolNames, ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1)) {
+    && !sameToolNames(toolNames, ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1)
+    && !sameToolNames(toolNames, additionalDiscoveryToolNames)) {
     throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
   }
   if (capability === "energyiq-additional-insight-transition" && toolNames.length > 0) {
@@ -392,6 +408,10 @@ export const createDataFoundry = async (
     && (!energyIqRun
       || !hasExactAdditionalInsightToolSet
       || input.explicitProtocol?.protocolId !== "general-task")) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+  if (input.additionalAiInsightSubmission
+    && input.trustedStageCapability !== "energyiq-additional-insight-discovery") {
     throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
   }
   if (input.trustedStageCapability === "energyiq-additional-insight-transition"
@@ -757,6 +777,11 @@ export const createDataFoundry = async (
         [OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME]: createOverviewAiCandidateSubmissionTool(),
       }
     : {};
+  const additionalAiInsightSubmissionTools = input.additionalAiInsightSubmission && !input.disableTools
+    ? {
+        [ADDITIONAL_AI_INSIGHT_SUBMISSION_TOOL_NAME]: createAdditionalAiInsightSubmissionTool(),
+      }
+    : {};
   const protocolHandoffTools = input.disableTools || excludedToolNames.has("protocol_handoff")
     ? {}
     : {
@@ -795,6 +820,7 @@ export const createDataFoundry = async (
     ...governedSelectedTools,
     ...requirementsCommitTools,
     ...overviewAiCandidateSubmissionTools,
+    ...additionalAiInsightSubmissionTools,
     ...protocolHandoffTools,
   };
   assertTrustedStageFinalTools(input.trustedStageCapability, Object.keys(tools));
@@ -819,6 +845,7 @@ export const createDataFoundry = async (
         ...Object.keys(selectedTools),
         ...Object.keys(requirementsCommitTools),
         ...Object.keys(overviewAiCandidateSubmissionTools),
+        ...Object.keys(additionalAiInsightSubmissionTools),
         ...Object.keys(protocolHandoffTools),
       ],
       mcpToolNames: input.mcpToolNames ?? [],

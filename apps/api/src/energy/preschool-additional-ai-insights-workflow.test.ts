@@ -27,11 +27,16 @@ import { PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 } from "./prescho
 describe("Preschool Additional AI Insights workflow", () => {
   it("projects the current Additional identity before composing presented Layer 1 and 2 claims", async () => {
     const harness = createHarness();
-    const runDiscovery = vi.fn(async ({ runId, sessionId }) => ({
-      answer: JSON.stringify({ candidates: [] }),
-      runId,
-      sessionId,
-    }));
+    const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
+      expect(prompt).toContain("Call energyiq_additional_insights_submit");
+      expect(prompt).toContain("do not emit the Candidate envelope as Assistant text");
+      expect(prompt).not.toContain("Return JSON only");
+      return {
+        answer: JSON.stringify({ candidates: [] }),
+        runId,
+        sessionId,
+      };
+    });
     try {
       const workflow = createPreschoolAdditionalAiInsightsWorkflow({
         metadataStore: harness.metadata,
