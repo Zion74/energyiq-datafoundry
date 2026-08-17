@@ -61,7 +61,9 @@ describe("EnergyIQ operational policy Admin interface", () => {
             owner: { kind: "project" },
             effectiveFrom: "2026-07-01T00:00:00+08:00",
             currency: "SGD",
-            ratePerKwh: 0.28,
+            ratePerKwh: 0.2972,
+            rateBasis: "tax_inclusive",
+            tax: { name: "GST", ratePct: 9 },
           }],
         }),
         ["projects", projectId, "operational-policies", "tariff"],
@@ -74,7 +76,12 @@ describe("EnergyIQ operational policy Admin interface", () => {
           data: {
             revision: {
               project_id: projectId,
-              entries: [{ currency: "SGD", rate_per_kwh: 0.28 }],
+              entries: [{
+                currency: "SGD",
+                rate_per_kwh: 0.2972,
+                rate_basis: "tax_inclusive",
+                tax: { name: "GST", rate_pct: 9 },
+              }],
             },
           },
         },

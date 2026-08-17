@@ -1082,6 +1082,10 @@ export type EnergyScopeAnalysisDto = {
       from: string;
       to: string;
       ratePerKwh: number;
+      rateBasis?: "tax_inclusive" | "tax_exclusive";
+      tax?: { name: string; ratePct: number };
+      taxInclusiveRatePerKwh?: number;
+      taxExclusiveRatePerKwh?: number;
       usageKwh: number;
       cost: number;
     }>;
@@ -1173,6 +1177,8 @@ export type EnergyTariffScheduleEntryDto = {
   effective_to?: string;
   currency: string;
   rate_per_kwh: number;
+  rate_basis?: "tax_inclusive" | "tax_exclusive";
+  tax?: { name: string; rate_pct: number };
 };
 
 export type EnergyTariffScheduleRevisionDto = {
@@ -1229,6 +1235,8 @@ export type EnergyTariffScheduleEntryInputDto = {
   effectiveTo?: string;
   currency: string;
   ratePerKwh: number;
+  rateBasis?: "tax_inclusive" | "tax_exclusive";
+  tax?: { name: string; ratePct: number };
 };
 
 export type EnergyOperatingCalendarEntryInputDto = {

@@ -11,6 +11,8 @@ export type EnergyIqTariffScheduleEntry = {
   effective_to?: string;
   currency: string;
   rate_per_kwh: number;
+  rate_basis?: "tax_inclusive" | "tax_exclusive";
+  tax?: { name: string; rate_pct: number };
 };
 
 export type EnergyIqTariffScheduleRevision = {
@@ -111,6 +113,10 @@ export type EnergyIqTariffEvaluation =
         from: string;
         to: string;
         rate_per_kwh: number;
+        rate_basis?: "tax_inclusive" | "tax_exclusive";
+        tax?: { name: string; rate_pct: number };
+        tax_inclusive_rate_per_kwh?: number;
+        tax_exclusive_rate_per_kwh?: number;
         usage_kwh: number;
         cost: number;
       }>;
@@ -623,10 +629,16 @@ export class EnergyIqOperationalPolicyStore {
         }
       }
       const roundedUsage = round(usage);
+      const taxRates = deriveTaxRates(segment.entry);
       return {
         from: new Date(segment.fromMs).toISOString(),
         to: new Date(segment.toMs).toISOString(),
         rate_per_kwh: segment.entry.rate_per_kwh,
+        ...(segment.entry.rate_basis ? {
+          rate_basis: segment.entry.rate_basis,
+          tax: segment.entry.tax,
+          ...taxRates,
+        } : {}),
         usage_kwh: roundedUsage,
         cost: round(roundedUsage * segment.entry.rate_per_kwh),
       };
@@ -823,6 +835,21 @@ const canonicalizeTariffEntries = (entries: EnergyIqTariffScheduleEntry[]): Ener
     if (!Number.isFinite(entry.rate_per_kwh) || entry.rate_per_kwh < 0) {
       throw new Error(`ENERGYIQ_TARIFF_RATE_INVALID:${entry.id}`);
     }
+    if ((entry.rate_basis === undefined) !== (entry.tax === undefined)) {
+      throw new Error(`ENERGYIQ_TARIFF_TAX_BASIS_INCOMPLETE:${entry.id}`);
+    }
+    if (entry.rate_basis !== undefined && entry.rate_basis !== "tax_inclusive" && entry.rate_basis !== "tax_exclusive") {
+      throw new Error(`ENERGYIQ_TARIFF_RATE_BASIS_INVALID:${entry.id}`);
+    }
+    const tax = entry.tax === undefined
+      ? undefined
+      : {
+          name: requiredText(entry.tax.name, `tariff:${entry.id}:tax:name`),
+          rate_pct: entry.tax.rate_pct,
+        };
+    if (tax && (!Number.isFinite(tax.rate_pct) || tax.rate_pct < 0)) {
+      throw new Error(`ENERGYIQ_TARIFF_TAX_RATE_INVALID:${entry.id}`);
+    }
     const currency = entry.currency.trim().toUpperCase();
     if (!/^[A-Z]{3}$/.test(currency)) {
       throw new Error(`ENERGYIQ_TARIFF_CURRENCY_INVALID:${entry.id}`);
@@ -834,6 +861,7 @@ const canonicalizeTariffEntries = (entries: EnergyIqTariffScheduleEntry[]): Ener
       effective_from: new Date(fromMs).toISOString(),
       ...(toMs !== undefined ? { effective_to: new Date(toMs).toISOString() } : {}),
       currency,
+      ...(entry.rate_basis && tax ? { rate_basis: entry.rate_basis, tax } : {}),
     };
   });
 
@@ -1059,6 +1087,23 @@ const resolveOperatingCalendarExceptions = (input: {
     }
   }
   return exceptions;
+};
+
+const deriveTaxRates = (entry: EnergyIqTariffScheduleEntry): {
+  tax_inclusive_rate_per_kwh: number;
+  tax_exclusive_rate_per_kwh: number;
+} | undefined => {
+  if (!entry.rate_basis || !entry.tax) return undefined;
+  const multiplier = 1 + entry.tax.rate_pct / 100;
+  return entry.rate_basis === "tax_inclusive"
+    ? {
+        tax_inclusive_rate_per_kwh: entry.rate_per_kwh,
+        tax_exclusive_rate_per_kwh: round(entry.rate_per_kwh / multiplier),
+      }
+    : {
+        tax_inclusive_rate_per_kwh: round(entry.rate_per_kwh * multiplier),
+        tax_exclusive_rate_per_kwh: entry.rate_per_kwh,
+      };
 };
 
 const resolveOperatingCalendarEntryForDate = (input: {

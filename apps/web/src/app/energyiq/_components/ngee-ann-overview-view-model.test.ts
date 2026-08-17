@@ -342,6 +342,35 @@ const anomalyStrictRuleMismatchCases: Array<{
 ];
 
 describe("Ngee Ann Overview ViewModel", () => {
+  it("explains the published tax-inclusive Tariff with its derived ex-tax reference rate", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.cost.status !== "available") throw new Error("Expected cost Evidence.");
+    snapshot.analysis.cost.amount = 455.063226;
+    Object.assign(snapshot.analysis.cost.allocations[0]!, {
+      ratePerKwh: 0.2972,
+      rateBasis: "tax_inclusive",
+      tax: { name: "GST", ratePct: 9 },
+      taxInclusiveRatePerKwh: 0.2972,
+      taxExclusiveRatePerKwh: 0.272661,
+      cost: 455.063226,
+    });
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.highlights.find((item) => item.id === "cost")?.detail)
+      .toBe("29.72¢/kWh incl. GST (27.27¢/kWh ex GST)");
+    expect(view.evidence.cost).toMatchObject({
+      status: "available",
+      allocations: [{
+        ratePerKwh: "0.2972",
+        rateBasis: "tax_inclusive",
+        tax: { name: "GST", ratePct: "9" },
+        taxInclusiveRatePerKwh: "0.2972",
+        taxExclusiveRatePerKwh: "0.272661",
+      }],
+    });
+  });
+
   it("projects the fixed Custom Golden Snapshot without creating a second formula stack", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const view = buildNgeeAnnOverviewViewModel(snapshot);

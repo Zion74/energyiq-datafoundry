@@ -718,6 +718,24 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("Published sections");
   });
 
+  it("shows the configured inclusive and ex-tax Tariff basis in the Cost summary and Evidence", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.cost.status !== "available") throw new Error("Expected cost Evidence.");
+    Object.assign(snapshot.analysis.cost.allocations[0]!, {
+      ratePerKwh: 0.2972,
+      rateBasis: "tax_inclusive",
+      tax: { name: "GST", ratePct: 9 },
+      taxInclusiveRatePerKwh: 0.2972,
+      taxExclusiveRatePerKwh: 0.272661,
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup.match(/29\.72¢\/kWh incl\. GST \(27\.27¢\/kWh ex GST\)/g)).toHaveLength(2);
+  });
+
   it("renders an honest unavailable Level module for a legacy Snapshot contract", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer

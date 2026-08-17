@@ -584,6 +584,10 @@ export type EnergyScopeAnalysis = {
       from: string;
       to: string;
       ratePerKwh: number;
+      rateBasis?: "tax_inclusive" | "tax_exclusive";
+      tax?: { name: string; ratePct: number };
+      taxInclusiveRatePerKwh?: number;
+      taxExclusiveRatePerKwh?: number;
       usageKwh: number;
       cost: number;
     }>;
@@ -2753,6 +2757,16 @@ const mapTariffEvaluation = (
         from: allocation.from,
         to: allocation.to,
         ratePerKwh: allocation.rate_per_kwh,
+        ...(allocation.rate_basis ? { rateBasis: allocation.rate_basis } : {}),
+        ...(allocation.tax ? {
+          tax: { name: allocation.tax.name, ratePct: allocation.tax.rate_pct },
+        } : {}),
+        ...(allocation.tax_inclusive_rate_per_kwh === undefined
+          ? {}
+          : { taxInclusiveRatePerKwh: allocation.tax_inclusive_rate_per_kwh }),
+        ...(allocation.tax_exclusive_rate_per_kwh === undefined
+          ? {}
+          : { taxExclusiveRatePerKwh: allocation.tax_exclusive_rate_per_kwh }),
         usageKwh: allocation.usage_kwh,
         cost: allocation.cost,
       })),

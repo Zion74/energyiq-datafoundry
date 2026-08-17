@@ -57,7 +57,9 @@ describe("EnergyIqOperationalPolicyStore", () => {
             effective_from: "2026-07-01T00:00:00+08:00",
             effective_to: "2026-07-03T00:00:00+08:00",
             currency: "SGD",
-            rate_per_kwh: 0.2,
+            rate_per_kwh: 0.2972,
+            rate_basis: "tax_inclusive",
+            tax: { name: "GST", rate_pct: 9 },
           },
           {
             id: "level-override",
@@ -97,14 +99,18 @@ describe("EnergyIqOperationalPolicyStore", () => {
         status: "available",
         currency: "SGD",
         tariff_schedule_version: "tariff-v1",
-        total_cost: 5,
+        total_cost: 5.972,
         allocations: [
           {
             from: "2026-06-30T16:00:00.000Z",
             to: "2026-07-01T16:00:00.000Z",
-            rate_per_kwh: 0.2,
+            rate_per_kwh: 0.2972,
+            rate_basis: "tax_inclusive",
+            tax: { name: "GST", rate_pct: 9 },
+            tax_inclusive_rate_per_kwh: 0.2972,
+            tax_exclusive_rate_per_kwh: 0.272661,
             usage_kwh: 10,
-            cost: 2,
+            cost: 2.972,
           },
           {
             from: "2026-07-01T16:00:00.000Z",

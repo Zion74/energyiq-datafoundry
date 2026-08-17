@@ -17,6 +17,9 @@ describe("operational policy Admin model", () => {
       owner: { kind: "project" },
       currency: "SGD",
       ratePerKwh: "0.28",
+      rateBasis: "tax_inclusive",
+      taxName: "GST",
+      taxRatePct: "9",
     }]);
     expect(calendarDraftFromConfiguration(configuration)[0]).toMatchObject({
       owner: { kind: "scope", scopeId: "level-6" },
@@ -38,6 +41,8 @@ describe("operational policy Admin model", () => {
       effectiveFrom: "2026-07-01T00:00:00+08:00",
       currency: "SGD",
       ratePerKwh: 0.28,
+      rateBasis: "tax_inclusive",
+      tax: { name: "GST", ratePct: 9 },
     }]);
     expect(calendarPublishEntries(calendarDraftFromConfiguration(configuration))).toMatchObject([{
       owner: { kind: "scope", scopeId: "level-6" },
@@ -88,6 +93,8 @@ const fixture = (): EnergyOperationalPolicyConfigurationDto => ({
         effective_from: "2026-07-01T00:00:00+08:00",
         currency: "SGD",
         rate_per_kwh: 0.28,
+        rate_basis: "tax_inclusive",
+        tax: { name: "GST", rate_pct: 9 },
       }],
     },
   ],

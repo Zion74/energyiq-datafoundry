@@ -25,6 +25,9 @@ export type TariffEntryDraft = {
   effectiveTo: string;
   currency: string;
   ratePerKwh: string;
+  rateBasis: "tax_inclusive" | "tax_exclusive" | "";
+  taxName: string;
+  taxRatePct: string;
 };
 
 export type OperatingTimeRangeDraft = { key: string; from: string; to: string };
@@ -53,6 +56,9 @@ export const createEmptyTariffEntry = (key: string): TariffEntryDraft => ({
   effectiveTo: "",
   currency: "SGD",
   ratePerKwh: "",
+  rateBasis: "",
+  taxName: "",
+  taxRatePct: "",
 });
 
 export const createEmptyCalendarEntry = (key: string): OperatingCalendarEntryDraft => ({
@@ -86,6 +92,9 @@ export const tariffDraftFromConfiguration = (
     effectiveTo: entry.effective_to ?? "",
     currency: entry.currency,
     ratePerKwh: String(entry.rate_per_kwh),
+    rateBasis: entry.rate_basis ?? "",
+    taxName: entry.tax?.name ?? "",
+    taxRatePct: entry.tax ? String(entry.tax.rate_pct) : "",
   }));
 };
 
@@ -125,15 +134,23 @@ export const tariffPublishEntries = (
   entries: TariffEntryDraft[],
 ): EnergyTariffScheduleEntryInputDto[] => entries.map((entry, index) => {
   const rate = Number(entry.ratePerKwh);
+  const taxRate = Number(entry.taxRatePct);
   if (!entry.effectiveFrom) throw new Error(`Tariff window ${index + 1} needs an effective start.`);
   if (!entry.currency.trim()) throw new Error(`Tariff window ${index + 1} needs a currency.`);
   if (!Number.isFinite(rate) || rate <= 0) throw new Error(`Tariff window ${index + 1} needs a positive rate.`);
+  if (entry.rateBasis && (!entry.taxName.trim() || !Number.isFinite(taxRate) || taxRate < 0)) {
+    throw new Error(`Tariff window ${index + 1} needs a valid tax name and rate.`);
+  }
   return {
     owner: ownerToInput(entry.owner, `Tariff window ${index + 1}`),
     effectiveFrom: entry.effectiveFrom,
     ...(entry.effectiveTo ? { effectiveTo: entry.effectiveTo } : {}),
     currency: entry.currency.trim().toUpperCase(),
     ratePerKwh: rate,
+    ...(entry.rateBasis ? {
+      rateBasis: entry.rateBasis,
+      tax: { name: entry.taxName.trim(), ratePct: taxRate },
+    } : {}),
   };
 });
 

@@ -257,7 +257,7 @@ function TariffEntryEditor({
   return (
     <div className="rounded-xl border border-border bg-surface-subtle/50 p-4">
       <EditorHeader label={`Rate window ${index + 1}`} removable={removable} onRemove={onRemove} />
-      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <OwnerField
           owner={entry.owner}
           options={scopeOptions}
@@ -287,6 +287,35 @@ function TariffEntryEditor({
           placeholder="0.28"
           inputMode="decimal"
           onChange={(ratePerKwh) => onChange({ ...entry, ratePerKwh })}
+        />
+        <label className="block">
+          <span className={fieldLabel}>Rate basis</span>
+          <select
+            aria-label="Tariff rate basis"
+            className={compactInputClass}
+            value={entry.rateBasis}
+            onChange={(event) => onChange({
+              ...entry,
+              rateBasis: event.target.value as TariffEntryDraft["rateBasis"],
+            })}
+          >
+            <option value="">Not specified</option>
+            <option value="tax_inclusive">Tax inclusive</option>
+            <option value="tax_exclusive">Tax exclusive</option>
+          </select>
+        </label>
+        <TextField
+          label="Tax name"
+          value={entry.taxName}
+          placeholder="GST"
+          onChange={(taxName) => onChange({ ...entry, taxName })}
+        />
+        <TextField
+          label="Tax rate (%)"
+          value={entry.taxRatePct}
+          placeholder="9"
+          inputMode="decimal"
+          onChange={(taxRatePct) => onChange({ ...entry, taxRatePct })}
         />
       </div>
     </div>

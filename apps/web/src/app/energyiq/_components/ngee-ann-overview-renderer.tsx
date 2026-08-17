@@ -446,7 +446,7 @@ function CostEvidence({
                 {evidence.allocations.map((allocation, index) => (
                   <tr key={`${allocation.from}:${allocation.to}:${index}`} className="border-b border-border last:border-b-0">
                     <td className="py-2 pr-3 text-foreground" title={`${allocation.from} / ${allocation.to}`}>{allocation.range}</td>
-                    <td className="px-3 py-2 tabular-nums text-foreground">{allocation.ratePerKwh} {evidence.currency}/kWh</td>
+                    <td className="px-3 py-2 tabular-nums text-foreground">{allocation.displayRate ?? `${allocation.ratePerKwh} ${evidence.currency}/kWh`}</td>
                     <td className="px-3 py-2 tabular-nums text-foreground">{allocation.usageKwh} kWh</td>
                     <td className="py-2 pl-3 tabular-nums text-foreground">{allocation.cost} {evidence.currency}</td>
                   </tr>

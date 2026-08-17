@@ -822,6 +822,11 @@ export type NgeeAnnOverviewViewModel = {
           to: string;
           range: string;
           ratePerKwh: string;
+          displayRate?: string;
+          rateBasis?: "tax_inclusive" | "tax_exclusive";
+          tax?: { name: string; ratePct: string };
+          taxInclusiveRatePerKwh?: string;
+          taxExclusiveRatePerKwh?: string;
           usageKwh: string;
           cost: string;
         }>;
@@ -944,7 +949,7 @@ export function buildNgeeAnnOverviewViewModel(
           ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatCustomerDecimal(analysis.cost.amount, 2)}`
           : "Unavailable",
         detail: analysis.cost.status === "available" && !unavailable
-          ? `Based on ${analysis.cost.allocations.length === 1 ? "the active tariff" : `${analysis.cost.allocations.length} active tariff allocations`} for this period`
+          ? formatTariffDetail(analysis.cost.allocations)
           : analysis.cost.status === "unavailable"
             ? analysis.cost.reason.message
             : "No effective Tariff",
@@ -1005,6 +1010,23 @@ export function buildNgeeAnnOverviewViewModel(
             to: allocation.to,
             range: formatEvidenceRange(allocation.from, allocation.to, context.timezone),
             ratePerKwh: formatDecimal(allocation.ratePerKwh, 6),
+            ...(allocation.tax
+              && allocation.taxInclusiveRatePerKwh !== undefined
+              && allocation.taxExclusiveRatePerKwh !== undefined
+              ? { displayRate: formatConfiguredTaxRates(allocation) }
+              : {}),
+            ...(allocation.rateBasis ? {
+              rateBasis: allocation.rateBasis,
+              tax: allocation.tax
+                ? { name: allocation.tax.name, ratePct: formatDecimal(allocation.tax.ratePct, 6) }
+                : undefined,
+              taxInclusiveRatePerKwh: allocation.taxInclusiveRatePerKwh === undefined
+                ? undefined
+                : formatDecimal(allocation.taxInclusiveRatePerKwh, 6),
+              taxExclusiveRatePerKwh: allocation.taxExclusiveRatePerKwh === undefined
+                ? undefined
+                : formatDecimal(allocation.taxExclusiveRatePerKwh, 6),
+            } : {}),
             usageKwh: formatDecimal(allocation.usageKwh, 6),
             cost: formatDecimal(allocation.cost, 6),
           })),
@@ -4214,6 +4236,36 @@ function buildMetadataLimitation(snapshot: EnergyProjectAnalysisSnapshotDto): st
     `${missing.join(" and ")} metadata ${missing.length === 1 ? "is" : "are"} missing. This does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost; normalised metrics remain unavailable.`,
     ...guidance,
   ].join(" ");
+}
+
+function formatTariffDetail(allocations: Array<{
+  rateBasis?: "tax_inclusive" | "tax_exclusive";
+  tax?: { name: string; ratePct: number };
+  taxInclusiveRatePerKwh?: number;
+  taxExclusiveRatePerKwh?: number;
+}>): string {
+  const allocation = allocations.length === 1 ? allocations[0] : undefined;
+  if (
+    allocation?.tax
+    && allocation.taxInclusiveRatePerKwh !== undefined
+    && allocation.taxExclusiveRatePerKwh !== undefined
+  ) {
+    return formatConfiguredTaxRates(allocation);
+  }
+  return `Based on ${allocations.length === 1 ? "the active tariff" : `${allocations.length} active tariff allocations`} for this period`;
+}
+
+function formatConfiguredTaxRates(allocation: {
+  tax?: { name: string; ratePct: number };
+  taxInclusiveRatePerKwh?: number;
+  taxExclusiveRatePerKwh?: number;
+}): string {
+  if (
+    !allocation.tax
+    || allocation.taxInclusiveRatePerKwh === undefined
+    || allocation.taxExclusiveRatePerKwh === undefined
+  ) return "";
+  return `${formatFixedCustomerDecimal(allocation.taxInclusiveRatePerKwh * 100, 2)}¢/kWh incl. ${allocation.tax.name} (${formatFixedCustomerDecimal(allocation.taxExclusiveRatePerKwh * 100, 2)}¢/kWh ex ${allocation.tax.name})`;
 }
 
 function formatDecimal(value: number, maximumFractionDigits: number): string {

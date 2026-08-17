@@ -2963,6 +2963,20 @@ const parseTariffScheduleEntries = (value: unknown): EnergyIqTariffScheduleEntry
   return value.map((candidate, index) => {
     const entry = requireRecord(candidate, `ENERGYIQ_TARIFF_ENTRY_INVALID:${index}`);
     const effectiveTo = optionalString(entry.effectiveTo);
+    const rateBasis = optionalString(entry.rateBasis);
+    const tax = entry.tax === undefined
+      ? undefined
+      : requireRecord(entry.tax, `ENERGYIQ_TARIFF_TAX_INVALID:${index}`);
+    if ((rateBasis === undefined) !== (tax === undefined)) {
+      throw new Error(`ENERGYIQ_TARIFF_TAX_BASIS_INCOMPLETE:${index}`);
+    }
+    if (rateBasis !== undefined && rateBasis !== "tax_inclusive" && rateBasis !== "tax_exclusive") {
+      throw new Error(`ENERGYIQ_TARIFF_RATE_BASIS_INVALID:${index}`);
+    }
+    const taxRatePct = tax?.ratePct;
+    if (tax && (typeof taxRatePct !== "number" || !Number.isFinite(taxRatePct) || taxRatePct < 0)) {
+      throw new Error(`ENERGYIQ_TARIFF_TAX_RATE_INVALID:${index}`);
+    }
     return {
       id: `tariff-entry-${randomUUID()}`,
       owner: parsePolicyOwner(entry.owner, `ENERGYIQ_TARIFF_OWNER_INVALID:${index}`),
@@ -2973,6 +2987,13 @@ const parseTariffScheduleEntries = (value: unknown): EnergyIqTariffScheduleEntry
       ...(effectiveTo ? { effective_to: effectiveTo } : {}),
       currency: requireNonEmptyString(entry.currency, `ENERGYIQ_TARIFF_CURRENCY_REQUIRED:${index}`).toUpperCase(),
       rate_per_kwh: requirePositiveNumber(entry.ratePerKwh, `ENERGYIQ_TARIFF_RATE_INVALID:${index}`),
+      ...(rateBasis ? {
+        rate_basis: rateBasis,
+        tax: {
+          name: requireNonEmptyString(tax?.name, `ENERGYIQ_TARIFF_TAX_NAME_REQUIRED:${index}`),
+          rate_pct: taxRatePct as number,
+        },
+      } : {}),
     };
   });
 };
