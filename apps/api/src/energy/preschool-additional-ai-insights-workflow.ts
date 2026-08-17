@@ -258,6 +258,11 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     user: UserRecord;
   }): Promise<PreschoolAdditionalAiPresentedClaims>;
   runDiscovery: PreschoolAdditionalAiInsightsDiscoveryRunner;
+  discoveryContext?: {
+    productLabel: string;
+    entityGuidance: string;
+    runPrefix: string;
+  };
 }): PreschoolAdditionalAiInsightsWorkflow => {
   const createArtifactIdentity = input.createArtifactIdentity
     ?? createPreschoolAdditionalAiInsightArtifactIdentity;
@@ -310,7 +315,14 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       catalog,
     });
     const completed = await input.runDiscovery({
-      prompt: buildDiscoveryPrompt({ identity, catalog, presentedClaims, methodResources: methodSet.resources }),
+      prompt: buildDiscoveryPrompt({
+        identity,
+        catalog,
+        presentedClaims,
+        methodResources: methodSet.resources,
+        productLabel: input.discoveryContext?.productLabel ?? "EnergyIQ Preschool",
+        entityGuidance: input.discoveryContext?.entityGuidance ?? "named Centres",
+      }),
       runId,
       sessionId,
       user,
@@ -380,12 +392,13 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       triggeredBy: user.id,
     });
     if (queued.status === "available" || queued.status === "running") return queued;
-    const workerId = `preschool-additional-ai-insights:${randomUUID()}`;
+    const runPrefix = input.discoveryContext?.runPrefix ?? "preschool-additional-ai-insights";
+    const workerId = `${runPrefix}:${randomUUID()}`;
     const claim = input.metadataStore.energyIq.overviewAiArtifacts.claim({ identity, workerId, leaseMs: LEASE_MS });
     if (!claim.claimed) return claim.artifact;
 
-    const runId = `preschool-additional-ai-insights-${randomUUID()}`;
-    const sessionId = `preschool-additional-ai-insights-${randomUUID()}`;
+    const runId = `${runPrefix}-${randomUUID()}`;
+    const sessionId = `${runPrefix}-${randomUUID()}`;
     try {
       const artifact = await evaluateAttempt({ identity, user, runId, sessionId });
       return input.metadataStore.energyIq.overviewAiArtifacts.complete({
@@ -560,10 +573,11 @@ const repairUnbalancedRootClosers = (
   return output;
 };
 
-const parseDiscoveryEnvelope = (answer: string): unknown => {
+const parseDiscoveryEnvelope = (answer: string, allowBoundedRepair: boolean): unknown => {
   try {
     return JSON.parse(answer) as unknown;
   } catch {
+    if (!allowBoundedRepair) return null;
     const trimmed = answer.trim();
     if (!trimmed.startsWith("{")) return null;
     const quoted = repairMissingPropertyOpeningQuotes(trimmed);
@@ -583,7 +597,8 @@ const parseDiscoveryCandidates = (
   identity: ProjectAdditionalAiInsightArtifactIdentity,
 ): DiscoveryCandidate[] | null => {
   if (typeof answer !== "string" || answer.length > MAX_DISCOVERY_ANSWER_CHARS) return null;
-  const parsed = parseDiscoveryEnvelope(answer);
+  const allowBoundedRepair = identity.identityContractRevision === "ngee-ann-additional-insights-v2";
+  const parsed = parseDiscoveryEnvelope(answer, allowBoundedRepair);
   if (!isRecord(parsed) || !Array.isArray(parsed.candidates)) return null;
   const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v2"
     && parsed.type === "object"
@@ -1490,9 +1505,11 @@ const buildDiscoveryPrompt = (input: {
   catalog: AnalysisContextEvidenceCatalog;
   presentedClaims: PreschoolAdditionalAiPresentedClaims;
   methodResources: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["resources"];
+  productLabel: string;
+  entityGuidance: string;
 }): string => {
   const prompt = [
-    "You are the Additional AI Insights discovery stage for EnergyIQ Preschool.",
+    `You are the Additional AI Insights discovery stage for ${input.productLabel}.`,
     ...input.methodResources.map(({ method, content }) => [
       `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
       content,
@@ -1501,7 +1518,7 @@ const buildDiscoveryPrompt = (input: {
     "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
     "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate. Every cited audit must overlap the candidate Evidence; the candidate may additionally cite exact Current Catalog Evidence that was not returned by that audit because the server validates every Evidence ref independently.",
     "For page readability, observation should be one short Evidence-backed sentence. angle should be 1 to 2 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
-    "Separate correctness from exploration. observation states only facts directly supported by the candidate Evidence. angle states the genuinely useful relationship, counterexample, hypothesis, or low-risk experiment. An inferred or speculative angle may freely interpret cited facts and named Centres and may go beyond what the Evidence proves, but it must use transparent possibility language and must not introduce uncited precise numbers, uncited Centres, dates, confirmed causes, savings, or outcomes.",
+    `Separate correctness from exploration. observation states only facts directly supported by the candidate Evidence. angle states the genuinely useful relationship, counterexample, hypothesis, or low-risk experiment. An inferred or speculative angle may freely interpret cited facts and ${input.entityGuidance} and may go beyond what the Evidence proves, but it must use transparent possibility language and must not introduce uncited precise numbers, uncited named entities, dates, confirmed causes, savings, or outcomes.`,
     "ai-discovery must contain exactly kind and directionMethodResourceIds, with directionMethodResourceIds=[]. Do not add novelContribution to ai-discovery. If alert cannot match the exact object shape {severity:'attention|urgent',certainty:'confirmed|anomaly|possible',evidenceRefs:[exact candidate Evidence ref]}, omit it.",
     "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence. Qualitative relationships, counterexamples, possible mechanisms, and testable hypotheses are valuable and remain valid even when the Evidence does not confirm the explanation.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",

@@ -1,6 +1,7 @@
 import type {
   EnergyIqOverviewAiArtifactIdentity,
   EnergyIqOverviewAiArtifactRecord,
+  EnergyIqAdditionalInsightModelProfileSnapshot,
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
@@ -67,6 +68,7 @@ export type NgeeAnnExecutiveRunner = (input: {
   runId: string;
   sessionId: string;
   structuredOutput: typeof NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 export const ngeeAnnExecutiveTargetId = (
@@ -96,11 +98,13 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
     sectionRecords,
     user,
     retry = false,
+    modelProfileSnapshot,
   }: {
     baseIdentity: OverviewAiArtifactIdentityV13;
     sectionRecords: readonly EnergyIqOverviewAiArtifactRecord[];
     user: UserRecord;
     retry?: boolean;
+    modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   }): Promise<EnergyIqOverviewAiArtifactRecord> {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
     const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
@@ -137,6 +141,7 @@ export const createNgeeAnnExecutiveSynthesizer = (input: {
         runId,
         sessionId,
         structuredOutput: NGEE_ANN_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1,
+        ...(modelProfileSnapshot ? { modelProfileSnapshot } : {}),
       });
       if (response.runId !== runId || response.sessionId !== sessionId) {
         throw new Error("ENERGYIQ_NGEE_ANN_EXECUTIVE_RUN_IDENTITY_MISMATCH");

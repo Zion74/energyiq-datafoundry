@@ -119,7 +119,10 @@ import {
   composeNgeeAnnOverviewAiReadModel,
   createNgeeAnnProjectOverviewAiAdapter,
 } from "./energy/ngee-ann-overview-ai-adapter.js";
-import { createNgeeAnnOverviewAiWorkflow } from "./energy/ngee-ann-overview-ai-workflow.js";
+import {
+  createNgeeAnnOverviewAiWorkflow,
+  isNgeeAnnOverviewAiGenerationTerminal,
+} from "./energy/ngee-ann-overview-ai-workflow.js";
 import { NGEE_ANN_SECTION_MESSAGE_MAX_CHARS } from "./energy/ngee-ann-section-interpreter.js";
 import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
@@ -695,6 +698,11 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const ngeeAnnAdditionalAiInsightsWorkflow = createPreschoolAdditionalAiInsightsWorkflow({
     metadataStore,
     createArtifactIdentity: createNgeeAnnAdditionalAiInsightArtifactIdentity,
+    discoveryContext: {
+      productLabel: "EnergyIQ Ngee Ann campus energy Overview",
+      entityGuidance: "the cited campus Levels, Circuits, loads, and operating-time patterns",
+      runPrefix: "ngee-ann-additional-ai-insights",
+    },
     resolveEvidenceCatalog: async ({ identity, user }) => {
       const project = metadataStore.energyIq.getProject(identity.projectId);
       const period = overviewAiArtifactPinnedLocalPeriod({ identity, timezone: project.timezone });
@@ -747,16 +755,16 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     metadataStore,
     dataGateway,
     async executeMissing({ identity, user, retryTarget }) {
-      if (retryTarget === "additional-ai-insights") {
+      if (retryTarget === "additional-insights") {
         await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
         return;
       }
-      await ngeeAnnOverviewAiWorkflow.execute({
+      const core = await ngeeAnnOverviewAiWorkflow.execute({
         identity,
         user,
         ...(retryTarget ? { retryTarget } : {}),
       });
-      if (!retryTarget) {
+      if (!retryTarget && isNgeeAnnOverviewAiGenerationTerminal(core)) {
         await ngeeAnnAdditionalAiInsightsWorkflow.execute({ baseIdentity: identity, user });
       }
     },

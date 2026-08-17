@@ -1,6 +1,7 @@
 import type {
   EnergyIqOverviewAiArtifactIdentity,
   EnergyIqOverviewAiArtifactRecord,
+  EnergyIqAdditionalInsightModelProfileSnapshot,
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
@@ -88,6 +89,7 @@ export type NgeeAnnSectionInterpreterRunner = (input: {
   runId: string;
   sessionId: string;
   structuredOutput: typeof NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1;
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 export const createNgeeAnnSectionInterpreter = (input: {
@@ -100,11 +102,13 @@ export const createNgeeAnnSectionInterpreter = (input: {
     packs,
     user,
     retryTargets = [],
+    modelProfileSnapshot,
   }: {
     baseIdentity: OverviewAiArtifactIdentityV13;
     packs: NgeeAnnSectionPacks;
     user: UserRecord;
     retryTargets?: NgeeAnnSectionId[];
+    modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   }): Promise<Record<NgeeAnnSectionId, EnergyIqOverviewAiArtifactRecord>> {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
     const identities = Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => [
@@ -141,6 +145,7 @@ export const createNgeeAnnSectionInterpreter = (input: {
           runId,
           sessionId,
           structuredOutput: NGEE_ANN_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1,
+          ...(modelProfileSnapshot ? { modelProfileSnapshot } : {}),
         });
         if (response.runId !== runId || response.sessionId !== sessionId) {
           throw new Error("ENERGYIQ_NGEE_ANN_SECTION_RUN_IDENTITY_MISMATCH");

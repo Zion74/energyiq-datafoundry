@@ -1,10 +1,13 @@
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
 import type {
+  EnergyIqAdditionalInsightModelProfileSnapshot,
   EnergyIqOverviewAiArtifactIdentity,
   EnergyIqOverviewAiArtifactRecord,
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
+
+import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 import {
   overviewAiArtifactPinnedLocalPeriod,
@@ -34,6 +37,7 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
     identity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
   }) => Promise<NgeeAnnSectionPacks>;
+  resolveModelProfileSnapshot?: () => EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => {
   const assertRuntimeIdentity = input.assertRuntimeIdentity
     ?? ((identity: EnergyIqOverviewAiArtifactIdentity) =>
@@ -71,6 +75,8 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
     if (resolution.status !== "ready") throw new Error("OVERVIEW_AI_SNAPSHOT_NOT_READY");
     return assembleNgeeAnnSectionPacks(resolution.snapshot);
   });
+  const resolveModelProfileSnapshot = input.resolveModelProfileSnapshot
+    ?? (() => resolveWorkspaceDefaultModelProfileSnapshot(input.metadataStore));
 
   return {
     async execute({
@@ -90,15 +96,20 @@ export const createNgeeAnnOverviewAiWorkflow = (input: {
         throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_RETRY_TARGET_INVALID");
       }
       assertRuntimeIdentity(baseIdentity);
+      const modelProfileSnapshot = resolveModelProfileSnapshot();
+      if (modelProfileSnapshot.bindingRevision !== baseIdentity.modelProfileRevision) {
+        throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+      }
       const packs = await resolvePacks({ identity: baseIdentity, user });
       const retryTargets = retryTarget && isNgeeAnnSectionId(retryTarget) ? [retryTarget] : [];
-      const sections = await interpreter.execute({ baseIdentity, packs, user, retryTargets });
+      const sections = await interpreter.execute({ baseIdentity, packs, user, retryTargets, modelProfileSnapshot });
       if (!areNgeeAnnSectionArtifactsTerminal(sections)) return { sections };
       const executive = await synthesizer.execute({
         baseIdentity,
         sectionRecords: NGEE_ANN_SECTION_IDS.map((sectionId) => sections[sectionId]),
         user,
         retry: retryTarget === "executive-synthesis",
+        modelProfileSnapshot,
       });
       return { sections, executive };
     },
@@ -109,6 +120,13 @@ export const areNgeeAnnSectionArtifactsTerminal = (
   sections: Record<NgeeAnnSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>,
 ): boolean => NGEE_ANN_SECTION_IDS.every((sectionId) =>
   sections[sectionId].status === "available" || sections[sectionId].status === "failed");
+
+export const isNgeeAnnOverviewAiGenerationTerminal = (input: {
+  sections: Record<NgeeAnnSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>;
+  executive?: Pick<EnergyIqOverviewAiArtifactRecord, "status">;
+}): boolean => areNgeeAnnSectionArtifactsTerminal(input.sections)
+  && Boolean(input.executive
+    && (input.executive.status === "available" || input.executive.status === "failed"));
 
 const isNgeeAnnSectionId = (value: string): value is NgeeAnnSectionId =>
   (NGEE_ANN_SECTION_IDS as readonly string[]).includes(value);

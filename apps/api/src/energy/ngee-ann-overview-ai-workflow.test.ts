@@ -10,6 +10,7 @@ import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
 import {
   areNgeeAnnSectionArtifactsTerminal,
   createNgeeAnnOverviewAiWorkflow,
+  isNgeeAnnOverviewAiGenerationTerminal,
 } from "./ngee-ann-overview-ai-workflow.js";
 import {
   NGEE_ANN_SECTION_IDS,
@@ -27,6 +28,7 @@ describe("Ngee Ann Overview AI workflow", () => {
       metadataStore: { energyIq: { overviewAiArtifacts: store } } as unknown as MetadataStore,
       dataGateway: {} as never,
       assertRuntimeIdentity: vi.fn(),
+      resolveModelProfileSnapshot: () => modelProfileSnapshot(),
       resolvePacks: vi.fn().mockResolvedValue(packs()),
       runSection: async ({ identity, runId, sessionId }) => {
         sectionCalls.push(identity);
@@ -53,11 +55,11 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v3")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v4")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(executiveCalls[0]).toMatchObject({
       artifactKind: "executive-synthesis",
-      identityContractRevision: "ngee-ann-executive-v2",
+      identityContractRevision: "ngee-ann-executive-v3",
       dataSnapshotId: "snapshot-ngee",
     });
     expect(Object.values(result.sections).every(({ status }) => status === "available")).toBe(true);
@@ -72,6 +74,20 @@ describe("Ngee Ann Overview AI workflow", () => {
       ...terminal,
       "time-behaviour": { status: "running" },
     })).toBe(false);
+  });
+
+  it("does not consider Layer 1/2 ready while Key Findings is still running", () => {
+    const terminal = Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => [sectionId, { status: "available" }])) as
+      Record<NgeeAnnSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>;
+
+    expect(isNgeeAnnOverviewAiGenerationTerminal({
+      sections: terminal,
+      executive: { status: "running" },
+    })).toBe(false);
+    expect(isNgeeAnnOverviewAiGenerationTerminal({
+      sections: terminal,
+      executive: { status: "available" },
+    })).toBe(true);
   });
 });
 
@@ -90,6 +106,21 @@ const baseIdentity = () => createOverviewAiArtifactIdentity({
 });
 
 const user = (): UserRecord => ({ id: "dev-user" } as UserRecord);
+
+const modelProfileSnapshot = () => ({
+  bindingRevision: 8,
+  profiles: [{
+    exposedId: "workspace-default-model-profile",
+    ownerWorkspaceId: "default",
+    ownerUserId: "dev-user",
+    resource: {
+      kind: "model-profile",
+      status: "connected",
+      default_enabled: true,
+      payload: {},
+    },
+  }],
+}) as never;
 
 const packs = (): NgeeAnnSectionPacks => Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => [sectionId, {
   contract: { id: "ngee-ann-section-pack", revision: "ngee-ann-section-pack-v1" },
