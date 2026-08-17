@@ -2277,8 +2277,11 @@ const parseSavedAnalysisAiArtifactInput = (
       throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
     }
     const artifact = value as unknown as SavedAnalysisAiProjectArtifactInput;
-    if ((!options.allowLegacyProjectEmptyWithoutRunId
-        && savedAnalysisAiRunIds(artifact.result).length === 0)
+    const hasProducedUnit = projectOverviewSavedUnits(artifact.result)
+      .some((unit) => isRecord(unit) && (unit.status === "available" || unit.status === "empty"));
+    if ((options.allowLegacyProjectEmptyWithoutRunId
+        ? !hasProducedUnit
+        : savedAnalysisAiRunIds(artifact.result).length === 0)
       || JSON.stringify(artifact).length > 262_144) {
       throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
     }

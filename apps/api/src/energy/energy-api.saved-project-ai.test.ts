@@ -178,6 +178,26 @@ describe("Ngee Ann Saved Project AI", () => {
       expect(readExact).toHaveBeenCalledOnce();
       expect(adapter.generateMissing).not.toHaveBeenCalled();
 
+      const missingEmptyRunModel = structuredClone(model);
+      const missingEmptyRunUnit = missingEmptyRunModel.sections["time-behaviour"];
+      if (missingEmptyRunUnit?.status !== "empty") throw new Error("TEST_EMPTY_UNIT_REQUIRED");
+      missingEmptyRunUnit.runId = "missing-empty-run";
+      const missingRunSaved = metadata.energyIq.savedAnalyses.create({
+        ...saved,
+        id: "saved-analysis-ngee-project-ai-missing-empty-run",
+        series_id: "saved-analysis-ngee-project-ai-missing-empty-run-series",
+        title: "Ngee AI missing empty Run",
+      });
+      readExact.mockResolvedValueOnce(missingEmptyRunModel);
+      expect(await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...artifact, result: missingEmptyRunModel } }),
+        ["projects", project.id, "saved-analyses", missingRunSaved.id, "ai-result"],
+        context,
+      )).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID" } },
+      });
+
       const emptyModel: ProjectOverviewAiReadModel = {
         ...model,
         keyFindings: emptyUnit("executive-empty", emptyRunId),
