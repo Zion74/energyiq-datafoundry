@@ -56,7 +56,7 @@ describe("EnergyIqInsightMethodGovernanceStore", () => {
         scopeId: "artifact-project-scope",
         artifactId: harness.artifact.id,
         artifactIdentityHash: `sha256:${harness.artifact.identity_hash}`,
-        artifactIdentityRevision: "additional-insights-v23",
+        artifactIdentityRevision: "additional-insights-v24",
         findingId: "additional-insight-1",
         actorId: "admin-reviewer",
         text: "Useful lead; verify whether the same shape repeats next week.",
@@ -130,7 +130,7 @@ describe("EnergyIqInsightMethodGovernanceStore", () => {
         scopeId: "artifact-project-scope",
         artifactId: harness.artifact.id,
         artifactIdentityHash: `sha256:${harness.artifact.identity_hash}`,
-        artifactIdentityRevision: "additional-insights-v23",
+        artifactIdentityRevision: "additional-insights-v24",
         dataSnapshotId: "snapshot-feedback",
         projectReleaseId: "release-v1",
         findingId: "additional-insight-1",
@@ -368,7 +368,7 @@ function createHarness() {
 
 type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v23";
+  identityContractRevision: "additional-insights-v24";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -403,7 +403,7 @@ function additionalIdentity(): AdditionalIdentity {
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v23",
+    identityContractRevision: "additional-insights-v24",
     methodSetId: "preschool-additional-insights-current",
     methodSetRevision: "v1",
     methodSetFingerprint: `sha256:${createHash("sha256").update(canonical).digest("hex")}`,

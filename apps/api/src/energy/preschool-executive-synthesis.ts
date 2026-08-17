@@ -183,7 +183,7 @@ const createPreschoolExecutiveSynthesizerV4 = (input: {
     const runId = `preschool-executive-synthesis-v4-${randomUUID()}`;
 
     try {
-      if (accepted.length === 0) {
+      if (accepted.length < 2) {
         input.assertRuntimeIdentity?.(identity);
         return store.complete({
           identity,
@@ -349,6 +349,7 @@ const buildExecutivePromptV4 = (
     "You are the Preschool Overview Key Findings synthesizer, not a new investigator.",
     "Use only the accepted current-v4 Section summaries and insights below, plus any explicitly supplied authoritative Overview Evidence.",
     "Select the few cross-Section themes that matter most. Do not mechanically rewrite every Section or invent a cause, number, date, entity relationship, or action.",
+    "Key Findings are cross-Section synthesis: every published Finding must cite and be supported by at least two accepted Sections. A one-Section restatement belongs only in that Section and must not be published here.",
     "Preserve source epistemic status: an inferred or speculative Section Insight may support only explicitly qualified Key Findings. Never upgrade a signal, relationship, hypothesis, or possibility into a confirmed fact.",
     "Qualify the Summary sentence, Finding title, and every Finding sentence independently. A cautious word in the body never makes an unqualified headline safe.",
     "A Section screening priority does not mean that Centre dominates total energy. Do not use 'dominated', 'proves', or 'confirms' unless that exact relationship is explicit in the cited source narrative.",
@@ -543,7 +544,9 @@ const materializeExecutiveResultV4 = (input: {
   if (summaryEvidenceRefs.length === 0) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   }
-  const summaryIsSupported = !hasUnsupportedNumber(summaryText, numbersSupportedByEvidenceRefs(
+  const summaryIsSupported = summaryContributingSections.size >= 2
+    && !isSingleSectionSummaryRestatement(summaryText, input.accepted)
+    && !hasUnsupportedNumber(summaryText, numbersSupportedByEvidenceRefs(
     summaryEvidenceRefs,
     narrativesByEvidenceRef,
     overviewFacts,
@@ -560,7 +563,7 @@ const materializeExecutiveResultV4 = (input: {
     const rawEvidenceRefs = stringArray(candidate.evidenceRefs);
     if (!title || title.length > PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS
       || !text || text.length > PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS
-      || !sectionIds || sectionIds.length === 0
+      || !sectionIds || sectionIds.length < 2
       || sectionIds.length !== (candidate.sectionIds as unknown[]).length
       || new Set(sectionIds).size !== sectionIds.length
       || sectionIds.some((sectionId) => !acceptedBySection.has(sectionId))
@@ -596,6 +599,7 @@ const materializeExecutiveResultV4 = (input: {
     if ([...declaredSections].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
       return [];
     }
+    if (isSingleSectionFindingRestatement(title, text, input.accepted)) return [];
     if (hasUnsupportedNumber(`${title} ${text}`, numbersSupportedByEvidenceRefs(
       evidenceRefs,
       narrativesByEvidenceRef,
@@ -650,7 +654,7 @@ const materializeExecutiveResultV4 = (input: {
     for (const factId of summaryOverviewFactIds) usedOverviewFactIds.add(factId);
   } else {
     const fallback = findings[0];
-    if (!fallback) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
+    if (!fallback) return emptyResultV4(input.identity, input.runId);
     publishedSummaryText = /[.!?]$/u.test(fallback.title) ? fallback.title : `${fallback.title}.`;
     publishedSummaryEvidenceRefs = [...fallback.evidenceRefs];
   }
@@ -658,9 +662,7 @@ const materializeExecutiveResultV4 = (input: {
     const accepted = acceptedBySection.get(sectionId);
     return contributingSections.has(sectionId) && accepted ? [accepted.artifactId] : [];
   });
-  if (sourceSectionArtifactIds.length === 0) {
-    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
-  }
+  if (sourceSectionArtifactIds.length < 2) return emptyResultV4(input.identity, input.runId);
   return {
     artifactKind: "executive-synthesis",
     status: "available",
@@ -915,6 +917,44 @@ const sectionNarrativesByEvidenceRef = (
   }
   return narratives;
 };
+
+const isSingleSectionSummaryRestatement = (
+  summaryText: string,
+  accepted: AcceptedSectionV4[],
+): boolean => accepted.some(({ result }) => sectionNarratives(result).some((source) =>
+  isNearVerbatimRestatement(summaryText, source)));
+
+const isSingleSectionFindingRestatement = (
+  title: string,
+  text: string,
+  accepted: AcceptedSectionV4[],
+): boolean => accepted.some(({ result }) => {
+  const narratives = sectionNarratives(result);
+  return narratives.some((source) => isNearVerbatimRestatement(title, source))
+    && narratives.some((source) => isNearVerbatimRestatement(text, source));
+});
+
+const sectionNarratives = (result: AcceptedSectionV4["result"]): string[] => [
+  result.summary.text,
+  ...result.insights.flatMap((insight) => [insight.title, insight.text]),
+];
+
+const isNearVerbatimRestatement = (candidate: string, source: string): boolean => {
+  const normalizedCandidate = normalizeNarrativeForRestatement(candidate);
+  const normalizedSource = normalizeNarrativeForRestatement(source);
+  if (!normalizedCandidate || !normalizedSource) return false;
+  if (normalizedCandidate === normalizedSource) return true;
+  const shorter = normalizedCandidate.length <= normalizedSource.length ? normalizedCandidate : normalizedSource;
+  const longer = normalizedCandidate.length > normalizedSource.length ? normalizedCandidate : normalizedSource;
+  return shorter.length >= 32 && shorter.length / longer.length >= 0.9 && longer.includes(shorter);
+};
+
+const normalizeNarrativeForRestatement = (value: string): string => value
+  .normalize("NFKC")
+  .toLocaleLowerCase("en")
+  .replace(/[\p{P}\p{S}_]+/gu, " ")
+  .replace(/\s+/gu, " ")
+  .trim();
 
 const numbersSupportedByEvidenceRefs = (
   evidenceRefs: string[],

@@ -56,7 +56,7 @@ export type ProjectAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtif
 };
 
 export type PreschoolAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
-  identityContractRevision: "additional-insights-v23";
+  identityContractRevision: "additional-insights-v24";
 };
 
 export type NgeeAnnAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
@@ -287,7 +287,7 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v23",
+    identityContractRevision: "additional-insights-v24",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
@@ -347,7 +347,7 @@ export const isCurrentPreschoolAdditionalAiInsightArtifactIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): identity is PreschoolAdditionalAiInsightArtifactIdentity =>
   identity.artifactKind === "autonomous-insights"
-  && identity.identityContractRevision === "additional-insights-v23"
+  && identity.identityContractRevision === "additional-insights-v24"
   && identity.analysisPackId === "preschool-additional-insights-pack"
   && identity.analysisPackRevision === "v1"
   && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
@@ -448,9 +448,9 @@ export const createPreschoolOverviewAiExecutiveArtifactIdentityV4 = (input: {
     analysisPackId: "preschool-executive-section-artifacts",
     analysisPackRevision: "section-interpretation-v4",
     outputContractRevision: "preschool-executive-synthesis-v4",
-    validatorRevision: "preschool-executive-synthesis-validator-v19",
-    workflowRevision: "preschool-executive-synthesis-v11",
-    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
+    validatorRevision: "preschool-executive-synthesis-validator-v20",
+    workflowRevision: "preschool-executive-synthesis-v12",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v12",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
@@ -512,7 +512,7 @@ export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
     analysisPackRevision: "v2",
     outputContractRevision: "preschool-section-interpretation-v4",
     validatorRevision: "acceptance-validator-v13",
-    workflowRevision: "discover-tools-accept-publish-v3",
+    workflowRevision: "discover-tools-accept-publish-v4",
     investigatorPromptRevision: "discovery-prompt-v11",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",

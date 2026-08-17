@@ -341,6 +341,7 @@ describe("Preschool Executive Synthesis", () => {
   it("does not upgrade an inferred Section relationship into a certain Key Finding", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -349,23 +350,23 @@ describe("Preschool Executive Synthesis", () => {
           status: "available",
           summary: {
             text: "The benchmark evidence suggests a relationship worth checking.",
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           },
           findings: [{
             title: "Efficiency issue is established",
             text: "The peer pattern proves an efficiency issue across the group.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           }, {
             title: "Schedule mismatch causes waste",
             text: "This may warrant review before any cause is assigned.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           }, {
             title: "Peer intensity needs context, not alarm",
             text: "The peer pattern points to a possible efficiency signal, not a confirmed issue.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           }],
         }),
         runId: input.runId,
@@ -377,7 +378,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [benchmark.id],
+      sourceSectionArtifactIds: [benchmark.id, standby.id],
       findings: [
         { title: "Possible: Schedule mismatch causes waste" },
         { title: "Peer intensity needs context, not alarm" },
@@ -388,6 +389,7 @@ describe("Preschool Executive Synthesis", () => {
   it("falls back to the first accepted Finding headline when the Executive Summary overstates an inferred source", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -396,13 +398,13 @@ describe("Preschool Executive Synthesis", () => {
           status: "available",
           summary: {
             text: "The peer evidence proves an efficiency issue.",
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           },
           findings: [{
             title: "A possible peer pattern warrants a check",
             text: "The peer pattern points to a possible efficiency signal, not a confirmed issue.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
           }],
         }),
         runId: input.runId,
@@ -414,7 +416,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [benchmark.id],
+      sourceSectionArtifactIds: [benchmark.id, standby.id],
       summary: { text: "A possible peer pattern warrants a check." },
       findings: [{ title: "A possible peer pattern warrants a check" }],
     });
@@ -423,6 +425,7 @@ describe("Preschool Executive Synthesis", () => {
   it("rejects an overlong current Key Findings summary even when the Provider ignores its schema", async () => {
     const harness = createHarness();
     completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -550,7 +553,7 @@ describe("Preschool Executive Synthesis", () => {
   it("rejects only a Key Finding whose Evidence belongs to a different current-v4 Section", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
-    completeSectionV4(harness, "standby-wastage");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -558,14 +561,14 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "The benchmark provides the summary context.",
-            evidenceRefs: ["evidence:centre-benchmark:summary"],
+            text: "The benchmark and standby Sections provide the summary context.",
+            evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:standby-wastage:summary"],
           },
           findings: [{
             title: "Mismatched lineage",
-            text: "This finding claims to come from the benchmark Section.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:standby-wastage:insight"],
+            text: "This finding claims to connect the benchmark and standby Sections.",
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:operating-behaviour:insight"],
           }],
         }),
         runId: input.runId,
@@ -579,7 +582,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [benchmark.id],
+      sourceSectionArtifactIds: [benchmark.id, standby.id],
       findings: [],
     });
     expect(storedBenchmark).toEqual(benchmark);
@@ -647,6 +650,19 @@ describe("Preschool Executive Synthesis", () => {
         evidenceRefs: ["evidence:standby:shared"],
       }],
     );
+    const operating = completeSectionV4(
+      harness,
+      "operating-behaviour",
+      "available",
+      "Current operating summary.",
+      [{
+        id: "insight:operating:observed",
+        title: "Operating context is available",
+        epistemicStatus: "observed",
+        text: "Operating context is available for the same review period.",
+        evidenceRefs: ["evidence:operating:observed"],
+      }],
+    );
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -654,14 +670,14 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "Current standby summary.",
-            evidenceRefs: ["evidence:standby-wastage:summary"],
+            text: "Current standby and operating summaries are available.",
+            evidenceRefs: ["evidence:standby-wastage:summary", "evidence:operating-behaviour:summary"],
           },
           findings: [{
             title: "Centre L holds all 11 flagged events",
-            text: "All 11 flagged events are in Centre L. A shared operating cause may be worth testing.",
-            sectionIds: ["standby-wastage"],
-            evidenceRefs: ["evidence:standby:shared"],
+            text: "All 11 flagged events are in Centre L, while operating context is available. A shared operating cause may be worth testing.",
+            sectionIds: ["standby-wastage", "operating-behaviour"],
+            evidenceRefs: ["evidence:standby:shared", "evidence:operating:observed"],
           }],
         }),
         runId: input.runId,
@@ -674,7 +690,7 @@ describe("Preschool Executive Synthesis", () => {
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [standby.id],
+      sourceSectionArtifactIds: [standby.id, operating.id],
       findings: [{ title: "Centre L holds all 11 flagged events" }],
     });
   });
@@ -682,6 +698,7 @@ describe("Preschool Executive Synthesis", () => {
   it("persists a supported deterministic Overview Evidence reference without weakening Section lineage", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const synthesizer = createPreschoolExecutiveSynthesizer({
       metadataStore: harness.metadata,
       revision: "v4",
@@ -715,14 +732,14 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "The portfolio used 120 kWh and the benchmark evidence warrants attention.",
-            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:summary"],
+            text: "The portfolio used 120 kWh, while benchmark and standby evidence warrant attention.",
+            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:summary", "evidence:standby-wastage:summary"],
           },
           findings: [{
             title: "Portfolio total adds context to a possible benchmark signal",
-            text: "The confirmed 120 kWh total adds context to a benchmark pattern that may warrant review.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:insight"],
+            text: "The confirmed 120 kWh total adds context to benchmark and standby patterns that may warrant review together.",
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
             alert: { severity: "attention", certainty: "possible" },
           }],
         }),
@@ -735,14 +752,14 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v19",
-      workflowRevision: "preschool-executive-synthesis-v11",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
+      validatorRevision: "preschool-executive-synthesis-validator-v20",
+      workflowRevision: "preschool-executive-synthesis-v12",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v12",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [benchmark.id],
+      sourceSectionArtifactIds: [benchmark.id, standby.id],
       overviewEvidence: {
         contract: "analysis-context-evidence@1",
         sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
@@ -755,6 +772,7 @@ describe("Preschool Executive Synthesis", () => {
   it("canonicalizes a uniquely owned Overview provenance reference to its server Fact ID", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
     const authoritativeOverviewEvidence = {
       binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
       catalog: {
@@ -816,9 +834,10 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "The benchmark context is available alongside the 12.45% closed-hour share and 138.8 kW peak.",
+            text: "The benchmark and standby contexts are available alongside the 12.45% closed-hour share and 138.8 kW peak.",
             evidenceRefs: [
               "evidence:centre-benchmark:summary",
+              "evidence:standby-wastage:summary",
               "evidence:snapshot:energy.off_hours_share_pct@1",
               "evidence:snapshot:energy.off_hours_share_pct@1",
               "evidence:snapshot:energy.peak_demand_kw@1",
@@ -826,9 +845,9 @@ describe("Preschool Executive Synthesis", () => {
           },
           findings: [{
             title: "Benchmark context may remain the supported priority",
-            text: "The benchmark evidence suggests the supported Section context may remain relevant.",
-            sectionIds: ["centre-benchmark"],
-            evidenceRefs: ["evidence:centre-benchmark:insight"],
+            text: "The benchmark and standby evidence suggest their relationship may remain relevant.",
+            sectionIds: ["centre-benchmark", "standby-wastage"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:standby-wastage:insight"],
             alert: { severity: "attention", certainty: "inferred" },
           }],
         }),
@@ -847,10 +866,11 @@ describe("Preschool Executive Synthesis", () => {
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [benchmark.id],
+      sourceSectionArtifactIds: [benchmark.id, standby.id],
       summary: {
         evidenceRefs: [
           "evidence:centre-benchmark:summary",
+          "evidence:standby-wastage:summary",
           "analysis.summary.closed_hour_share_pct",
           "analysis.summary.peak_kw",
         ],
@@ -864,6 +884,7 @@ describe("Preschool Executive Synthesis", () => {
 
   it("removes an unsupported cross-source cost relation and restores the uniquely matching Overview Fact", async () => {
     const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
     const operating = completeSectionV4(
       harness,
       "operating-behaviour",
@@ -904,14 +925,14 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "The portfolio used 24,921.8 kWh at a provisional cost of about S$5,950 before GST, with operating evidence available.",
-            evidenceRefs: ["evidence:operating-behaviour:summary"],
+            text: "The portfolio used 24,921.8 kWh at a provisional cost of about S$5,950 before GST, with benchmark and operating evidence available.",
+            evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary"],
           },
           findings: [{
             title: "Operating evidence remains available",
-            text: "The accepted operating evidence supports a focused review.",
-            sectionIds: ["operating-behaviour"],
-            evidenceRefs: ["evidence:operating-behaviour:insight"],
+            text: "The accepted benchmark and operating evidence support a focused cross-Section review.",
+            sectionIds: ["centre-benchmark", "operating-behaviour"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
           }],
         }),
         runId: input.runId,
@@ -929,10 +950,10 @@ describe("Preschool Executive Synthesis", () => {
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
-      sourceSectionArtifactIds: [operating.id],
+      sourceSectionArtifactIds: [benchmark.id, operating.id],
       summary: {
-        text: "The portfolio used 24,921.8 kWh, with operating evidence available.",
-        evidenceRefs: ["evidence:operating-behaviour:summary", "analysis.summary.usage_kwh"],
+        text: "The portfolio used 24,921.8 kWh, with benchmark and operating evidence available.",
+        evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary", "analysis.summary.usage_kwh"],
       },
       overviewEvidence: { factIds: ["analysis.summary.usage_kwh"] },
     });
@@ -1103,6 +1124,91 @@ describe("Preschool Executive Synthesis", () => {
     expect(result).not.toHaveProperty("summary");
     expect(result).not.toHaveProperty("keyFindings");
     expect(providerCalls).toBe(0);
+  });
+
+  it("does not call the Provider when only one current Section can contribute to a cross-Section synthesis", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage", "empty");
+    failSectionV4(harness, "operating-behaviour");
+    completeSectionV4(harness, "planning-outlook", "empty");
+    let providerCalls = 0;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async () => {
+        providerCalls += 1;
+        throw new Error("ONE_SECTION_MUST_NOT_CALL_PROVIDER");
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      artifactKind: "executive-synthesis",
+      status: "empty",
+      sourceSectionArtifactIds: [],
+      findings: [],
+    });
+    expect(providerCalls).toBe(0);
+  });
+
+  it("rejects a one-Section restatement while preserving a distinct cross-Section sibling", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Current centre-benchmark summary.",
+            evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:standby-wastage:summary"],
+          },
+          findings: [
+            {
+              title: "Benchmark finding copied from one Section",
+              text: "Current centre-benchmark summary.",
+              sectionIds: ["centre-benchmark"],
+              evidenceRefs: ["evidence:centre-benchmark:summary"],
+            },
+            {
+              title: "Benchmark and standby patterns may warrant a coordinated review",
+              text: "The peer and closed-hour signals may be more useful when reviewed together.",
+              sectionIds: ["centre-benchmark", "standby-wastage"],
+              evidenceRefs: [
+                "evidence:centre-benchmark:summary",
+                "evidence:standby-wastage:summary",
+              ],
+            },
+          ],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    const result = JSON.parse(artifact.result_json!) as {
+      status: string;
+      sourceSectionArtifactIds: string[];
+      summary: { text: string };
+      findings: Array<{ title: string; sectionIds: string[] }>;
+    };
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result.status).toBe("available");
+    expect(result.summary.text).toBe("Benchmark and standby patterns may warrant a coordinated review.");
+    expect(result.findings).toEqual([expect.objectContaining({
+      title: "Benchmark and standby patterns may warrant a coordinated review",
+      sectionIds: ["centre-benchmark", "standby-wastage"],
+    })]);
+    expect(result.sourceSectionArtifactIds).toEqual([benchmark.id, standby.id]);
   });
 });
 

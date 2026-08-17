@@ -442,7 +442,7 @@ const canonicalIdentityForMutation = (
 const isCurrentAdditionalAiInsightMutationIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): boolean => ((identity.rendererKey === "preschool-overview"
-  && identity.identityContractRevision === "additional-insights-v23"
+  && identity.identityContractRevision === "additional-insights-v24"
   && identity.analysisPackId === "preschool-additional-insights-pack")
   || (identity.rendererKey === "ngee-ann-overview"
     && identity.identityContractRevision === "ngee-ann-additional-insights-v3"
@@ -874,7 +874,15 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  const isCurrentV23 = identity.identityContractRevision === "additional-insights-v23"
+  const isHistoricalV23 = identity.identityContractRevision === "additional-insights-v23"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v17"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v21"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v12"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2";
+  const isCurrentV24 = identity.identityContractRevision === "additional-insights-v24"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
     && identity.validatorRevision === "additional-insights-acceptance-v17"
     && identity.workflowRevision === "additional-insights-discover-accept-publish-v21"
@@ -915,7 +923,7 @@ const requireAdditionalAiInsightsResult = (
   const validAnalysisPack = isHistoricalNgeeAnnV1 || isHistoricalNgeeAnnV2 || isCurrentNgeeAnnV3
     ? identity.analysisPackId === "ngee-ann-additional-insights-pack"
     : identity.analysisPackId === "preschool-additional-insights-pack";
-  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isHistoricalV6 && !isHistoricalV7 && !isHistoricalV8 && !isHistoricalV9 && !isHistoricalV10 && !isHistoricalV11 && !isHistoricalV12 && !isHistoricalV13 && !isHistoricalV14 && !isHistoricalV15 && !isHistoricalV16 && !isHistoricalV17 && !isHistoricalV18 && !isHistoricalV19 && !isHistoricalV20 && !isHistoricalV21 && !isHistoricalV22 && !isCurrentV23 && !isHistoricalNgeeAnnV1 && !isHistoricalNgeeAnnV2 && !isCurrentNgeeAnnV3)
+  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isHistoricalV6 && !isHistoricalV7 && !isHistoricalV8 && !isHistoricalV9 && !isHistoricalV10 && !isHistoricalV11 && !isHistoricalV12 && !isHistoricalV13 && !isHistoricalV14 && !isHistoricalV15 && !isHistoricalV16 && !isHistoricalV17 && !isHistoricalV18 && !isHistoricalV19 && !isHistoricalV20 && !isHistoricalV21 && !isHistoricalV22 && !isHistoricalV23 && !isCurrentV24 && !isHistoricalNgeeAnnV1 && !isHistoricalNgeeAnnV2 && !isCurrentNgeeAnnV3)
     || !validAnalysisPack
     || identity.analysisPackRevision !== "v1"
     || identity.capabilityRevision !== "scoped-read-only-v1"
@@ -1402,6 +1410,9 @@ const validSectionV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIde
     && identity.investigatorPromptRevision === "discovery-prompt-v11")
   || (identity.validatorRevision === "acceptance-validator-v13"
     && identity.workflowRevision === "discover-tools-accept-publish-v3"
+    && identity.investigatorPromptRevision === "discovery-prompt-v11")
+  || (identity.validatorRevision === "acceptance-validator-v13"
+    && identity.workflowRevision === "discover-tools-accept-publish-v4"
     && identity.investigatorPromptRevision === "discovery-prompt-v11");
 
 const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>
@@ -1480,6 +1491,10 @@ const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactI
   || (identity.validatorRevision === "preschool-executive-synthesis-validator-v19"
     && identity.workflowRevision === "preschool-executive-synthesis-v11"
     && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v11"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2")
+  || (identity.validatorRevision === "preschool-executive-synthesis-validator-v20"
+    && identity.workflowRevision === "preschool-executive-synthesis-v12"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v12"
     && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2");
 
 const requireExecutiveSourceLineageV4 = (input: {

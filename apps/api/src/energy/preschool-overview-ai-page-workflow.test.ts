@@ -162,6 +162,7 @@ describe("Preschool Overview AI page workflow", () => {
   it("passes the server-owned Snapshot Evidence catalog into current Key Findings synthesis", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark", "The benchmark evidence supports review.");
+    const standby = completeSectionV4(harness, "standby-wastage", "The standby evidence supports review.");
     const snapshot = emptySnapshot();
     snapshot.evidence = [{
       id: "query:overview-current",
@@ -185,14 +186,14 @@ describe("Preschool Overview AI page workflow", () => {
           answer: JSON.stringify({
             status: "available",
             summary: {
-              text: "The 120 kWh portfolio total adds context to the benchmark evidence.",
-              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark"],
+              text: "The 120 kWh total adds context to the benchmark and standby evidence.",
+              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark", "evidence:v4:standby-wastage"],
             },
             findings: [{
               title: "Portfolio context",
-              text: "The 120 kWh total and benchmark evidence support a focused review.",
-              sectionIds: ["centre-benchmark"],
-              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark"],
+              text: "The 120 kWh total and the two accepted Sections support a focused review.",
+              sectionIds: ["centre-benchmark", "standby-wastage"],
+              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark", "evidence:v4:standby-wastage"],
             }],
           }),
           runId,
@@ -206,7 +207,7 @@ describe("Preschool Overview AI page workflow", () => {
     expect(result.executive).toMatchObject({
       status: "available",
       result: {
-        sourceSectionArtifactIds: [benchmark.id],
+        sourceSectionArtifactIds: [benchmark.id, standby.id],
         overviewEvidence: {
           contract: "analysis-context-evidence@1",
           pins: {

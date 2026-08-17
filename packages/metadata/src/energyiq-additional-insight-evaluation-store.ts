@@ -1612,6 +1612,10 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.validatorRevision === "additional-insights-acceptance-v17"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v21"
     && target.promptRevision === "additional-insights-discovery-v12")
+  || (target.artifactIdentityRevision === "additional-insights-v24"
+    && target.validatorRevision === "additional-insights-acceptance-v17"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v21"
+    && target.promptRevision === "additional-insights-discovery-v12")
 );
 
 const overviewArtifactIdentityMatchesEvaluationTarget = (
@@ -1646,7 +1650,7 @@ const overviewArtifactIdentityMatchesEvaluationTarget = (
 };
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v23"
+  if (target.artifactIdentityRevision !== "additional-insights-v24"
     || target.validatorRevision !== "additional-insights-acceptance-v17"
     || target.workflowRevision !== "additional-insights-discover-accept-publish-v21"
     || target.promptRevision !== "additional-insights-discovery-v12") {

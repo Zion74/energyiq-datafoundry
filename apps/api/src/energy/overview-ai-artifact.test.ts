@@ -203,7 +203,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
       validatorRevision: "acceptance-validator-v13",
-      workflowRevision: "discover-tools-accept-publish-v3",
+      workflowRevision: "discover-tools-accept-publish-v4",
       investigatorPromptRevision: "discovery-prompt-v11",
       capabilityRevision: "scoped-read-only-v1",
       publicationRevision: "v1",
@@ -213,9 +213,9 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       targetId: "sections:current-v4",
     })).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v19",
-      workflowRevision: "preschool-executive-synthesis-v11",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
+      validatorRevision: "preschool-executive-synthesis-validator-v20",
+      workflowRevision: "preschool-executive-synthesis-v12",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v12",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
     });
     expect(legacySection).toMatchObject({
@@ -263,7 +263,7 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v23",
+      identityContractRevision: "additional-insights-v24",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-additional-ai-insights-v2",

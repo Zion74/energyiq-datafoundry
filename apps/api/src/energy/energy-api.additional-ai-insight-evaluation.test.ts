@@ -464,7 +464,7 @@ const createHarness = () => {
         analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
         modelProfileId: "workspace-default",
         modelProfileRevision: 7,
-        artifactIdentityRevision: "additional-insights-v23",
+        artifactIdentityRevision: "additional-insights-v24",
         artifactIdentityHash: `sha256:${"a".repeat(64)}`,
         outputContractRevision: "energyiq-additional-ai-insights-v2",
         validatorRevision: "additional-insights-acceptance-v17",

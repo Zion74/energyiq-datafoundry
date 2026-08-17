@@ -1413,7 +1413,7 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v23",
+  identityContractRevision: "additional-insights-v24",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,
