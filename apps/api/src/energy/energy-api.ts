@@ -92,11 +92,23 @@ import {
 } from "./project-overview-ai-adapter.js";
 import { createProjectHarnessConfigurationReader } from "./project-harness-configuration.js";
 import { createProjectAiOperationsReader } from "./project-ai-operations.js";
+import {
+  operatingCalendarCoversOverviewLookback,
+  resolveOverviewCalendarLookbackRequirement,
+} from "./project-overview-release-readiness.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
 const explorerAnchoredWindowCache = new Map<string, { localFrom: string; localTo: string }>();
+
+type EnergyApiDependencies = {
+  selectCurrentOverviewPeriod: typeof selectEnergyCurrentOverviewPeriod;
+};
+
+const DEFAULT_ENERGY_API_DEPENDENCIES: EnergyApiDependencies = {
+  selectCurrentOverviewPeriod: selectEnergyCurrentOverviewPeriod,
+};
 
 type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestCompleteDay>[0];
 
@@ -146,7 +158,8 @@ const resolveExplorerAnchoredWindow = async (
 export const handleEnergyApiRequest = async (
   request: IncomingMessage,
   segments: string[],
-  context: Required<ConfigApiContext>
+  context: Required<ConfigApiContext>,
+  dependencies: EnergyApiDependencies = DEFAULT_ENERGY_API_DEPENDENCIES,
 ): Promise<ConfigApiResponse> => {
   try {
     const user = context.metadataStore.users.getById({ user_id: context.userId });
@@ -1053,7 +1066,7 @@ export const handleEnergyApiRequest = async (
       }
       if (segments[3] === "publish" && request.method === "POST") {
         const body = requireRecord(await readJsonBody(request));
-        requireProjectOverviewReleaseRules(context, projectId);
+        await requireProjectOverviewReleaseRules(context, projectId, user, dependencies);
         const draft = context.metadataStore.energyIq.projectSetup.getDraft({
           project_id: projectId,
           user_id: user.id,
@@ -1733,6 +1746,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message === "ENERGYIQ_DATA_SNAPSHOT_MISMATCH"
     || message === "ENERGYIQ_PROJECT_RELEASE_MISMATCH"
     || message.startsWith("ENERGYIQ_OVERVIEW_RULE_REQUIRED:")
+    || message.startsWith("ENERGYIQ_OVERVIEW_CALENDAR_LOOKBACK_REQUIRED:")
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
@@ -1761,13 +1775,81 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
 const requireProjectOverviewReleaseRules = (
   context: Required<ConfigApiContext>,
   projectId: string,
-): void => {
-  if (resolveProjectOverviewProfile(projectId)?.rendererKey !== "ngee-ann-overview") return;
+  user: UserRecord,
+  dependencies: EnergyApiDependencies,
+): Promise<void> => {
+  const profile = resolveProjectOverviewProfile(projectId);
+  if (profile?.rendererKey !== "ngee-ann-overview") return Promise.resolve();
   const selectedRuleRevisionIds = context.metadataStore.energyIq.rules
     .getProjectConfig(projectId).selected_rule_revision_ids;
-  if (selectedRuleRevisionIds.includes(NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID)) return;
+  if (!selectedRuleRevisionIds.includes(NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID)) {
+    throw new Error(
+      `ENERGYIQ_OVERVIEW_RULE_REQUIRED:${NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID}`,
+    );
+  }
+  return requireProjectOverviewCalendarLookback(
+    context,
+    projectId,
+    user,
+    profile.rendererKey,
+    dependencies,
+  );
+};
+
+const requireProjectOverviewCalendarLookback = async (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+  user: UserRecord,
+  rendererKey: string,
+  dependencies: EnergyApiDependencies,
+): Promise<void> => {
+  const anomalyRule = context.metadataStore.energyIq.rules.listRevisions()
+    .find((rule) => rule.revision_id === NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID);
+  if (!anomalyRule) {
+    throw new Error(`ENERGYIQ_RULE_REVISION_NOT_FOUND:${NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID}`);
+  }
+  const project = context.metadataStore.energyIq.getProject(projectId);
+  const queryContext = resolveEnergyQueryContext({
+    metadataStore: context.metadataStore,
+    user,
+    workspaceId: project.workspace_id,
+    request: {
+      projectId,
+      scopeId: project.root_scope_id,
+      resource: "electricity",
+      analysisWindow: "current-month-to-date",
+    },
+  });
+  const selected = await dependencies.selectCurrentOverviewPeriod({
+    metadataStore: context.metadataStore,
+    dataGateway: context.dataGateway,
+    userId: user.id,
+    context: queryContext,
+    periodBasis: "calendar_month_to_date",
+  });
+  const requirement = resolveOverviewCalendarLookbackRequirement({
+    rendererKey,
+    overviewPeriodLocalFrom: selected.period.localFrom,
+    anomalyRule,
+  });
+  if (!requirement) return;
+  const calendarVersion = context.metadataStore.energyIq.operationalPolicy
+    .getActivePolicyVersions(projectId).business_calendar_version;
+  if (!calendarVersion) {
+    throw new Error(
+      `ENERGYIQ_OVERVIEW_CALENDAR_LOOKBACK_REQUIRED:${requirement.requiredLocalFrom}:unconfigured`,
+    );
+  }
+  const calendar = context.metadataStore.energyIq.operationalPolicy
+    .getOperatingCalendar(calendarVersion);
+  if (operatingCalendarCoversOverviewLookback({
+    calendar,
+    rootScopeId: project.root_scope_id,
+    requiredLocalFrom: requirement.requiredLocalFrom,
+    overviewPeriodLocalFrom: selected.period.localFrom,
+  })) return;
   throw new Error(
-    `ENERGYIQ_OVERVIEW_RULE_REQUIRED:${NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID}`,
+    `ENERGYIQ_OVERVIEW_CALENDAR_LOOKBACK_REQUIRED:${requirement.requiredLocalFrom}:${calendarVersion}`,
   );
 };
 

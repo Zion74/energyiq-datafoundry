@@ -1,4 +1,6 @@
-import { LocalDataGateway } from "@datafoundry/data-gateway";
+import {
+  LocalDataGateway,
+} from "@datafoundry/data-gateway";
 import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -61,10 +63,101 @@ describe("Energy Project Release readiness", () => {
         .toBeNull();
     } finally {
       metadata.close();
-      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      removeTemporaryFixture(root);
+    }
+  });
+
+  it("rejects a Ngee Ann publication when the pending Calendar does not cover the anomaly lookback", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-release-calendar-readiness-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "ngee-ann-calendar-too-short",
+        project_id: "ngee-ann-polytechnic",
+        entries: [{
+          id: "ngee-ann-calendar-too-short-project",
+          owner: { kind: "project" },
+          effective_from: "2026-04-21",
+          weekly: operatingWeek(),
+        }],
+        published_by: "dev-user",
+        activate: true,
+      });
+      const ruleConfig = metadata.energyIq.rules.getProjectConfig("ngee-ann-polytechnic");
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          expectedRevision: 0,
+          expectedTemplateDraftRevision: 0,
+          expectedMetricConfigRevision: 0,
+          expectedRuleConfigRevision: ruleConfig.revision,
+        }),
+        ["projects", "ngee-ann-polytechnic", "setup", "publish"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+        } as Required<ConfigApiContext>,
+        {
+          selectCurrentOverviewPeriod: async () => ({
+            periodBasis: "calendar_month_to_date",
+            periodDays: 16,
+            cutoffLocalDate: "2026-06-16",
+            intervalMinutes: 15,
+            period: {
+              localFrom: "2026-06-01",
+              localToExclusive: "2026-06-17",
+              from: "2026-05-31T16:00:00.000Z",
+              to: "2026-06-16T16:00:00.000Z",
+            },
+          }),
+        },
+      );
+
+      expect(response).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: {
+            code: "CONFLICT",
+            message: "ENERGYIQ_OVERVIEW_CALENDAR_LOOKBACK_REQUIRED:2026-04-02:ngee-ann-calendar-too-short",
+          },
+        },
+      });
+      expect(metadata.energyIq.templates.getLatestProjectRevision("ngee-ann-polytechnic"))
+        .toBeNull();
+    } finally {
+      metadata.close();
+      removeTemporaryFixture(root);
     }
   });
 });
+
+const operatingWeek = () => ({
+  monday: [{ from: "08:00", to: "18:00" }],
+  tuesday: [{ from: "08:00", to: "18:00" }],
+  wednesday: [{ from: "08:00", to: "18:00" }],
+  thursday: [{ from: "08:00", to: "18:00" }],
+  friday: [{ from: "08:00", to: "18:00" }],
+  saturday: [],
+  sunday: [],
+});
+
+const removeTemporaryFixture = (root: string): void => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (
+      process.platform === "win32"
+      && error instanceof Error
+      && "code" in error
+      && (error.code === "EPERM" || error.code === "EBUSY")
+    ) return;
+    throw error;
+  }
+};
 
 const jsonPost = (body: unknown): IncomingMessage => {
   const request = new PassThrough();
