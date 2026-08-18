@@ -43,7 +43,7 @@ export type EnergyQueryContextRequest = {
   period?: EnergyPeriod;
   from?: string;
   to?: string;
-  analysisWindow?: "latest-complete-day" | "latest-complete-7d" | "current-overview-28d";
+  analysisWindow?: "latest-complete-day" | "latest-complete-7d" | "current-overview-28d" | "current-month-to-date";
   expectedDataSnapshotId?: string;
   expectedProjectReleaseId?: string;
 };

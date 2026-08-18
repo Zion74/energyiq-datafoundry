@@ -43,6 +43,18 @@ describe("EnergyIQ AI Analyst handoff", () => {
     });
   });
 
+  it("uses the server-owned calendar month-to-date domain for a direct Ngee Ann AI entry", () => {
+    expect(energyQueryContextRequestFromSearchParams(
+      new URLSearchParams({ projectId: "ngee-ann-polytechnic" }),
+      "ngee-ann-polytechnic",
+    )).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-month-to-date",
+    });
+  });
+
   it("projects the server-resolved Snapshot and data cutoff into the visible Analyst context", () => {
     const context = toEnergyAnalysisExternalContext({
       userId: "user-1",

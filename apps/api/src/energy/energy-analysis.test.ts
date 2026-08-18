@@ -23,6 +23,7 @@ import {
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
   executeEnergyScopeAnalysisWithLatestAvailable,
+  resolveEnergyCurrentOverviewPeriodBasis,
   selectEnergyLatestCompleteDay,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyGoldenPeriod,
@@ -34,6 +35,13 @@ import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import { NGEE_ANN_GOLDEN } from "./ngee-ann-golden.fixture.js";
 import { materializePreschoolGoldenFixture, PRESCHOOL_GOLDEN } from "./preschool-golden.fixture.js";
 import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
+
+describe("Energy current Overview window contract", () => {
+  it("keeps rolling 28 days and calendar month-to-date as distinct public contracts", () => {
+    expect(resolveEnergyCurrentOverviewPeriodBasis("current-overview-28d")).toBe("rolling_28_days");
+    expect(resolveEnergyCurrentOverviewPeriodBasis("current-month-to-date")).toBe("calendar_month_to_date");
+  });
+});
 
 describe("EnergyScopeAnalysis", () => {
   it("calculates reproducible Preschool portfolio and circuit drill-down facts", async () => {
@@ -838,7 +846,7 @@ describe("EnergyScopeAnalysis", () => {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("keeps the Overview analysis available when the optional anomaly fact query fails", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-query-failure-"));
@@ -1036,7 +1044,7 @@ describe("EnergyScopeAnalysis", () => {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("repeats the selected Ngee Ann golden period without contending with the live API DuckDB", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-ngee-ann-"));

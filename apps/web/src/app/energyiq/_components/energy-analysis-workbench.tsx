@@ -203,6 +203,9 @@ export function energyQueryContextRequestFromSearchParams(
   if (projectId === "preschool-demo" && explicitPeriod === null) {
     return { ...base, analysisWindow: "current-overview-28d" };
   }
+  if (projectId === "ngee-ann-polytechnic" && explicitPeriod === null) {
+    return { ...base, analysisWindow: "current-month-to-date" };
+  }
   return {
     ...base,
     period: normalizePeriod(explicitPeriod),

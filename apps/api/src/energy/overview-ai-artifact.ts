@@ -615,7 +615,9 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
         expectedDataSnapshotId: input.pin.dataSnapshotId,
         expectedProjectReleaseId: input.pin.projectReleaseId,
       } : {
-        analysisWindow: "current-overview-28d" as const,
+        analysisWindow: project.id === "ngee-ann-polytechnic"
+          ? "current-month-to-date" as const
+          : "current-overview-28d" as const,
       }),
     },
   });

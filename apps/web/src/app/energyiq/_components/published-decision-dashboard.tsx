@@ -521,7 +521,7 @@ function PublishedDecisionDashboardView({
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
                 <span className="font-semibold text-foreground">{selectedProject?.name}</span>
-                {isNgeeAnnRenderer ? <span>Rolling 28-day view</span> : null}
+                {isNgeeAnnRenderer ? <span>Calendar month to date</span> : null}
                 {currentSnapshot ? <span>{formatAnalysisWindow(currentSnapshot)}</span> : null}
                 {currentAnalysis ? <span>{currentAnalysis.context.timezone}</span> : null}
                 {isNgeeAnnRenderer && currentSnapshot ? (
@@ -879,7 +879,9 @@ export function currentOverviewAnalysisRequest(
     projectId,
     scopeId: view.scopeId?.trim() || "project",
     resource: view.resource ?? "electricity",
-    analysisWindow: "current-overview-28d",
+    analysisWindow: projectId === "ngee-ann-polytechnic"
+      ? "current-month-to-date"
+      : "current-overview-28d",
     ...(view.currentOverviewPin ? {
       from: view.currentOverviewPin.from,
       to: view.currentOverviewPin.to,

@@ -299,6 +299,7 @@ export const resolveProjectAnalysis = async (input: {
   const publishedRunContext: PublishedRunContext = input.request.analysisWindow === "latest-complete-day"
     || input.request.analysisWindow === "latest-complete-7d"
     || input.request.analysisWindow === "current-overview-28d"
+    || input.request.analysisWindow === "current-month-to-date"
     ? await resolveCurrentOverviewContext(input)
     : resolvePublishedEnergyQueryContext({
         metadataStore: input.metadataStore,
@@ -666,13 +667,12 @@ const resolveCurrentOverviewContext = async (input: {
   } = input.request;
   const selectOverviewPeriod = (
     selectionInput: Parameters<typeof selectEnergyLatestCompleteDay>[0],
-    rendererKey: string | undefined,
   ) => analysisWindow === "latest-complete-day"
     ? selectEnergyLatestCompleteDay(selectionInput)
-    : analysisWindow === "current-overview-28d"
+    : analysisWindow === "current-overview-28d" || analysisWindow === "current-month-to-date"
       ? selectEnergyCurrentOverviewPeriod({
           ...selectionInput,
-          periodBasis: resolveEnergyCurrentOverviewPeriodBasis(rendererKey),
+          periodBasis: resolveEnergyCurrentOverviewPeriodBasis(analysisWindow),
         })
       : selectEnergyLatestCompletePeriod(selectionInput);
   const suppliedPinParts = [from, to, expectedDataSnapshotId, expectedProjectReleaseId]
@@ -725,7 +725,7 @@ const resolveCurrentOverviewContext = async (input: {
           userId: input.user.id,
           context: pinnedProjectContext.context,
           ...(input.databasePath ? { databasePath: input.databasePath } : {}),
-        }, pinnedProjectContext.projectRelease?.renderer.key);
+        });
         if (from !== selected.period.localFrom
           || to !== inclusiveLocalDate(selected.period.localToExclusive)) {
           throw new Error("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
@@ -755,7 +755,7 @@ const resolveCurrentOverviewContext = async (input: {
     userId: input.user.id,
     context: projectContext.context,
     ...(input.databasePath ? { databasePath: input.databasePath } : {}),
-  }, projectRelease.renderer.key);
+  });
   return resolvePublishedEnergyQueryContext({
     metadataStore: input.metadataStore,
     user: input.user,

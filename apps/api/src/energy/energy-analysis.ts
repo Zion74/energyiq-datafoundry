@@ -1019,11 +1019,11 @@ export const selectEnergyCurrentOverviewPeriod = async (
 };
 
 export const resolveEnergyCurrentOverviewPeriodBasis = (
-  rendererKey: string | undefined,
+  analysisWindow: "current-overview-28d" | "current-month-to-date",
 ): EnergyCurrentOverviewPeriodBasis => {
-  if (rendererKey === "ngee-ann-overview") return "calendar_month_to_date";
-  if (rendererKey === "preschool-overview") return "rolling_28_days";
-  throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
+  return analysisWindow === "current-month-to-date"
+    ? "calendar_month_to_date"
+    : "rolling_28_days";
 };
 
 const prepareEnergyPeriodSelection = async (

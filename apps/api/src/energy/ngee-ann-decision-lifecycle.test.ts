@@ -178,7 +178,7 @@ const savedAnalysis = (
     projectId: "ngee-ann-polytechnic",
     scopeId: "project",
     resource: "electricity",
-    analysisWindow: "current-overview-28d",
+    analysisWindow: "current-month-to-date",
   }),
   analysis_json: JSON.stringify({
     provenance: { dataSnapshotId: "snapshot-a" },

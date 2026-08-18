@@ -101,15 +101,14 @@ type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestComplete
 
 const resolveExplorerAnchoredWindow = async (
   input: ExplorerPeriodSelectionInput & {
-    analysisWindow: "latest-complete-day" | "current-overview-28d";
-    rendererKey?: string;
+    analysisWindow: "latest-complete-day" | "current-overview-28d" | "current-month-to-date";
   },
 ): Promise<{ localFrom: string; localTo: string }> => {
-  if (input.analysisWindow === "current-overview-28d") {
+  if (input.analysisWindow === "current-overview-28d" || input.analysisWindow === "current-month-to-date") {
     try {
       const selected = await selectEnergyCurrentOverviewPeriod({
         ...input,
-        periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.rendererKey),
+        periodBasis: resolveEnergyCurrentOverviewPeriodBasis(input.analysisWindow),
       });
       return {
         localFrom: selected.period.localFrom,
@@ -1540,7 +1539,8 @@ export const handleEnergyApiRequest = async (
       const explorerAnchoredWindow = isRecord(body)
         && body.surface === "project-explorer"
         && (query.analysisWindow === "latest-complete-day"
-          || query.analysisWindow === "current-overview-28d");
+          || query.analysisWindow === "current-overview-28d"
+          || query.analysisWindow === "current-month-to-date");
       const preliminaryRun = resolvePublishedEnergyQueryContext({
         metadataStore: context.metadataStore,
         user,
@@ -1575,11 +1575,9 @@ export const handleEnergyApiRequest = async (
             dataGateway: context.dataGateway,
             userId: context.userId,
             context: preliminaryRun.context,
-            ...(preliminaryRun.projectRelease
-              ? { rendererKey: preliminaryRun.projectRelease.renderer.key }
-              : {}),
             analysisWindow: query.analysisWindow === "current-overview-28d"
-              ? "current-overview-28d"
+              || query.analysisWindow === "current-month-to-date"
+              ? query.analysisWindow
               : "latest-complete-day",
           })
         : null);
@@ -2853,7 +2851,8 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
   if (value.analysisWindow !== undefined
     && value.analysisWindow !== "latest-complete-day"
     && value.analysisWindow !== "latest-complete-7d"
-    && value.analysisWindow !== "current-overview-28d") {
+    && value.analysisWindow !== "current-overview-28d"
+    && value.analysisWindow !== "current-month-to-date") {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_INVALID");
   }
   const period: EnergyPeriod = value.period === undefined
@@ -2869,6 +2868,7 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     ...(value.analysisWindow === "latest-complete-day"
       || value.analysisWindow === "latest-complete-7d"
       || value.analysisWindow === "current-overview-28d"
+      || value.analysisWindow === "current-month-to-date"
       ? { analysisWindow: value.analysisWindow }
       : {}),
     ...(typeof value.expectedDataSnapshotId === "string"

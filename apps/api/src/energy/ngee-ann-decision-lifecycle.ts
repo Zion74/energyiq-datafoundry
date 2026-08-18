@@ -173,7 +173,7 @@ const parseCompatibleSavedAnalysis = (
     const query = JSON.parse(record.query_json) as unknown;
     const analysis = JSON.parse(record.analysis_json) as unknown;
     if (!isRecord(query)
-      || query.analysisWindow !== "current-overview-28d"
+      || query.analysisWindow !== "current-month-to-date"
       || !isRecord(analysis)
       || !isRecord(analysis.provenance)
       || analysis.provenance.dataSnapshotId !== record.data_snapshot_id
