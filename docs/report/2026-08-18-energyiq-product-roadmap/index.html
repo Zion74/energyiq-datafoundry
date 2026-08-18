@@ -324,6 +324,54 @@
     .phase-card p { margin: 0; color: var(--muted); font-size: 14px; }
     .gate { margin-top: 28px; padding: 13px 14px; border-radius: 12px; color: var(--ink); background: var(--teal-light); font-size: 12px; font-weight: 900; }
 
+    /* === DELIVERY GANTT === */
+    .gantt-panel { margin-top: 30px; overflow: hidden; }
+    .gantt-panel-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 28px 30px 22px; border-bottom: 1px solid var(--line); }
+    .gantt-panel-head h3 { margin: 6px 0 0; font-size: 28px; }
+    .gantt-overline { color: var(--teal); font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .gantt-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px 16px; color: var(--muted); font-size: 11px; font-weight: 800; }
+    .gantt-legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .gantt-legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--teal); }
+    .gantt-legend .legend-complete { background: var(--green); }
+    .gantt-legend .legend-review { background: var(--amber); }
+    .gantt-legend .legend-active { background: var(--blue); }
+    .gantt-legend .legend-planned { background: #a9b6ba; }
+    .gantt-scroll { overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-color: var(--teal) var(--paper); }
+    .gantt-grid { min-width: 1120px; padding: 0 0 18px; }
+    .gantt-month-row, .gantt-week-row, .gantt-row { display: grid; grid-template-columns: 280px repeat(15, minmax(48px, 1fr)); }
+    .gantt-month-row { color: white; background: var(--ink); }
+    .gantt-corner { position: sticky; left: 0; z-index: 4; display: flex; align-items: center; padding: 12px 18px; color: #9fc4c9; background: var(--ink); font-size: 10px; font-weight: 900; letter-spacing: .12em; }
+    .gantt-month { padding: 12px 10px; border-left: 1px solid rgba(255,255,255,.12); text-align: center; font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .1em; }
+    .gantt-month.aug { grid-column: 2 / span 5; }
+    .gantt-month.sep { grid-column: 7 / span 4; }
+    .gantt-month.oct { grid-column: 11 / span 4; }
+    .gantt-month.nov { grid-column: 15 / span 2; }
+    .gantt-week-row { color: var(--muted); background: #f4f3ee; }
+    .gantt-week-label { position: sticky; left: 0; z-index: 4; padding: 10px 18px; background: #f4f3ee; font-size: 10px; font-weight: 900; letter-spacing: .08em; }
+    .gantt-week { padding: 10px 2px; border-left: 1px solid var(--line); text-align: center; font-size: 10px; font-weight: 800; }
+    .gantt-row { min-height: 52px; border-top: 1px solid var(--line); background: rgba(255,253,248,.82); }
+    .gantt-row.group-start { border-top: 7px solid var(--paper); }
+    .gantt-task { position: sticky; left: 0; z-index: 3; display: flex; align-items: center; gap: 11px; padding: 8px 14px; background: rgba(255,253,248,.97); box-shadow: 8px 0 14px rgba(19,45,52,.035); }
+    .gantt-task i { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 50%; background: var(--stream-color, var(--teal)); }
+    .gantt-task b { display: block; font-size: 12px; line-height: 1.25; }
+    .gantt-task small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.2; }
+    .gantt-track { position: relative; grid-column: 2 / -1; min-width: 0; background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(6.6667% - 1px), rgba(210,216,214,.72) calc(6.6667% - 1px), rgba(210,216,214,.72) 6.6667%); }
+    .gantt-bar { position: absolute; top: 11px; bottom: 11px; left: var(--left); width: var(--width); min-width: 12px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--stream-color, var(--teal)) 68%, white); border-radius: 7px; background: color-mix(in srgb, var(--stream-color, var(--teal)) 18%, white); box-shadow: 0 4px 10px rgba(11,53,63,.08); }
+    .gantt-bar::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--progress); background: var(--stream-color, var(--teal)); opacity: .92; }
+    .gantt-bar::before { content: attr(data-progress); position: absolute; z-index: 2; top: 50%; left: 8px; transform: translateY(-50%); color: var(--ink); font-size: 9px; font-weight: 900; }
+    .gantt-row.foundation { --stream-color: var(--green); }
+    .gantt-row.acceptance { --stream-color: var(--amber); }
+    .gantt-row.cross-project { --stream-color: var(--blue); }
+    .gantt-row.learning { --stream-color: var(--teal); }
+    .gantt-row.scale { --stream-color: #64747a; }
+    .gantt-row.foundation .gantt-bar::before, .gantt-row.cross-project .gantt-bar::before, .gantt-row.learning .gantt-bar::before { color: white; }
+    .gantt-milestone-row { background: #edf6f3; }
+    .gantt-milestone-row .gantt-task { background: #edf6f3; }
+    .gantt-milestone { position: absolute; top: 7px; left: var(--left); display: grid; place-items: center; width: 38px; height: 38px; transform: translateX(-19px) rotate(45deg); color: white; border: 3px solid #edf6f3; border-radius: 9px; background: var(--ink); box-shadow: 0 0 0 1px rgba(10,42,55,.22); }
+    .gantt-milestone b { transform: rotate(-45deg); font-size: 8px; letter-spacing: .04em; }
+    .gantt-source { display: flex; justify-content: space-between; gap: 18px; padding: 16px 30px 20px; color: var(--muted); background: #f4f3ee; font-size: 11px; }
+    .gantt-source b { color: var(--ink); }
+
     /* === LAYERS === */
     .layer-map { display: grid; gap: 10px; }
     .layer { display: grid; grid-template-columns: 170px 1.1fr 1.6fr; gap: 20px; align-items: center; min-height: 72px; padding: 14px 20px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,253,248,.72); }
@@ -333,6 +381,76 @@
     .layer.control { color: white; background: var(--ink); }
     .layer.control .layer-name { color: #6fe0c9; }
     .layer.control .layer-copy { color: #c0d0d4; }
+
+    /* === LAUNCH ARCHITECTURE === */
+    .architecture-board { padding: 28px; }
+    .architecture-audience { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .architecture-person { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; text-align: center; color: var(--ink); background: white; font-size: 12px; font-weight: 900; }
+    .architecture-person small { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; font-weight: 700; }
+    .architecture-arrow { height: 25px; text-align: center; color: var(--teal); font-size: 22px; font-weight: 900; }
+    .architecture-body { display: grid; grid-template-columns: .8fr 2.2fr .85fr; gap: 14px; align-items: stretch; }
+    .architecture-side { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 1px dashed var(--line); border-radius: 15px; background: #f7f5ef; }
+    .architecture-side h4 { margin: 0 0 6px; color: var(--teal); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    .architecture-side-item { flex: 1; display: grid; place-items: center; min-height: 52px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; text-align: center; background: white; font-size: 11px; font-weight: 800; }
+    .architecture-core { display: grid; gap: 7px; }
+    .architecture-tier { padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; }
+    .architecture-tier.experience { background: var(--blue-light); }
+    .architecture-tier.project { background: var(--teal-light); }
+    .architecture-tier.ai { color: white; background: var(--ink); }
+    .architecture-tier.contract { background: var(--green-light); }
+    .architecture-tier.data { background: #f5eee0; }
+    .architecture-tier-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+    .architecture-tier-head b { font-size: 13px; }
+    .architecture-tier-head span { color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+    .architecture-tier.ai .architecture-tier-head span { color: #9fb8bd; }
+    .architecture-components { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+    .architecture-component { display: grid; place-items: center; min-height: 42px; padding: 8px; border: 1px solid rgba(12,61,70,.12); border-radius: 9px; text-align: center; background: rgba(255,255,255,.72); font-size: 10px; font-weight: 850; }
+    .architecture-tier.ai .architecture-component { color: #dcebed; border-color: rgba(255,255,255,.14); background: rgba(255,255,255,.07); }
+    .architecture-tier.project .architecture-component.highlight { color: white; background: var(--teal); }
+    .architecture-platform { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+    .architecture-platform div { padding: 12px 14px; border-radius: 11px; color: var(--muted); background: #f4f3ee; font-size: 10px; text-align: center; }
+    .architecture-platform b { display: block; margin-bottom: 3px; color: var(--ink); font-size: 11px; }
+    .architecture-caption { margin: 15px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
+    .architecture-caption a { color: var(--teal); }
+
+    /* === PRODUCT EVOLUTION === */
+    .evolution-track { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+    .evolution-stage { position: relative; min-height: 360px; padding: 26px; }
+    .evolution-stage:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; top: 42px; right: -24px; display: grid; place-items: center; width: 34px; height: 34px; color: white; border: 6px solid var(--paper); border-radius: 50%; background: var(--teal); font-size: 16px; font-weight: 900; }
+    .evolution-now { color: var(--green); }
+    .evolution-next { color: var(--blue); }
+    .evolution-scale { color: var(--teal); }
+    .evolution-platform { color: var(--amber); }
+    .evolution-code { font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .evolution-stage h3 { margin: 28px 0 10px; color: var(--ink); font-size: 24px; }
+    .evolution-stage > p { min-height: 64px; margin: 0; color: var(--muted); font-size: 13px; }
+    .evolution-list { display: grid; gap: 8px; margin-top: 22px; }
+    .evolution-list span { padding: 9px 10px; border-radius: 9px; color: var(--ink); background: #f4f3ee; font-size: 11px; font-weight: 800; }
+    .evolution-proof { display: block; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--teal); font-size: 10px; font-weight: 900; }
+
+    /* === BUSINESS MODEL === */
+    .business-model { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 24px; }
+    .business-offer { padding: 26px; }
+    .business-offer .offer-code { color: var(--teal); font: 900 11px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .12em; }
+    .business-offer h3 { margin: 26px 0 10px; font-size: 24px; }
+    .business-offer p { margin: 0; color: var(--muted); font-size: 13px; }
+    .business-offer ul { margin: 20px 0 0; padding: 0; list-style: none; }
+    .business-offer li { padding: 9px 0; border-top: 1px solid var(--line); font-size: 11px; font-weight: 800; }
+    .business-offer .revenue { display: block; margin-top: 22px; padding: 12px 13px; border-radius: 10px; color: var(--ink); background: var(--teal-light); font-size: 11px; font-weight: 900; }
+    .business-buyer-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; margin-top: 14px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); }
+    .business-buyer-strip div { padding: 18px; background: white; }
+    .business-buyer-strip b { display: block; margin-bottom: 5px; color: var(--teal); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+    .business-buyer-strip span { color: var(--muted); font-size: 11px; }
+    .commercial-hypothesis { margin-top: 14px; padding: 14px 17px; border-left: 4px solid var(--amber); color: var(--muted); background: var(--amber-light); font-size: 12px; }
+
+    /* === VALUE MEASUREMENT === */
+    .value-scorecard { display: grid; grid-template-columns: 1.2fr repeat(4, 1fr); gap: 1px; margin-top: 16px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--line); }
+    .value-equation, .value-measure { padding: 20px; background: white; }
+    .value-equation { color: white; background: var(--ink); }
+    .value-equation b, .value-measure b { display: block; margin-bottom: 6px; font-size: 12px; }
+    .value-equation span { color: #b7cbcf; font-size: 11px; }
+    .value-measure b { color: var(--teal); }
+    .value-measure span { color: var(--muted); font-size: 10px; }
 
     /* === COMMERCIAL ROUTE === */
     .commercial-route { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end; }
@@ -411,6 +529,13 @@
       .status-cell { padding: 14px 10px; }
       .layer { grid-template-columns: 120px 1fr; }
       .layer-copy { grid-column: 1 / -1; }
+      .architecture-body { grid-template-columns: 1fr; }
+      .architecture-side { display: grid; grid-template-columns: repeat(3, 1fr); }
+      .architecture-side h4 { grid-column: 1 / -1; }
+      .evolution-track, .business-model { grid-template-columns: 1fr 1fr; }
+      .evolution-stage:not(:last-child)::after { display: none; }
+      .value-scorecard { grid-template-columns: 1fr 1fr; }
+      .value-equation { grid-column: 1 / -1; }
     }
 
     @media (max-width: 700px) {
@@ -433,6 +558,12 @@
       .layer { grid-template-columns: 1fr; gap: 4px; }
       .layer-copy { grid-column: auto; }
       .action-panel { padding: 28px; }
+      .architecture-board { padding: 18px; }
+      .architecture-audience, .architecture-components, .architecture-platform, .architecture-side, .evolution-track, .business-model, .business-buyer-strip, .value-scorecard { grid-template-columns: 1fr; }
+      .architecture-side h4, .value-equation { grid-column: auto; }
+      .gantt-panel-head { align-items: flex-start; flex-direction: column; }
+      .gantt-legend { justify-content: flex-start; }
+      .gantt-source { flex-direction: column; }
     }
 
     /* === PRINT === */
@@ -446,6 +577,10 @@
       .card, .rag-panel, .action-panel { box-shadow: none; break-inside: avoid; }
       .reveal { opacity: 1 !important; transform: none !important; }
       .roadmap, .executive-grid, .value-chain { gap: 8px; }
+      .gantt-scroll { overflow: visible; }
+      .gantt-grid { min-width: 0; }
+      .gantt-month-row, .gantt-week-row, .gantt-row { grid-template-columns: 280px repeat(15, minmax(28px, 1fr)); }
+      .gantt-panel { break-inside: avoid; }
       a { text-decoration: none; }
     }
 
@@ -481,11 +616,12 @@
           <span>状态原则 <strong>Engineering ≠ Customer Acceptance</strong></span>
         </div>
         <nav class="quick-nav" aria-label="快速跳转">
+          <a href="#value">产品价值</a>
           <a href="#progress">当前进度</a>
-          <a href="#proof">客户证明</a>
-          <a href="#continuous">A→B</a>
-          <a href="#roadmap">90 天路线</a>
-          <a href="#business">商业路径</a>
+          <a href="#architecture">技术架构</a>
+          <a href="#evolution">产品演进</a>
+          <a href="#roadmap">Roadmap</a>
+          <a href="#business">商业模式</a>
           <a href="#actions">下一步</a>
         </nav>
       </div>
@@ -549,7 +685,7 @@
       </div>
       <div class="value-chain">
         <article class="card value-step reveal"><span class="step-no">1</span><h3>可信数据</h3><p>把 Excel、API、Meter 与项目结构整理成可追溯 Snapshot 和 Evidence。</p><span class="outcome">结果：事实可核查</span></article>
-        <article class="card value-step reveal"><span class="step-no">2</span><h3>决策 Overview</h3><p>让 Boss 在 20 秒内看到重点，让 FM 能定位图表、时段和证据。</p><span class="outcome">结果：更快找到重点</span></article>
+        <article class="card value-step reveal"><span class="step-no">2</span><h3>决策 Overview</h3><p>让决策者快速看到重点，让 FM 能定位图表、时段和证据。</p><span class="outcome">结果：更快找到重点</span></article>
         <article class="card value-step reveal"><span class="step-no">3</span><h3>AI + A→B</h3><p>围绕 Section 产生新角度，并随 Snapshot B 保留、更新、新增或淘汰结论。</p><span class="outcome">结果：持续产生价值</span></article>
         <article class="card value-step reveal"><span class="step-no">4</span><h3>Method / SOP</h3><p>把用户认可的分析角度固化为方法，经审核后跨 Snapshot 和项目复用。</p><span class="outcome">结果：形成产品壁垒</span></article>
       </div>
@@ -557,6 +693,13 @@
         <article class="card audience-card reveal"><span class="audience-icon">D</span><div><b>Decision leaders</b><span>快速看懂重点、风险、变化和优先行动。</span></div></article>
         <article class="card audience-card reveal"><span class="audience-icon">E</span><div><b>Energy / FM teams</b><span>从结论进入 Evidence 和 AI Analysis 深挖。</span></div></article>
         <article class="card audience-card reveal"><span class="audience-icon">A</span><div><b>Admin / delivery teams</b><span>管理项目、模型、Skill、Method、Tool 与 Run Trace。</span></div></article>
+      </div>
+      <div class="value-scorecard reveal" aria-label="业务价值衡量框架">
+        <div class="value-equation"><b>VALUE EQUATION</b><span>更少的分析等待 + 更清晰的优先级 + 更稳定的复跑 + 可复用的专家经验</span></div>
+        <div class="value-measure"><b>Time to priority</b><span>从数据发布到识别首要问题所需时间</span></div>
+        <div class="value-measure"><b>Evidence coverage</b><span>关键结论中可追溯 Evidence 的覆盖率</span></div>
+        <div class="value-measure"><b>Action conversion</b><span>Insight 被深挖、采纳或转成行动的比例</span></div>
+        <div class="value-measure"><b>Repeatability</b><span>新 Snapshot 到来后可自动复跑的分析比例</span></div>
       </div>
     </section>
 
@@ -655,30 +798,105 @@
         <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R3</div><div class="phase-date">21 Sep–9 Oct</div><h3>Learning Loop</h3><p>Usefulness 反馈、Explore 事件、Method Proposal、审核与 SOP 发布。</p><div class="gate">G3 · One approved Method</div></article></div>
         <div class="phase reveal"><span class="phase-dot"></span><article class="card phase-card"><div class="phase-code">R4</div><div class="phase-date">12 Oct–6 Nov</div><h3>Pilot Scale</h3><p>模板提案、Visual Canvas、Coding Agent spike 与下一次发布决策。</p><div class="gate">G4 · Next release decision</div></article></div>
       </div>
+      <article class="card gantt-panel reveal" aria-labelledby="delivery-gantt-title">
+        <div class="gantt-panel-head">
+          <div><div class="gantt-overline">DELIVERY VIEW · AUG–NOV 2026</div><h3 id="delivery-gantt-title">整体 Roadmap 甘特图</h3></div>
+          <div class="gantt-legend" aria-label="任务状态图例">
+            <span><i class="legend-complete"></i>已完成</span><span><i class="legend-review"></i>验收中</span><span><i class="legend-active"></i>执行中</span><span><i class="legend-planned"></i>已规划</span>
+          </div>
+        </div>
+        <div class="gantt-scroll" role="region" aria-label="EnergyIQ 2026 年 8 月至 11 月交付甘特图" tabindex="0">
+          <div class="gantt-grid" role="table" aria-label="工作流、任务、周次与当前进度">
+            <div class="gantt-month-row" role="row"><div class="gantt-corner" role="columnheader">WORKSTREAM / DELIVERY</div><div class="gantt-month aug" role="columnheader">AUGUST</div><div class="gantt-month sep" role="columnheader">SEPTEMBER</div><div class="gantt-month oct" role="columnheader">OCTOBER</div><div class="gantt-month nov" role="columnheader">NOVEMBER</div></div>
+            <div class="gantt-week-row" role="row"><div class="gantt-week-label" role="columnheader">15-WEEK EXECUTION WINDOW</div><span class="gantt-week">03</span><span class="gantt-week">10</span><span class="gantt-week">17</span><span class="gantt-week">24</span><span class="gantt-week">31</span><span class="gantt-week">07</span><span class="gantt-week">14</span><span class="gantt-week">21</span><span class="gantt-week">28</span><span class="gantt-week">05</span><span class="gantt-week">12</span><span class="gantt-week">19</span><span class="gantt-week">26</span><span class="gantt-week">02</span><span class="gantt-week">09</span></div>
+
+            <div class="gantt-row foundation" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Verified data + AI foundation</b><small>Identity · Overview · Saved · Preschool A→B</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="100%" title="3–17 Aug · Engineering verified" style="--left:0%;--width:15.15%;--progress:100%"></span></div></div>
+
+            <div class="gantt-row acceptance group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Preschool Key Findings review</b><small>17–21 Aug · Product</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="90%" title="17–21 Aug · Acceptance pending" style="--left:14.14%;--width:5.05%;--progress:90%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Section + Additional Insight review</b><small>17–24 Aug · Product + Energy</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="90%" title="17–24 Aug · Acceptance pending" style="--left:14.14%;--width:8.08%;--progress:90%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Multi-account + Admin AI Ops</b><small>17 Aug–1 Sep · QA + Admin</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="70%" title="17 Aug–1 Sep · Acceptance pending" style="--left:14.14%;--width:16.16%;--progress:70%"></span></div></div>
+            <div class="gantt-row acceptance" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Pilot runbook + rollback evidence</b><small>20 Aug–1 Sep · Operations</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="55%" title="20 Aug–1 Sep · In progress" style="--left:17.17%;--width:13.13%;--progress:55%"></span></div></div>
+
+            <div class="gantt-row cross-project group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Ngee Ann Layer 1–3 Adapter</b><small>15 Aug–1 Sep · AI Platform</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="85%" title="15 Aug–1 Sep · In progress" style="--left:12.12%;--width:18.18%;--progress:85%"></span></div></div>
+            <div class="gantt-row cross-project" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Ngee Ann Snapshot A→B</b><small>31 Aug–11 Sep · Product + AI</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="15%" title="31 Aug–11 Sep · Planned" style="--left:28.28%;--width:12.12%;--progress:15%"></span></div></div>
+            <div class="gantt-row cross-project" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Common Adapter boundary</b><small>7–18 Sep · Architecture</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="20%" title="7–18 Sep · Planned" style="--left:35.35%;--width:12.12%;--progress:20%"></span></div></div>
+
+            <div class="gantt-row learning group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Usefulness + Explore events</b><small>21 Sep–2 Oct · Product Analytics</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="21 Sep–2 Oct · Planned" style="--left:49.49%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row learning" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Insight-to-Method proposal flow</b><small>28 Sep–9 Oct · Energy + Admin</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="28 Sep–9 Oct · Planned" style="--left:56.57%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row learning" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Governed Harness policy</b><small>28 Sep–9 Oct · AI Platform</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="28 Sep–9 Oct · Planned" style="--left:56.57%;--width:12.12%;--progress:10%"></span></div></div>
+
+            <div class="gantt-row scale group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>AI Template Proposal + Preview</b><small>12–23 Oct · Admin Product</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="20%" title="12–23 Oct · Planned" style="--left:70.71%;--width:12.12%;--progress:20%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Controlled visual Insight Canvas</b><small>19–30 Oct · Frontend + AI</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="19–30 Oct · Planned" style="--left:77.78%;--width:12.12%;--progress:10%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Coding Agent architecture spike</b><small>19 Oct–6 Nov · Architecture</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="5%" title="19 Oct–6 Nov · Discovery" style="--left:77.78%;--width:19.19%;--progress:5%"></span></div></div>
+            <div class="gantt-row scale" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b data-editable>Customer handover + pilot review</b><small>2–6 Nov · Product + Sales</small></span></div><div class="gantt-track" role="cell"><span class="gantt-bar" data-progress="10%" title="2–6 Nov · Planned" style="--left:91.92%;--width:5.05%;--progress:10%"></span></div></div>
+
+            <div class="gantt-row gantt-milestone-row group-start" role="row"><div class="gantt-task" role="rowheader"><i></i><span><b>Release gates</b><small>客户承诺前必须通过</small></span></div><div class="gantt-track" role="cell"><span class="gantt-milestone" style="--left:14.14%" title="G0 · Foundation verified"><b>G0</b></span><span class="gantt-milestone" style="--left:26.26%" title="G1 · Named-user acceptance"><b>G1</b></span><span class="gantt-milestone" style="--left:46.46%" title="G2 · Repeatability"><b>G2</b></span><span class="gantt-milestone" style="--left:67.68%" title="G3 · One approved Method"><b>G3</b></span><span class="gantt-milestone" style="--left:95.96%" title="G4 · Next release decision"><b>G4</b></span></div></div>
+          </div>
+        </div>
+        <div class="gantt-source"><span><b>读取方式：</b>实色代表当前完成度，浅色代表剩余计划；横向滚动可查看完整 15 周。</span><span>Source · PMO Delivery Plan / Gantt · 17 Aug 2026 · indicative until owner confirmation</span></div>
+      </article>
     </section>
 
-    <!-- === PRODUCT / CONTROL PLANE === -->
+    <!-- === TECHNICAL ARCHITECTURE === -->
     <section class="section-shell" id="architecture">
       <div class="section-head reveal">
-        <div><div class="section-kicker">07 · Product system</div><h2>项目专属表达，共享可信控制面</h2></div>
-        <p class="section-intro">公共平台统一身份、存储、恢复、权限、Run 和治理；每个项目保留自己的 Renderer、Section Pack、指标和管理问题。</p>
+        <div><div class="section-kicker">07 · Technical architecture</div><h2>从原始数据到可信决策的完整链路</h2></div>
+        <p class="section-intro">项目拥有自己的业务语义和分析表达；平台统一数据身份、Evidence、AI Harness、权限、恢复和审计，使每次输出都可以解释、复跑和治理。</p>
       </div>
-      <div class="layer-map reveal">
-        <div class="layer"><div class="layer-id">7 · Experience</div><div class="layer-name">用户体验</div><div class="layer-copy">Overview · Explorer · AI Analyst · Admin · Reports</div></div>
-        <div class="layer"><div class="layer-id">6 · Project Product</div><div class="layer-name">项目产品</div><div class="layer-copy">Renderer · Project Recipe · Template Release · A/B Change Summary</div></div>
-        <div class="layer"><div class="layer-id">5 · Governed AI</div><div class="layer-name">治理型 AI</div><div class="layer-copy">Key Findings · Section Interpretation · Additional Insights</div></div>
-        <div class="layer"><div class="layer-id">4 · Harness</div><div class="layer-name">模型与能力</div><div class="layer-copy">Model Profile · Skill · Method · Tool · Context Policy · Run Finalizer</div></div>
-        <div class="layer"><div class="layer-id">3 · Contracts</div><div class="layer-name">分析合同</div><div class="layer-copy">Section Pack · Analysis Pack · Evidence Catalog · Exact Read Model</div></div>
-        <div class="layer"><div class="layer-id">2 · Data</div><div class="layer-name">数据底座</div><div class="layer-copy">Import · Reading · Metric / Rule Revision · Snapshot</div></div>
-        <div class="layer"><div class="layer-id">1 · Persistence</div><div class="layer-name">持久化与追溯</div><div class="layer-copy">Metadata · Artifact · Saved Analysis · Run / Event Trace</div></div>
-        <div class="layer control"><div class="layer-id">Cross-cutting</div><div class="layer-name">Control Plane</div><div class="layer-copy">Workspace / Project isolation · Security · Backup · Human approval · AI Operations</div></div>
+      <article class="card architecture-board reveal" aria-label="EnergyIQ 分层技术架构图">
+        <div class="architecture-audience">
+          <div class="architecture-person">Decision leaders<small>优先级、变化和决策</small></div>
+          <div class="architecture-person">Energy / FM teams<small>Evidence、诊断和行动</small></div>
+          <div class="architecture-person">Project admins<small>项目、账户和发布</small></div>
+          <div class="architecture-person">AI operators<small>Model、Skill、Method 和 Run</small></div>
+        </div>
+        <div class="architecture-arrow" aria-hidden="true">↕</div>
+        <div class="architecture-body">
+          <aside class="architecture-side" aria-label="项目输入">
+            <h4>Project inputs</h4>
+            <div class="architecture-side-item">Meter / API / Files</div>
+            <div class="architecture-side-item">Hierarchy + metadata</div>
+            <div class="architecture-side-item">Calendar + tariff</div>
+            <div class="architecture-side-item">Expert SOP / Method</div>
+          </aside>
+          <div class="architecture-core">
+            <div class="architecture-tier experience"><div class="architecture-tier-head"><b>Experience layer</b><span>what users see</span></div><div class="architecture-components"><div class="architecture-component">Decision Overview</div><div class="architecture-component">AI Analyst</div><div class="architecture-component">Saved / Reports</div><div class="architecture-component">Admin Studio</div></div></div>
+            <div class="architecture-tier project"><div class="architecture-tier-head"><b>Project intelligence</b><span>project-specific meaning</span></div><div class="architecture-components"><div class="architecture-component">Renderer + Recipe</div><div class="architecture-component">Section Packs</div><div class="architecture-component highlight">Layer 1–3 AI</div><div class="architecture-component">A→B Change Summary</div></div></div>
+            <div class="architecture-tier ai"><div class="architecture-tier-head"><b>Governed AI Harness</b><span>controlled model execution</span></div><div class="architecture-components"><div class="architecture-component">Model Profile</div><div class="architecture-component">Skills + Methods</div><div class="architecture-component">Tools + Context</div><div class="architecture-component">Run Finalizer</div></div></div>
+            <div class="architecture-tier contract"><div class="architecture-tier-head"><b>Trust contracts</b><span>why the result can be trusted</span></div><div class="architecture-components"><div class="architecture-component">Snapshot identity</div><div class="architecture-component">Evidence Catalog</div><div class="architecture-component">Artifact identity</div><div class="architecture-component">Saved restore</div></div></div>
+            <div class="architecture-tier data"><div class="architecture-tier-head"><b>Data foundation</b><span>versioned analytical truth</span></div><div class="architecture-components"><div class="architecture-component">Import + validation</div><div class="architecture-component">Metrics + rules</div><div class="architecture-component">Metadata store</div><div class="architecture-component">Run / Event trace</div></div></div>
+          </div>
+          <aside class="architecture-side" aria-label="跨层控制面">
+            <h4>Control plane</h4>
+            <div class="architecture-side-item">Tenant isolation</div>
+            <div class="architecture-side-item">Human approval</div>
+            <div class="architecture-side-item">Readiness + policy</div>
+            <div class="architecture-side-item">Backup + rollback</div>
+          </aside>
+        </div>
+        <div class="architecture-platform"><div><b>Shared platform</b>身份、存储、运行和治理只实现一次</div><div><b>Project adapters</b>每个项目保留自己的 Pack、Renderer 和分析问题</div><div><b>Exact reruns</b>新 Snapshot 生成新 Artifact，旧结果只做历史恢复</div></div>
+        <p class="architecture-caption">Diagram approach · Layered HTML architecture inspired by <a href="https://github.com/markdown-viewer/skills/tree/main/architecture">markdown-viewer/skills</a> · direct rendering, no external runtime dependency.</p>
+      </article>
+    </section>
+
+    <!-- === PRODUCT EVOLUTION === -->
+    <section class="section-shell" id="evolution">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">08 · Product evolution</div><h2>从一次分析，演进为持续学习的能源智能平台</h2></div>
+        <p class="section-intro">演进顺序不是堆功能：先建立可信事实，再让 AI 在约束内产生价值，然后把用户认可的洞察沉淀为方法，最后开放受治理的配置与扩展能力。</p>
+      </div>
+      <div class="evolution-track">
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-now">NOW · PROVE</div><h3>Decision Product</h3><p>把复杂能耗数据转换成可以核查、可以行动的项目 Overview。</p><div class="evolution-list"><span>Deterministic Sections</span><span>Project-specific Renderer</span><span>Evidence + Saved Analysis</span></div><span class="evolution-proof">证明：用户能更快找到重点</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-next">NEXT · REPEAT</div><h3>Governed AI</h3><p>Layer 1–3 从 Section 到跨 Section 提供总结、角度和 Additional Insights。</p><div class="evolution-list"><span>Key Findings + Interpretation</span><span>Snapshot A→B</span><span>Exact Artifact restore</span></div><span class="evolution-proof">证明：数据更新后仍持续有价值</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-scale">SCALE · LEARN</div><h3>Method Library</h3><p>记录 usefulness 和 Explore 行为，把用户认可的 Insight 转成可审核 Method。</p><div class="evolution-list"><span>Feedback contract</span><span>Insight → Method Proposal</span><span>Skill / SOP governance</span></div><span class="evolution-proof">证明：专家经验可以复用</span></article>
+        <article class="card evolution-stage reveal"><div class="evolution-code evolution-platform">PLATFORM · EXTEND</div><h3>Configurable Intelligence</h3><p>Admin 可理解和配置 Harness；AI 可以提出模板、可视化和软件变更建议。</p><div class="evolution-list"><span>Admin Harness Studio</span><span>Template + Visual Proposal</span><span>Coding Agent review loop</span></div><span class="evolution-proof">证明：新增项目无需平台分叉</span></article>
       </div>
     </section>
 
     <!-- === COMMERCIAL ROUTE === -->
     <section class="section-shell" id="business">
       <div class="section-head reveal">
-        <div><div class="section-kicker">08 · Commercial route</div><h2>先证明价值，再扩项目、方法和治理能力</h2></div>
+        <div><div class="section-kicker">09 · Business model</div><h2>先卖结果，再卖持续能力和组织复用</h2></div>
         <p class="section-intro" data-editable>商业化不是一次性卖出一套看板，而是从单项目诊断开始，证明数据更新后仍持续产生价值，再把项目经验和专家方法规模化。</p>
       </div>
       <div class="commercial-route">
@@ -688,12 +906,19 @@
         <article class="card commercial-step reveal"><div class="commercial-stage">04 · INTELLIGENCE</div><h3>Expert Methods</h3><p>把高价值 Insight 固化成可审核、可复跑的 Method / SOP。</p><span class="commercial-proof">证明：专家经验可跨项目复用</span></article>
         <article class="card commercial-step reveal"><div class="commercial-stage">05 · SCALE</div><h3>Enterprise Control</h3><p>提供 Harness、Trace、Policy、API、权限与运营控制面。</p><span class="commercial-proof">证明：治理和规模化要求通过</span></article>
       </div>
+      <div class="business-model">
+        <article class="card business-offer reveal"><div class="offer-code">LAND · PAID PILOT</div><h3>先交付一个可信结果</h3><p>用客户真实数据完成一个项目的 Overview、AI Analysis、A→B 和验收报告。</p><ul><li>数据接入与项目配置</li><li>单项目诊断与 Named-user acceptance</li><li>明确的价值指标与下一阶段建议</li></ul><span class="revenue">收入假设 · 一次性 onboarding + 固定 Pilot 费用</span></article>
+        <article class="card business-offer reveal"><div class="offer-code">EXPAND · SUBSCRIPTION</div><h3>扩成持续运营能力</h3><p>从单项目扩展到多个项目、更多账户和持续更新的 AI 决策支持。</p><ul><li>按项目 / 站点 / Portfolio 的平台订阅</li><li>AI Run 容量与高级分析包</li><li>多账户、Admin、支持与 SLA</li></ul><span class="revenue">收入假设 · 年度平台订阅 + AI 容量</span></article>
+        <article class="card business-offer reveal"><div class="offer-code">COMPOUND · INTELLIGENCE</div><h3>把经验变成增值资产</h3><p>把专家和用户认可的分析角度沉淀为可治理、可复跑的 Method / SOP。</p><ul><li>行业方法包与专家服务</li><li>企业级 Harness / Policy / Trace</li><li>模板、API 和受控扩展能力</li></ul><span class="revenue">收入假设 · 方法包 + 企业治理与服务</span></article>
+      </div>
+      <div class="business-buyer-strip reveal"><div><b>Economic buyer</b><span>资产、能源或运营负责人</span></div><div><b>Daily users</b><span>Energy / FM / Sustainability 团队</span></div><div><b>Land motion</b><span>真实项目 Paid Pilot</span></div><div><b>Expansion trigger</b><span>A→B 复跑价值和跨项目复用</span></div></div>
+      <div class="commercial-hypothesis reveal"><b>商业边界：</b>包装、计费单位和价格尚需通过真实 Pilot 的付费意愿、使用频率和支持成本验证；本图表达可测试的商业路径，不构成已经确认的价格承诺。</div>
     </section>
 
     <!-- === RISK AND VALUE METRICS === -->
     <section class="section-shell" id="risk">
       <div class="section-head reveal">
-        <div><div class="section-kicker">09 · Trust & value</div><h2>风险和价值必须一起管理</h2></div>
+        <div><div class="section-kicker">10 · Trust & value</div><h2>风险和价值必须一起管理</h2></div>
         <p class="section-intro">真正的风险不是功能少，而是工程结果没有转化为客户价值、AI 输出缺乏新意、跨项目复制带来维护分叉。</p>
       </div>
       <div class="risk-grid">
@@ -721,7 +946,7 @@
     <section class="action-section" id="actions">
       <div class="action-panel reveal">
         <div>
-          <div class="section-kicker" style="color:#6fe0c9">10 · What comes next</div>
+          <div class="section-kicker" style="color:#6fe0c9">11 · What comes next</div>
           <h2 data-editable>下一步不是继续堆功能，而是把能力变成客户可验证的价值</h2>
           <p data-editable>未来两周应以验收证据为中心：谁使用、看到什么、是否产生决策、数据更新后是否仍然有价值。</p>
           <div class="next-list">
@@ -738,7 +963,7 @@
           <a class="download-link" href="./EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx" download><span><b>产品路线图 PPT</b><small>12 页原始演示稿</small></span><i>↓</i></a>
           <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17.xlsx" download><span><b>PMO Roadmap</b><small>能力、计划、风险与证据</small></span><i>↓</i></a>
           <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17_with_Gantt.xlsx" download><span><b>PMO Roadmap + Gantt</b><small>含时间视图的工作簿</small></span><i>↓</i></a>
-          <div class="source-note">状态来源：<a href="https://github.com/Zion74/energyiq-datafoundry/issues/47">#47</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/55">#55</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/56">#56</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/57">#57</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/65">#65</a><br>报告基线：main@a252d367 · 18 Aug 2026</div>
+          <div class="source-note">状态来源：<a href="https://github.com/Zion74/energyiq-datafoundry/issues/47">#47</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/55">#55</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/56">#56</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/57">#57</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/65">#65</a><br>报告基线：main · 18 Aug 2026</div>
         </aside>
       </div>
     </section>
