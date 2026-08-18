@@ -223,7 +223,7 @@
       box-shadow: 0 10px 30px rgba(10,36,48,.045);
     }
 
-    /* === EXECUTIVE SUMMARY === */
+    /* === PRODUCT THESIS === */
     .executive-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
     .signal-card { min-height: 260px; padding: 28px; position: relative; overflow: hidden; }
     .signal-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 5px; background: var(--teal); }
@@ -257,6 +257,11 @@
     .value-step h3 { margin: 34px 0 10px; font-size: 25px; }
     .value-step p { margin: 0; color: var(--muted); }
     .value-step .outcome { display: block; margin-top: 20px; color: var(--teal); font-size: 13px; font-weight: 900; }
+    .audience-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+    .audience-card { padding: 20px 22px; display: grid; grid-template-columns: 44px 1fr; gap: 14px; align-items: center; }
+    .audience-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 13px; color: white; background: var(--ink); font-weight: 900; }
+    .audience-card b { display: block; margin-bottom: 3px; }
+    .audience-card span { color: var(--muted); font-size: 13px; }
 
     /* === STATUS TABLE === */
     .status-board { overflow: hidden; }
@@ -329,6 +334,23 @@
     .layer.control .layer-name { color: #6fe0c9; }
     .layer.control .layer-copy { color: #c0d0d4; }
 
+    /* === COMMERCIAL ROUTE === */
+    .commercial-route { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: end; }
+    .commercial-step { position: relative; padding: 24px; overflow: hidden; }
+    .commercial-step:nth-child(1) { min-height: 230px; }
+    .commercial-step:nth-child(2) { min-height: 270px; }
+    .commercial-step:nth-child(3) { min-height: 310px; }
+    .commercial-step:nth-child(4) { min-height: 350px; }
+    .commercial-step:nth-child(5) { min-height: 390px; color: white; background: var(--ink); }
+    .commercial-step:not(:last-child)::after { content: ""; position: absolute; inset: 0 0 auto; height: 4px; background: var(--teal); }
+    .commercial-stage { color: var(--teal); font: 900 12px/1 "Bricolage Grotesque", sans-serif; letter-spacing: .1em; }
+    .commercial-step:last-child .commercial-stage { color: #6fe0c9; }
+    .commercial-step h3 { margin: 28px 0 12px; font-size: 23px; }
+    .commercial-step p { margin: 0; color: var(--muted); font-size: 13px; }
+    .commercial-step:last-child p { color: #c0d0d4; }
+    .commercial-proof { display: block; margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--teal); font-size: 11px; font-weight: 900; }
+    .commercial-step:last-child .commercial-proof { color: #6fe0c9; border-color: rgba(255,255,255,.14); }
+
     /* === RISK / METRICS === */
     .risk-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 20px; }
     .risk-list, .metric-panel { padding: 30px; }
@@ -377,7 +399,9 @@
       .hero, .section-head, .action-panel, .risk-grid { grid-template-columns: 1fr; }
       .hero { min-height: auto; gap: 42px; }
       .hero::before { display: none; }
-      .executive-grid, .value-chain, .roadmap { grid-template-columns: 1fr 1fr; }
+      .executive-grid, .value-chain, .roadmap, .commercial-route { grid-template-columns: 1fr 1fr; align-items: stretch; }
+      .commercial-step:nth-child(n) { min-height: 250px; }
+      .audience-grid { grid-template-columns: 1fr; }
       .ab-flow { grid-template-columns: 1fr; }
       .ab-arrow { transform: rotate(90deg); padding: 2px 0; }
       .decision-strip { grid-template-columns: 1fr; }
@@ -399,7 +423,7 @@
       h1 { font-size: 48px; }
       .section-shell { padding: 62px 0; }
       .section-head { gap: 20px; }
-      .executive-grid, .value-chain, .roadmap { grid-template-columns: 1fr; }
+      .executive-grid, .value-chain, .roadmap, .commercial-route { grid-template-columns: 1fr; }
       .ab-proof { grid-template-columns: 1fr; }
       .value-step:not(:last-child)::after { content: "↓"; top: auto; right: 26px; bottom: -25px; }
       .status-board { overflow-x: auto; }
@@ -435,7 +459,7 @@
   <!-- === STICKY REPORT CONTROLS === -->
   <header class="topbar">
     <div class="topbar-inner">
-      <div class="brand"><span class="brand-mark">E</span><span>ENERGYIQ · EXECUTIVE ROADMAP</span></div>
+      <div class="brand"><span class="brand-mark">E</span><span>ENERGYIQ · PRODUCT LAUNCH ROADMAP</span></div>
       <div class="top-actions">
         <button class="top-action" id="editButton" type="button" aria-label="编辑报告内容" title="直接编辑报告文字">✎ <span>编辑内容</span></button>
         <button class="top-action" id="saveButton" type="button" aria-label="下载当前 HTML" title="下载包含当前修改的 HTML">↓ <span>下载当前 HTML</span></button>
@@ -448,7 +472,7 @@
     <!-- === HERO: 20-SECOND MANAGEMENT READ === -->
     <section class="hero" id="overview">
       <div class="reveal">
-        <div class="eyebrow">Management brief · 18 Aug 2026</div>
+        <div class="eyebrow">Product launch brief · 18 Aug 2026</div>
         <h1 data-editable>从可信数据，走向<span>可复跑的能源决策</span></h1>
         <p class="hero-lead" data-editable>EnergyIQ 的工程底座和双项目产品形态已经形成。当前最重要的工作不是继续堆功能，而是把能力转化为<strong>客户可验证、数据更新后仍有价值、可以跨项目复用</strong>的产品。</p>
         <div class="hero-meta">
@@ -461,7 +485,8 @@
           <a href="#proof">客户证明</a>
           <a href="#continuous">A→B</a>
           <a href="#roadmap">90 天路线</a>
-          <a href="#actions">管理决策</a>
+          <a href="#business">商业路径</a>
+          <a href="#actions">下一步</a>
         </nav>
       </div>
 
@@ -480,11 +505,11 @@
       </aside>
     </section>
 
-    <!-- === EXECUTIVE SUMMARY === -->
+    <!-- === PRODUCT THESIS === -->
     <section class="section-shell" id="summary">
       <div class="section-head reveal">
-        <div><div class="section-kicker">01 · Executive summary</div><h2>老板今天只需要看懂三件事</h2></div>
-        <p class="section-intro" data-editable>产品已经从“展示图表”走到了“以可信数据为底座、随新数据重新分析、把有效经验沉淀下来”。接下来要证明的是客户愿意持续使用，而不是再证明我们能写更多代码。</p>
+        <div><div class="section-kicker">01 · Product thesis</div><h2>EnergyIQ 正在完成三次关键跃迁</h2></div>
+        <p class="section-intro" data-editable>从“展示图表”走向“以可信数据为底座、随新数据重新分析、把有效经验沉淀下来”。下一阶段要证明的是客户愿意持续使用、产品能够跨项目复制，并形成可规模化的行业智能。</p>
       </div>
 
       <div class="executive-grid">
@@ -509,10 +534,10 @@
       </div>
 
       <div class="decision-strip reveal">
-        <div class="decision-title">需要管理层确认</div>
-        <div class="decision"><b>① 产品优先级</b><span>先完成 Ngee + A→B + 反馈闭环，再扩大 Coding Agent。</span></div>
-        <div class="decision"><b>② 责任人</b><span>确认 Product、Energy、QA/UAT 与 Operations owner。</span></div>
-        <div class="decision"><b>③ 商业验证</b><span>用真实 Pilot 反馈验证包装、价值指标和 SOP 付费假设。</span></div>
+        <div class="decision-title">下一阶段关键选择</div>
+        <div class="decision"><b>① 产品路径</b><span>先完成 Ngee + A→B + 反馈闭环，再扩大 Coding Agent。</span></div>
+        <div class="decision"><b>② 交付机制</b><span>建立 Product、Energy、QA/UAT 与 Operations 的明确责任链。</span></div>
+        <div class="decision"><b>③ 市场证明</b><span>用真实 Pilot 反馈验证产品包装、价值指标和 SOP 付费假设。</span></div>
       </div>
     </section>
 
@@ -527,6 +552,11 @@
         <article class="card value-step reveal"><span class="step-no">2</span><h3>决策 Overview</h3><p>让 Boss 在 20 秒内看到重点，让 FM 能定位图表、时段和证据。</p><span class="outcome">结果：更快找到重点</span></article>
         <article class="card value-step reveal"><span class="step-no">3</span><h3>AI + A→B</h3><p>围绕 Section 产生新角度，并随 Snapshot B 保留、更新、新增或淘汰结论。</p><span class="outcome">结果：持续产生价值</span></article>
         <article class="card value-step reveal"><span class="step-no">4</span><h3>Method / SOP</h3><p>把用户认可的分析角度固化为方法，经审核后跨 Snapshot 和项目复用。</p><span class="outcome">结果：形成产品壁垒</span></article>
+      </div>
+      <div class="audience-grid">
+        <article class="card audience-card reveal"><span class="audience-icon">D</span><div><b>Decision leaders</b><span>快速看懂重点、风险、变化和优先行动。</span></div></article>
+        <article class="card audience-card reveal"><span class="audience-icon">E</span><div><b>Energy / FM teams</b><span>从结论进入 Evidence 和 AI Analysis 深挖。</span></div></article>
+        <article class="card audience-card reveal"><span class="audience-icon">A</span><div><b>Admin / delivery teams</b><span>管理项目、模型、Skill、Method、Tool 与 Run Trace。</span></div></article>
       </div>
     </section>
 
@@ -546,7 +576,7 @@
         <div class="status-row" role="row"><div class="status-cell workstream">Method / SOP</div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill planned">规划中</span></div><div class="status-cell"><span class="status-pill planned">规划中</span></div><div class="status-cell"><span class="status-pill planned">规划中</span></div></div>
         <div class="status-row" role="row"><div class="status-cell workstream">Coding Agent</div><div class="status-cell">—</div><div class="status-cell">—</div><div class="status-cell">—</div><div class="status-cell"><span class="status-pill planned">发现阶段</span></div></div>
       </div>
-      <div class="truth-note reveal"><b>管理判断</b><span data-editable>当前最短关键路径是：客户验收 → Ngee 真实 A→B → Feedback → SOP。不要把测试通过写成客户接受，也不要让 Coding Agent 抢占眼前的交付门。</span></div>
+      <div class="truth-note reveal"><b>产品判断</b><span data-editable>当前最短关键路径是：客户验收 → Ngee 真实 A→B → Feedback → SOP。工程测试是产品可信度的基础，真实用户持续使用才是下一阶段的证明。</span></div>
     </section>
 
     <!-- === CUSTOMER PROOF === -->
@@ -645,10 +675,25 @@
       </div>
     </section>
 
+    <!-- === COMMERCIAL ROUTE === -->
+    <section class="section-shell" id="business">
+      <div class="section-head reveal">
+        <div><div class="section-kicker">08 · Commercial route</div><h2>先证明价值，再扩项目、方法和治理能力</h2></div>
+        <p class="section-intro" data-editable>商业化不是一次性卖出一套看板，而是从单项目诊断开始，证明数据更新后仍持续产生价值，再把项目经验和专家方法规模化。</p>
+      </div>
+      <div class="commercial-route">
+        <article class="card commercial-step reveal"><div class="commercial-stage">01 · PROOF</div><h3>Diagnostic Demo</h3><p>使用客户真实数据完成单项目诊断和价值展示。</p><span class="commercial-proof">证明：客户认可结论值得深挖</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">02 · PILOT</div><h3>Paid Pilot</h3><p>交付 Overview、AI Analysis 和至少一次真实 A→B。</p><span class="commercial-proof">证明：数据更新后持续产生价值</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">03 · EXPAND</div><h3>Multi-project</h3><p>共享平台机制，同时保持每个项目的专属 Pack 与表达。</p><span class="commercial-proof">证明：新增项目无需平台分叉</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">04 · INTELLIGENCE</div><h3>Expert Methods</h3><p>把高价值 Insight 固化成可审核、可复跑的 Method / SOP。</p><span class="commercial-proof">证明：专家经验可跨项目复用</span></article>
+        <article class="card commercial-step reveal"><div class="commercial-stage">05 · SCALE</div><h3>Enterprise Control</h3><p>提供 Harness、Trace、Policy、API、权限与运营控制面。</p><span class="commercial-proof">证明：治理和规模化要求通过</span></article>
+      </div>
+    </section>
+
     <!-- === RISK AND VALUE METRICS === -->
     <section class="section-shell" id="risk">
       <div class="section-head reveal">
-        <div><div class="section-kicker">08 · Management control</div><h2>风险和价值必须一起管理</h2></div>
+        <div><div class="section-kicker">09 · Trust & value</div><h2>风险和价值必须一起管理</h2></div>
         <p class="section-intro">真正的风险不是功能少，而是工程结果没有转化为客户价值、AI 输出缺乏新意、跨项目复制带来维护分叉。</p>
       </div>
       <div class="risk-grid">
@@ -676,7 +721,7 @@
     <section class="action-section" id="actions">
       <div class="action-panel reveal">
         <div>
-          <div class="section-kicker" style="color:#6fe0c9">09 · Decisions & next actions</div>
+          <div class="section-kicker" style="color:#6fe0c9">10 · What comes next</div>
           <h2 data-editable>下一步不是继续堆功能，而是把能力变成客户可验证的价值</h2>
           <p data-editable>未来两周应以验收证据为中心：谁使用、看到什么、是否产生决策、数据更新后是否仍然有价值。</p>
           <div class="next-list">
@@ -689,8 +734,8 @@
         </div>
         <aside class="download-box">
           <h3>原始交付附件</h3>
-          <p>HTML 用于管理层阅读；PPT 和 Excel 保留用于会议、PMO 跟踪和深度核查。</p>
-          <a class="download-link" href="./EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx" download><span><b>管理层 PPT</b><small>12 页原始演示稿</small></span><i>↓</i></a>
+          <p>HTML 用于发布、分享和持续更新；PPT 和 Excel 保留用于会议、PMO 跟踪和深度核查。</p>
+          <a class="download-link" href="./EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx" download><span><b>产品路线图 PPT</b><small>12 页原始演示稿</small></span><i>↓</i></a>
           <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17.xlsx" download><span><b>PMO Roadmap</b><small>能力、计划、风险与证据</small></span><i>↓</i></a>
           <a class="download-link" href="./EnergyIQ_PMO_Product_Roadmap_2026-08-17_with_Gantt.xlsx" download><span><b>PMO Roadmap + Gantt</b><small>含时间视图的工作簿</small></span><i>↓</i></a>
           <div class="source-note">状态来源：<a href="https://github.com/Zion74/energyiq-datafoundry/issues/47">#47</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/55">#55</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/56">#56</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/57">#57</a> · <a href="https://github.com/Zion74/energyiq-datafoundry/issues/65">#65</a><br>报告基线：main@a252d367 · 18 Aug 2026</div>
@@ -740,7 +785,7 @@
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = 'EnergyIQ_Executive_Roadmap_2026-08-18.html';
+      link.download = 'EnergyIQ_Product_Launch_Roadmap_2026-08-18.html';
       document.body.appendChild(link);
       link.click();
       link.remove();

@@ -1,17 +1,17 @@
 # EnergyIQ 产品战略与交付路线图
 
-这是面向管理层异步阅读的 HTML Roadmap 报告。它将原来的 PPT 重新组织为：
+这是面向产品发布会、用户、合作伙伴、投资人和管理团队的 HTML Roadmap 报告。它将原来的 PPT 重新组织为：
 
-1. 20 秒管理摘要；
+1. 一句话产品主张与发布状态；
 2. 当前产品价值与交付状态；
 3. Preschool / Ngee Ann 客户证明；
 4. 90 天 Release Gate；
-5. 管理层决策、风险与衡量指标。
+5. 商业扩展路径、下一阶段选择、风险与衡量指标。
 
 ## Files
 
 - `index.html`：可直接打开的单文件 HTML 报告；包含内联 CSS/JavaScript，无构建步骤。
-- `EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx`：原始管理层 PPT。
+- `EnergyIQ_Product_Strategy_Delivery_Roadmap_2026-08-17.pptx`：原始产品路线图 PPT。
 - `EnergyIQ_PMO_Product_Roadmap_2026-08-17.xlsx`：PMO 工作簿。
 - `EnergyIQ_PMO_Product_Roadmap_2026-08-17_with_Gantt.xlsx`：带 Gantt 的 PMO 工作簿。
 
