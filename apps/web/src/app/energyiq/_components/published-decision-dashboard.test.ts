@@ -1364,6 +1364,41 @@ describe("published Overview URL reload", () => {
     expect(mockedRouter.replace).not.toHaveBeenCalled();
   });
 
+  it("consumes a user-triggered current Overview refresh only once when the router rerenders the same URL", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    const snapshot = dashboardNgeeAnnSnapshot();
+    window.history.replaceState(
+      {},
+      "",
+      `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all&currentFrom=2026-06-01&currentTo=2026-06-16&currentDataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}&currentProjectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`,
+    );
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue({ status: "ready", snapshot });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Refresh current overview");
+    await act(async () => refresh?.click());
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
+    expect(resolveProjectAnalysis).toHaveBeenLastCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-month-to-date",
+    }, { bypassCache: true });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps the current cutoff pin while forcing a legacy Ngee Ann Scope to Project", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;

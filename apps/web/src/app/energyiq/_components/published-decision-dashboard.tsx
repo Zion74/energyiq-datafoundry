@@ -88,8 +88,15 @@ type LoadedResolution = {
 
 export function PublishedDecisionDashboard() {
   const searchParams = useSearchParams();
-  const initialViewState = overviewViewStateFromSearchParams(searchParams);
-  const historyState = overviewHistoryStateFromSearchParams(searchParams);
+  const urlSearch = searchParams.toString();
+  const initialViewState = useMemo(
+    () => overviewViewStateFromSearchParams(new URLSearchParams(urlSearch)),
+    [urlSearch],
+  );
+  const historyState = useMemo(
+    () => overviewHistoryStateFromSearchParams(new URLSearchParams(urlSearch)),
+    [urlSearch],
+  );
   const hasExplicitPeriod = searchParams.has("period");
   const viewStateKey = [
     initialViewState.projectId,
@@ -108,7 +115,7 @@ export function PublishedDecisionDashboard() {
     <PublishedDecisionDashboardView
       key={viewStateKey}
       initialViewState={initialViewState}
-      urlSearch={searchParams.toString()}
+      urlSearch={urlSearch}
       historyState={historyState}
     />
   );
