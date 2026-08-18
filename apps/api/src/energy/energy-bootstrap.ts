@@ -5,6 +5,8 @@ import type {
 
 const NGEE_ANN_PROJECT_ID = "ngee-ann-polytechnic";
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
+export const NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID =
+  "comparison.daily_usage_above_baseline@1" as const;
 export const NGEE_ANN_WORKSPACE_ID = "default";
 export const PRESCHOOL_WORKSPACE_ID = "preschool-demo-org";
 
@@ -50,6 +52,7 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     document: buildNgeeAnnSetup(),
     published_by: "dev-user"
   });
+  ensureNgeeAnnDefaultRuleConfig(metadataStore);
   ensureBootstrapProjectWorkspace(metadataStore, NGEE_ANN_PROJECT_ID, NGEE_ANN_WORKSPACE_ID);
   metadataStore.energyIq.upsertProjectAccess({
     project_id: NGEE_ANN_PROJECT_ID,
@@ -79,6 +82,23 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     project_id: PRESCHOOL_PROJECT_ID,
     user_id: "dev-user",
     role: "editor"
+  });
+};
+
+const ensureNgeeAnnDefaultRuleConfig = (metadataStore: MetadataStore): void => {
+  const config = metadataStore.energyIq.rules.getProjectConfig(NGEE_ANN_PROJECT_ID);
+  if (
+    config.revision !== 0
+    || config.selected_rule_revision_ids.includes(NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID)
+  ) return;
+  metadataStore.energyIq.rules.saveProjectConfig({
+    project_id: NGEE_ANN_PROJECT_ID,
+    expected_revision: config.revision,
+    selected_rule_revision_ids: [
+      ...config.selected_rule_revision_ids,
+      NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID,
+    ],
+    updated_by: "dev-user",
   });
 };
 

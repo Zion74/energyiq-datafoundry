@@ -200,16 +200,6 @@ describe("ProjectAnalysisResolver", () => {
     try {
       ensureEnergyIqBootstrap(metadata);
       await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
-      const ruleConfig = metadata.energyIq.rules.getProjectConfig(NGEE_ANN_GOLDEN.projectId);
-      metadata.energyIq.rules.saveProjectConfig({
-        project_id: NGEE_ANN_GOLDEN.projectId,
-        expected_revision: ruleConfig.revision,
-        selected_rule_revision_ids: [
-          ...ruleConfig.selected_rule_revision_ids,
-          "comparison.daily_usage_above_baseline@1",
-        ],
-        updated_by: "dev-user",
-      });
       metadata.energyIq.operationalPolicy.publishOperatingCalendar({
         version_id: "sg-calendar-v1",
         project_id: NGEE_ANN_GOLDEN.projectId,
@@ -252,6 +242,9 @@ describe("ProjectAnalysisResolver", () => {
         to: NGEE_ANN_GOLDEN.selection.period.to,
       });
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(currentProjectResult.snapshot.projectRelease.ruleRevisionIds)
+        .toContain("comparison.daily_usage_above_baseline@1");
+      expect(currentProjectResult.snapshot.analysis.dailyUsageAnomalies).toBeDefined();
       expect(currentProjectResult.snapshot.analysis.dataHealth.status).toBe("partial");
       expect(currentProjectResult.snapshot.analysis.dailyTotals?.scopes[0]?.rows).toHaveLength(16);
       expect(currentProjectResult.snapshot.analysis.dailyTotals?.scopes[0]?.rows[0]).toMatchObject({

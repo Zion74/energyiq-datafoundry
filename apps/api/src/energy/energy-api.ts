@@ -52,6 +52,7 @@ import {
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID } from "./energy-bootstrap.js";
 import {
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
 } from "./energy-import-materializer.js";
@@ -1052,6 +1053,7 @@ export const handleEnergyApiRequest = async (
       }
       if (segments[3] === "publish" && request.method === "POST") {
         const body = requireRecord(await readJsonBody(request));
+        requireProjectOverviewReleaseRules(context, projectId);
         const draft = context.metadataStore.energyIq.projectSetup.getDraft({
           project_id: projectId,
           user_id: user.id,
@@ -1730,6 +1732,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message === "ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_STALE"
     || message === "ENERGYIQ_DATA_SNAPSHOT_MISMATCH"
     || message === "ENERGYIQ_PROJECT_RELEASE_MISMATCH"
+    || message.startsWith("ENERGYIQ_OVERVIEW_RULE_REQUIRED:")
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
@@ -1753,6 +1756,19 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     status: forbidden ? 403 : notFound ? 404 : conflict ? 409 : invalid ? 400 : 500,
     body: createErrorResult(code, message),
   };
+};
+
+const requireProjectOverviewReleaseRules = (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+): void => {
+  if (resolveProjectOverviewProfile(projectId)?.rendererKey !== "ngee-ann-overview") return;
+  const selectedRuleRevisionIds = context.metadataStore.energyIq.rules
+    .getProjectConfig(projectId).selected_rule_revision_ids;
+  if (selectedRuleRevisionIds.includes(NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID)) return;
+  throw new Error(
+    `ENERGYIQ_OVERVIEW_RULE_REQUIRED:${NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID}`,
+  );
 };
 
 const MINIMUM_SAVED_ANALYSIS_COVERAGE_PCT = 95;
