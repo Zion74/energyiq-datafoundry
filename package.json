@@ -67,6 +67,7 @@
     "start:tui": "npm --workspace @datafoundry/tui run start --",
     "build:tui": "npm --workspace @datafoundry/tui run build",
     "smoke:api": "node scripts/smoke-copilotkit.mjs",
+    "deploy:energyiq:release": "node scripts/energyiq/deploy-release.mjs",
     "smoke:copilotkit": "node scripts/smoke-copilotkit.mjs",
     "smoke:copilotkit-run": "npm run build && node scripts/smoke-copilotkit-run.mjs",
     "smoke:api-context": "npm run build && node scripts/smoke-copilotkit-context.mjs",

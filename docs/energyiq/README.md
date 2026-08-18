@@ -66,6 +66,7 @@
 | 文档 | 作用 |
 | --- | --- |
 | [2026-08-17 Preschool Stage 3 native submit unavailable 修复记录](2026-08-17-Preschool-Stage3-native-submit-unavailable修复记录.md) | 记录真实 Provider 已完成调查却未调用正式 submit tool 的根因、v23 identity 旋转、v22 历史只读边界，以及部署与真实 B 验收的剩余门 |
+| [2026-08-18 生产不可变 Release 部署与回滚 Runbook](2026-08-18-生产不可变Release部署与回滚Runbook.md) | 用真实 release 目录、强制 TypeScript 构建、精确 SHA、独立 Metadata 备份与原子 current 切换防止发布覆盖旧版本 |
 | [2026-08-16 AI 输出审核边界讨论与二次验证请求](2026-08-16-AI输出审核边界讨论与二次验证请求.md) | 用户与侧边 Agent 关于运行时审核、Stage 3 质量审核、Evidence、Epistemic Status 和结构化 Claim 的讨论记录；不是 accepted 决策，要求主 Agent 独立复核后再提交最终结论与修改方案 |
 | [2026-08-09 Preschool Overview AI 路线 B 集成记录](2026-08-09-Preschool-Overview-AI-路线B集成记录.md) | 两阶段 AI Artifact、bounded failed retry、Benchmark/Standby 薄适配、本地自动化证据，以及仍待完成的服务端执行、Provider 与 Chrome 边界 |
 | [2026-08-04 Ngee Ann 权威 Excel、Mapping 与 Facts Materialization 实施记录](2026-08-04-Ngee-Ann权威Excel-Mapping与Facts-Materialization实施记录.md) | 四份权威 workbook、18/18 Mapping、项目级 canonical interval rebuild、100,205 facts、固定 Golden、Admin readiness 与 #4/#24/#19 边界 |
