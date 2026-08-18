@@ -3015,10 +3015,34 @@ function validDailyAnomalyDerivedValues(
   // four decimals. Re-deriving from those serialized inputs can differ by one
   // final decimal without changing the governed rule result.
   if (!approximatelyEqual(row.impactKwh, expectedImpact, 0.0002)
-    || !approximatelyEqual(row.relativePct, expectedRelativePct, 0.001)) return false;
+    || !relativePctFitsFourDecimalInputs({
+      actualKwh: row.actualKwh,
+      baselineKwh: row.baselineKwh,
+      relativePct: row.relativePct,
+    })) return false;
   const shouldTrigger = expectedImpact >= rule.absoluteImpactKwh
     && expectedRelativePct >= rule.relativeThresholdPct;
   return shouldTrigger ? row.outcome === "triggered" : row.outcome === "within_threshold";
+}
+
+function relativePctFitsFourDecimalInputs(input: {
+  actualKwh: number;
+  baselineKwh: number;
+  relativePct: number;
+}): boolean {
+  const halfSerializationUnit = 0.00005;
+  if (input.baselineKwh <= halfSerializationUnit) return false;
+  const expected = ((input.actualKwh - input.baselineKwh) / input.baselineKwh) * 100;
+  if (approximatelyEqual(input.relativePct, expected, 0.001)) return true;
+  // Independent four-decimal serialization of actual and baseline values can
+  // widen the explainable percentage interval when the baseline is small.
+  const minimum = (
+    (input.actualKwh - halfSerializationUnit) / (input.baselineKwh + halfSerializationUnit) - 1
+  ) * 100 - halfSerializationUnit;
+  const maximum = (
+    (input.actualKwh + halfSerializationUnit) / (input.baselineKwh - halfSerializationUnit) - 1
+  ) * 100 + halfSerializationUnit;
+  return input.relativePct >= minimum && input.relativePct <= maximum;
 }
 
 function approximatelyEqual(left: number, right: number, absoluteTolerance: number): boolean {

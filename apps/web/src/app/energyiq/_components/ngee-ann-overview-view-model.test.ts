@@ -841,6 +841,21 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(trend.scopes[0]!.points[0]!.baseline).not.toBeNull();
   });
 
+  it("keeps a high-ratio anomaly available when four-decimal inputs explain the serialized percentage", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const row = dailyAnomalyBundle(snapshot).scopes[1]!.rows[4]!;
+    expect(row.actualKwh).toBe(115.1763);
+    expect(row.outcome).toBe("triggered");
+    row.baselineKwh = 20.1134;
+    row.impactKwh = 95.063;
+    row.relativePct = 472.6361;
+
+    const trend = buildNgeeAnnOverviewViewModel(snapshot).energyTrend;
+
+    expect(trend.status).toBe("available");
+    expect(trend.baselineOverlay.status).toBe("available");
+  });
+
   it("uses the authoritative 24-hour grid for a single local day without depending on dailyTotals", () => {
     const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
 
