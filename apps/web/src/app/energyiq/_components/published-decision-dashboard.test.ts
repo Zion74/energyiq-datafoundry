@@ -307,7 +307,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     const explorer = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
       .find((anchor) => anchor.textContent?.includes("Open Project Explorer"));
@@ -320,7 +320,7 @@ describe("published Overview URL reload", () => {
     expect(saveEnergyAnalysis).toHaveBeenCalledWith(
       "ngee-ann-polytechnic",
       expect.objectContaining({
-        analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
         from: "2026-06-01",
         to: "2026-06-16",
         expectedDataSnapshotId: snapshot.context.dataSnapshotId,
@@ -360,7 +360,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
@@ -388,7 +388,7 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      analysisWindow: "current-project-overview",
     });
     expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
     expect(container.textContent?.match(/Energy overview/g)).toHaveLength(1);
@@ -453,7 +453,7 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      analysisWindow: "current-project-overview",
     }, { bypassCache: true });
   });
 
@@ -554,7 +554,7 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      analysisWindow: "current-project-overview",
     });
     for (const [nextHref] of mockedRouter.replace.mock.calls) {
       expect(nextHref).not.toContain("period=Custom");
@@ -699,7 +699,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
     expect(mockedAccess.selectProject).toHaveBeenCalledWith("ngee-ann-polytechnic");
@@ -761,7 +761,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     expect(mockedRouter.replace).toHaveBeenCalledWith(
       "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all",
@@ -1044,7 +1044,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
       "currentFrom=2026-07-28&currentTo=2026-08-03",
@@ -1343,7 +1343,7 @@ describe("published Overview URL reload", () => {
 
     expect(resolveProjectAnalysis).toHaveBeenCalledWith(expect.objectContaining({
       scopeId: "project",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
       from: "2026-05-20",
       to: "2026-06-16",
       expectedDataSnapshotId: "stale-snapshot",
@@ -1359,7 +1359,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     }, { bypassCache: true });
     expect(mockedRouter.replace).not.toHaveBeenCalled();
   });
@@ -1390,7 +1390,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     }, { bypassCache: true });
 
     await act(async () => {
@@ -1420,7 +1420,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
       from: "2026-05-20",
       to: "2026-06-16",
       expectedDataSnapshotId: "snapshot-v1",
@@ -1449,7 +1449,7 @@ describe("published Overview date inputs", () => {
     });
   });
 
-  it("asks the server for distinct Ngee Ann month-to-date and Preschool rolling windows without client dates", () => {
+  it("asks the server for the Project Overview window without branching on Project identity", () => {
     expect(currentOverviewAnalysisRequest("ngee-ann-polytechnic", {
       scopeId: "level-7",
       resource: "electricity",
@@ -1457,11 +1457,11 @@ describe("published Overview date inputs", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "level-7",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
     });
     expect(currentOverviewAnalysisRequest("preschool-demo")).toMatchObject({
       projectId: "preschool-demo",
-      analysisWindow: "current-overview-28d",
+      analysisWindow: "current-project-overview",
     });
   });
 
@@ -1484,7 +1484,7 @@ describe("published Overview date inputs", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "level-7",
       resource: "electricity",
-      analysisWindow: "current-month-to-date",
+      analysisWindow: "current-project-overview",
       from: "2026-05-20",
       to: "2026-06-16",
       expectedDataSnapshotId: "snapshot-v1",

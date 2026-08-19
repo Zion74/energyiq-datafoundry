@@ -662,7 +662,7 @@ export const resolvePinnedOverviewAiArtifactReadIdentity = (input: {
     throw new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
   }
 
-  const profile = resolveProjectOverviewProfile(project.id);
+  const profile = resolveProjectOverviewProfile(input.metadataStore, project.id);
   if (!profile || profile.rendererKey !== "preschool-overview") {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
   }

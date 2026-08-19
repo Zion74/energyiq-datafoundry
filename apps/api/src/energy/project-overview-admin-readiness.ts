@@ -106,7 +106,7 @@ export const createProjectOverviewAdminReadinessService = (input: {
 }): ProjectOverviewAdminReadinessService => {
   const readProjectOverviewAdminState: ProjectOverviewAdminReadinessService["readProjectOverviewAdminState"] = async ({ projectId, user }) => {
     const project = input.metadataStore.energyIq.getProject(projectId);
-    const profile = resolveProjectOverviewProfile(project.id);
+    const profile = resolveProjectOverviewProfile(input.metadataStore, project.id);
     const customerOverview = profile && project.status === "published"
       ? {
           status: "ready" as const,
@@ -280,7 +280,7 @@ export const createProjectOverviewAdminReadinessService = (input: {
       const before = await readProjectOverviewAdminState({ projectId, user });
       if (!before.allowedActions.includes("generate-missing")) return before;
       const project = input.metadataStore.energyIq.getProject(projectId);
-      const profile = resolveProjectOverviewProfile(project.id);
+      const profile = resolveProjectOverviewProfile(input.metadataStore, project.id);
       const projectAdapter = findProjectOverviewAiAdapter(
         input.projectOverviewAiAdapters ?? [],
         profile?.rendererKey ?? null,

@@ -313,6 +313,8 @@ export type EnergyProjectOverviewProfileDto = {
   rendererKey: EnergyProjectRendererKeyDto;
   rendererVersion: "1";
   contractVersion: "project-analysis-snapshot@1";
+  currentAnalysisWindow: "current-overview-28d" | "current-month-to-date";
+  source: "overview-definition" | "legacy-profile";
   horizons: {
     latestStatus: "latest-complete-day";
     shortTermDays: 7;
@@ -352,7 +354,7 @@ export type EnergyQueryContextRequestDto = {
   period?: "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom";
   from?: string;
   to?: string;
-  analysisWindow?: "latest-complete-day" | "latest-complete-7d" | "current-overview-28d" | "current-month-to-date";
+  analysisWindow?: "latest-complete-day" | "latest-complete-7d" | "current-project-overview" | "current-overview-28d" | "current-month-to-date";
   surface?: "project-explorer";
   expectedDataSnapshotId?: string;
   expectedProjectReleaseId?: string;
@@ -1891,6 +1893,36 @@ export type EnergyProjectAnalysisSnapshotDto = {
     } | null;
   };
   projectRelease: EnergyPublishedProjectReleaseDto;
+  reportTimeContext?: {
+    contractRevision: "energyiq-report-time-context@1";
+    binding: {
+      workspaceId: string;
+      projectId: string;
+      scopeId: string;
+      resource: string;
+      dataSnapshotId: string;
+      projectReleaseId: string;
+    };
+    timezone: string;
+    asOf: string;
+    acceptedDataEndExclusive: string;
+    dataThroughLocalDate: string;
+    lastRefreshedAt: string;
+    policyId: string;
+    policyRevision: string;
+    windows: Array<{
+      windowId: string;
+      role: string;
+      label: string;
+      strategy: Record<string, unknown> & { kind: string };
+      phase: "complete" | "partial" | "forecast";
+      from: string;
+      toExclusive: string;
+      completeDayCount: number;
+      segments: Array<{ from: string; toExclusive: string }>;
+      comparisonCompatibilityKey: string;
+    }>;
+  };
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
   renderer: EnergyPublishedProjectReleaseDto["renderer"];
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];

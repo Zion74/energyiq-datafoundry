@@ -29,6 +29,7 @@ describe("EnergyIqReportTimePolicyStore", () => {
 
       expect(policy.revision_id).toBe("operations-policy@1");
       expect(metadata.energyIq.reportTimePolicies.get("project-time-policy", "operations-policy@1")).toEqual(policy);
+      expect(metadata.energyIq.reportTimePolicies.getLatest("project-time-policy")).toEqual(policy);
       expect(() => metadata.energyIq.reportTimePolicies.publish({
         project_id: "project-time-policy",
         policy: { ...policy.policy, windows: [] },

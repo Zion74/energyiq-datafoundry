@@ -8,6 +8,7 @@ import type {
 import { EnergyIcon } from "./icons";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
+import { OverviewWindowLabel } from "./overview-report-time";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import {
   isPreschoolOverviewAiReadModelRenderable,
@@ -224,7 +225,7 @@ export function PreschoolOverviewRenderer({
           sectionNumber={1}
           title="Overall metrics"
           description={`Energy use and estimated cost across ${view.overallSummary.total.centreCount} Centres.`}
-          meta={view.context.period}
+          meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
         />
 
         <div className="mt-4 grid overflow-hidden rounded-xl bg-[linear-gradient(125deg,var(--color-foreground),color-mix(in_srgb,var(--color-primary)_58%,var(--color-foreground)))] text-background sm:grid-cols-3">
@@ -356,6 +357,7 @@ export function PreschoolOverviewRenderer({
           sectionNumber={2}
           title="Benchmark Analysis"
           description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
+          meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
         />
         {!sectionedAiResult || benchmarkInterpretation ? (
           <BenchmarkInterpretationSlot
@@ -449,6 +451,7 @@ export function PreschoolOverviewRenderer({
           sectionNumber={3}
           title="Standby Energy Wastage — Post Operating Hours"
           description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
+          meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview", "day-type-reference"]} />}
         />
         {!sectionedAiResult || standbyInterpretation ? (
           <StandbyInterpretationSlot
@@ -512,6 +515,7 @@ export function PreschoolOverviewRenderer({
           sectionNumber={4}
           title="Operating Hours Analysis"
           description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
+          meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
         />
         {!sectionedAiResult || operatingInterpretation ? (
           <OperatingInterpretationSlot
@@ -574,6 +578,7 @@ export function PreschoolOverviewRenderer({
           description={view.forecast.status === "unavailable"
             ? "A transparent next-month energy view with Plan and Actual kept as separate, Snapshot-bound facts."
             : `${view.forecast.targetMonth} · ${view.forecast.targetPeriod} · Plan and Actual remain separately pinned.`}
+          meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-month-progress", "next-month-outlook"]} />}
         />
         <PreschoolForecastPanel forecast={view.forecast} />
         <PlanningForecastEvidence planning={view.planningOutlook} forecast={view.forecast} />
@@ -699,7 +704,7 @@ function SectionHeader({
   sectionNumber: 1 | 2 | 3 | 4 | 5;
   title: string;
   description: string;
-  meta?: string;
+  meta?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
@@ -712,7 +717,7 @@ function SectionHeader({
         </div>
         <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted">{description}</p>
       </div>
-      {meta ? <span className="shrink-0 text-xs font-semibold tabular-nums text-muted">{meta}</span> : null}
+      {meta ? <div className="shrink-0 tabular-nums">{meta}</div> : null}
     </div>
   );
 }

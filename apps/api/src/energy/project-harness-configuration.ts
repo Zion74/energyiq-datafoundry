@@ -181,7 +181,7 @@ export const createProjectHarnessConfigurationReader = (input: {
       contentSha256: method.contentSha256,
       lifecycle: "published" as const,
     }));
-    const profile = resolveProjectOverviewProfile(project.id);
+    const profile = resolveProjectOverviewProfile(input.metadataStore, project.id);
     const systemModelIds = models
       .filter(({ source, enabled, status }) => source === "server-system-binding" && enabled && status === "connected")
       .map(({ id }) => id);

@@ -10,6 +10,7 @@ import {
   type MetadataStore,
   type UserRecord,
 } from "@datafoundry/metadata";
+import type { ReportTimeContext, ReportTimePolicyRevision } from "@datafoundry/contracts";
 import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
@@ -72,6 +73,7 @@ import {
   createProjectAnalysisResultCache,
   type ProjectAnalysisResultCache,
 } from "./project-analysis-result-cache.js";
+import { resolveReportTimeContext } from "./report-time-context.js";
 
 export type ProjectRendererKey = "ngee-ann-overview" | "preschool-overview";
 
@@ -121,6 +123,7 @@ export type ProjectAnalysisSnapshot = {
     monthlyOutlookTargetPeriod?: PreschoolMonthlyTargetPeriod | null;
   };
   projectRelease: PublishedProjectRelease;
+  reportTimeContext?: ReportTimeContext;
   recipe: PublishedProjectRelease["recipe"];
   renderer: PublishedProjectRelease["renderer"];
   dataQuality: EnergyScopeAnalysis["dataHealth"];
@@ -231,6 +234,8 @@ export type ProjectOverviewProfile = {
   rendererKey: ProjectRendererKey;
   rendererVersion: "1";
   contractVersion: "project-analysis-snapshot@1";
+  currentAnalysisWindow: "current-overview-28d" | "current-month-to-date";
+  source: "overview-definition" | "legacy-profile";
   horizons: {
     latestStatus: "latest-complete-day";
     shortTermDays: 7;
@@ -238,23 +243,57 @@ export type ProjectOverviewProfile = {
   };
 };
 
-const PROJECT_OVERVIEW_PROFILES: Readonly<Record<string, ProjectOverviewProfile>> = {
+const LEGACY_PROJECT_OVERVIEW_PROFILES: Readonly<Record<string, ProjectOverviewProfile>> = {
   "ngee-ann-polytechnic": {
     rendererKey: "ngee-ann-overview",
     rendererVersion: "1",
     contractVersion: "project-analysis-snapshot@1",
+    currentAnalysisWindow: "current-month-to-date",
+    source: "legacy-profile",
     horizons: { latestStatus: "latest-complete-day", shortTermDays: 7, mainDays: 28 },
   },
   "preschool-demo": {
     rendererKey: "preschool-overview",
     rendererVersion: "1",
     contractVersion: "project-analysis-snapshot@1",
+    currentAnalysisWindow: "current-overview-28d",
+    source: "legacy-profile",
     horizons: { latestStatus: "latest-complete-day", shortTermDays: 7, mainDays: 28 },
   },
 };
 
-export const resolveProjectOverviewProfile = (projectId: string): ProjectOverviewProfile | null =>
-  PROJECT_OVERVIEW_PROFILES[projectId] ?? null;
+export const resolveProjectOverviewProfile = (
+  metadataStore: MetadataStore,
+  projectId: string,
+): ProjectOverviewProfile | null => {
+  const revision = metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+  const definitionRecord = revision
+    ? metadataStore.energyIq.overviewDefinitions.get(revision.revision_id)
+    : null;
+  if (definitionRecord) {
+    const policy = metadataStore.energyIq.reportTimePolicies.get(
+      projectId,
+      definitionRecord.time_policy_revision_id,
+    )?.policy;
+    const primaryWindowId = definitionRecord.definition.sections[0]?.primaryWindowId;
+    const primaryStrategy = policy?.windows.find((window) => window.windowId === primaryWindowId)?.strategy;
+    const currentAnalysisWindow = primaryStrategy?.kind === "calendar_month_to_date"
+      ? "current-month-to-date" as const
+      : primaryStrategy?.kind === "rolling_complete_days" && primaryStrategy.days === 28
+        ? "current-overview-28d" as const
+        : null;
+    if (!currentAnalysisWindow) throw new Error("ENERGYIQ_OVERVIEW_PRIMARY_WINDOW_UNSUPPORTED");
+    return {
+      rendererKey: definitionRecord.renderer_key,
+      rendererVersion: PROJECT_RENDERER_VERSION,
+      contractVersion: PROJECT_RENDERER_CONTRACT_VERSION,
+      currentAnalysisWindow,
+      source: "overview-definition",
+      horizons: { latestStatus: "latest-complete-day", shortTermDays: 7, mainDays: 28 },
+    };
+  }
+  return LEGACY_PROJECT_OVERVIEW_PROFILES[projectId] ?? null;
+};
 
 export const resolveProjectAnalysis = async (input: {
   metadataStore: MetadataStore;
@@ -267,6 +306,7 @@ export const resolveProjectAnalysis = async (input: {
   now?: Date;
   env?: Record<string, string | undefined>;
 }): Promise<ProjectAnalysisResolution> => {
+  const resolvedAt = (input.now ?? new Date()).toISOString();
   const access = resolveEnergyAccessContext({
     metadataStore: input.metadataStore,
     user: input.user,
@@ -277,7 +317,7 @@ export const resolveProjectAnalysis = async (input: {
   if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
     throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
   }
-  const legacyProfile = resolveProjectOverviewProfile(input.request.projectId);
+  const legacyProfile = resolveProjectOverviewProfile(input.metadataStore, input.request.projectId);
   if (!legacyProfile) {
     const context = resolveEnergyQueryContext({
       metadataStore: input.metadataStore,
@@ -298,6 +338,7 @@ export const resolveProjectAnalysis = async (input: {
   }
   const publishedRunContext: PublishedRunContext = input.request.analysisWindow === "latest-complete-day"
     || input.request.analysisWindow === "latest-complete-7d"
+    || input.request.analysisWindow === "current-project-overview"
     || input.request.analysisWindow === "current-overview-28d"
     || input.request.analysisWindow === "current-month-to-date"
     ? await resolveCurrentOverviewContext(input)
@@ -514,11 +555,33 @@ export const resolveProjectAnalysis = async (input: {
             })
           : undefined;
       const latestAvailablePeriod = scopeAnalysis.latestAvailablePeriod ?? null;
+      const reportTimePolicy = resolveSnapshotReportTimePolicy({
+        metadataStore: input.metadataStore,
+        projectRelease,
+      });
+      const reportTimeContext = reportTimePolicy
+        ? resolveReportTimeContext({
+            binding: {
+              workspaceId: releasedContext.workspaceId,
+              projectId: releasedContext.projectId,
+              scopeId: releasedContext.scopeId,
+              resource: releasedContext.resource,
+              dataSnapshotId: analysis.provenance.dataSnapshotId,
+              projectReleaseId: projectRelease.id,
+            },
+            timezone: releasedContext.timezone,
+            asOf: resolvedAt,
+            acceptedDataEndExclusive: snapshotContext.primaryPeriod.endExclusive,
+            lastRefreshedAt: resolvedAt,
+            policy: reportTimePolicy,
+          })
+        : undefined;
       return {
         status: "ready",
         snapshot: {
           context: snapshotContext,
           projectRelease,
+          ...(reportTimeContext ? { reportTimeContext } : {}),
           recipe: projectRelease.recipe,
           renderer: projectRelease.renderer,
           dataQuality: analysis.dataHealth,
@@ -630,6 +693,28 @@ export const resolveProjectAnalysis = async (input: {
   };
 };
 
+const resolveSnapshotReportTimePolicy = (input: {
+  metadataStore: MetadataStore;
+  projectRelease: PublishedProjectRelease;
+}): ReportTimePolicyRevision | null => {
+  const definition = input.projectRelease.templateRevisionId
+    ? input.metadataStore.energyIq.overviewDefinitions.get(input.projectRelease.templateRevisionId)
+    : null;
+  if (definition && definition.renderer_key !== input.projectRelease.renderer.key) {
+    throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_RENDERER_MISMATCH");
+  }
+  const policyRecord = definition
+    ? input.metadataStore.energyIq.reportTimePolicies.get(
+        input.projectRelease.projectId,
+        definition.time_policy_revision_id,
+      )
+    : input.metadataStore.energyIq.reportTimePolicies.getLatest(input.projectRelease.projectId);
+  if (definition && !policyRecord) {
+    throw new Error("ENERGYIQ_REPORT_TIME_POLICY_NOT_FOUND");
+  }
+  return policyRecord?.policy ?? null;
+};
+
 const selectPreschoolLatestCompleteLocalDay = async (
   input: Parameters<typeof selectEnergyLatestCompleteDay>[0],
 ): Promise<string | null> => {
@@ -665,14 +750,20 @@ const resolveCurrentOverviewContext = async (input: {
     to,
     ...requestedContext
   } = input.request;
+  const resolvedAnalysisWindow = analysisWindow === "current-project-overview"
+    ? resolveProjectOverviewProfile(input.metadataStore, input.request.projectId)?.currentAnalysisWindow
+    : analysisWindow;
+  if (analysisWindow === "current-project-overview" && !resolvedAnalysisWindow) {
+    throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_REQUIRED");
+  }
   const selectOverviewPeriod = (
     selectionInput: Parameters<typeof selectEnergyLatestCompleteDay>[0],
-  ) => analysisWindow === "latest-complete-day"
+  ) => resolvedAnalysisWindow === "latest-complete-day"
     ? selectEnergyLatestCompleteDay(selectionInput)
-    : analysisWindow === "current-overview-28d" || analysisWindow === "current-month-to-date"
+    : resolvedAnalysisWindow === "current-overview-28d" || resolvedAnalysisWindow === "current-month-to-date"
       ? selectEnergyCurrentOverviewPeriod({
           ...selectionInput,
-          periodBasis: resolveEnergyCurrentOverviewPeriodBasis(analysisWindow),
+          periodBasis: resolveEnergyCurrentOverviewPeriodBasis(resolvedAnalysisWindow),
         })
       : selectEnergyLatestCompletePeriod(selectionInput);
   const suppliedPinParts = [from, to, expectedDataSnapshotId, expectedProjectReleaseId]
@@ -811,7 +902,7 @@ export const resolvePublishedProjectRelease = (
 ): PublishedProjectRelease | null => {
   const catalog = metadataStore.energyIq.templates.listComponentRevisions();
   const revision = metadataStore.energyIq.templates.getLatestProjectRevision(context.projectId);
-  const legacyProfile = resolveProjectOverviewProfile(context.projectId);
+  const legacyProfile = resolveProjectOverviewProfile(metadataStore, context.projectId);
   if (!legacyProfile) return null;
   return revision
     ? releaseFromTemplateRevision(revision, legacyProfile.rendererKey, catalog)

@@ -167,6 +167,36 @@ describe("createEnergyQueryContextItem", () => {
           businessCalendarVersion: "calendar-v1",
           tariffScheduleVersion: "tariff-v1",
         },
+        reportTimeContext: {
+          contractRevision: "energyiq-report-time-context@1",
+          binding: {
+            workspaceId: baseContext.workspaceId,
+            projectId: baseContext.projectId,
+            scopeId: baseContext.scopeId,
+            resource: baseContext.resource,
+            dataSnapshotId: "snapshot-v1",
+            projectReleaseId: "preschool-release-v1",
+          },
+          timezone: baseContext.timezone,
+          asOf: "2026-07-09T00:00:00.000Z",
+          acceptedDataEndExclusive: baseContext.to,
+          dataThroughLocalDate: "2026-07-08",
+          lastRefreshedAt: "2026-07-09T00:00:00.000Z",
+          policyId: "preschool-report-time",
+          policyRevision: "1",
+          windows: [{
+            windowId: "current-overview",
+            role: "recent_operations",
+            label: "Recent 28 complete days",
+            strategy: { kind: "rolling_complete_days", days: 28 },
+            phase: "complete",
+            from: "2026-06-10T16:00:00.000Z",
+            toExclusive: baseContext.to,
+            completeDayCount: 28,
+            segments: [{ from: "2026-06-10T16:00:00.000Z", toExclusive: baseContext.to }],
+            comparisonCompatibilityKey: "current",
+          }],
+        },
         dataSnapshot: { id: "snapshot-v1", importBatchIds: ["batch-v1"], lastSeenAt: "2026-06-01T00:00:00.000Z" },
         metadata: {
           status: "provisional",
@@ -309,6 +339,8 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain('"dataSnapshotId":"snapshot-v1"');
     expect(content).toContain('"dataCutoff":"2026-07-08T16:00:00.000Z"');
     expect(content).toContain('"businessCalendarVersion":"calendar-v1"');
+    expect(content).toContain('"reportTimeContext":{"contractRevision":"energyiq-report-time-context@1"');
+    expect(content).toContain('"windowId":"current-overview"');
     expect(content).toContain("preschool.benchmark.cohorts.active%20aging%20center.eui.p50");
     expect(content).toContain('"cohort":"Active Aging Center","sampleSize":"8"');
     expect(content).toContain('"sourceCircuitCount":2');

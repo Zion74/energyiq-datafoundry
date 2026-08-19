@@ -71,6 +71,17 @@ export class EnergyIqReportTimePolicyStore {
     return isRecord(row) ? mapRecord(row) : null;
   }
 
+  getLatest(projectId: string): EnergyIqReportTimePolicyRevisionRecord | null {
+    const row = this.db.prepare(`
+      SELECT project_id, revision_id, policy_json, published_by, published_at
+      FROM energyiq_report_time_policy_revisions
+      WHERE project_id = ?
+      ORDER BY published_at DESC, revision_id DESC
+      LIMIT 1
+    `).get(projectId);
+    return isRecord(row) ? mapRecord(row) : null;
+  }
+
   private require(projectId: string, revisionId: string): EnergyIqReportTimePolicyRevisionRecord {
     const record = this.get(projectId, revisionId);
     if (!record) throw new Error("ENERGYIQ_REPORT_TIME_POLICY_NOT_FOUND");

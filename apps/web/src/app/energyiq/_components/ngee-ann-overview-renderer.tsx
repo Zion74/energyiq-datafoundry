@@ -20,6 +20,7 @@ import { NgeeAnnExecutiveSummary } from "./ngee-ann-executive-summary";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
 import { NgeeAnnSummaryFindings } from "./ngee-ann-summary-findings";
 import { NgeeAnnUsageHeatmap } from "./ngee-ann-usage-heatmap";
+import { OverviewWindowLabel } from "./overview-report-time";
 import {
   buildNgeeAnnOverviewViewModel,
   type NgeeAnnLatestAvailableRange,
@@ -199,6 +200,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-executive-summary"
         title="Executive Summary"
         description={view.executiveSummary.headline}
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["current-month-progress"]}
       />
 
       <NgeeAnnExecutiveSummary view={view} />
@@ -211,6 +214,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-summary-findings"
         title="Summary of Findings"
         description="Verified findings from the selected Snapshot, kept separate from AI interpretation."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["current-month-progress"]}
       />
 
       <NgeeAnnSummaryFindings view={view} />
@@ -219,6 +224,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-day-profile-analysis"
         title="Day Profile Analysis"
         description="Compare the accepted 24-hour shape by Day Type and Scope."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations", "day-type-reference"]}
       />
 
       <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
@@ -229,6 +236,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-energy-health"
         title="Time-based Behavioral Analysis"
         description="Review day-type averages, weekday time bands and accepted Level totals before moving into Circuit evidence."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations", "day-type-reference"]}
       />
 
       <NgeeAnnEnergyHealth dayProfile={view.dayProfile} levelComparison={view.levelComparison} />
@@ -239,6 +248,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-circuit-analysis"
         title="Circuit Category Analysis"
         description="Rank the published Circuit evidence that explains the Project result."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations"]}
       />
 
       <NgeeAnnCircuitRanking view={view.energyComposition.circuits} />
@@ -253,6 +264,8 @@ export function NgeeAnnOverviewRenderer({
         id="ngee-ann-recommendations"
         title="Personalized Recommendations"
         description="Prioritised operational checks supported by this Snapshot; no saving is assumed."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations"]}
       />
 
       <NgeeAnnDecisionPriorities
@@ -353,14 +366,21 @@ function OverviewSectionHeading({
   id,
   title,
   description,
+  reportTimeContext,
+  windowIds,
 }: {
   id: string;
   title: string;
   description: string;
+  reportTimeContext?: NonNullable<EnergyProjectAnalysisSnapshotDto["reportTimeContext"]>;
+  windowIds: readonly string[];
 }) {
   return (
     <div id={id} data-overview-section="true" className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 lg:px-7 lg:pt-8">
-      <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
+      <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
+        <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
+        <OverviewWindowLabel context={reportTimeContext} windowIds={windowIds} />
+      </div>
       <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">{description}</p>
     </div>
   );

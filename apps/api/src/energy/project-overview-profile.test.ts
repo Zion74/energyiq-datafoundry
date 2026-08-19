@@ -1,24 +1,59 @@
+import type { MetadataStore } from "@datafoundry/metadata";
 import { describe, expect, it } from "vitest";
 
 import { resolveProjectOverviewProfile } from "./project-analysis-resolver.js";
 
 describe("resolveProjectOverviewProfile", () => {
-  it("returns the registered customer renderer and fixed decision horizons", () => {
-    expect(resolveProjectOverviewProfile("ngee-ann-polytechnic")).toEqual({
+  it("resolves the renderer and current window from the immutable Overview Definition", () => {
+    const metadata = definitionMetadata({
+      projectId: "customer-project",
+      rendererKey: "ngee-ann-overview",
+      strategy: { kind: "calendar_month_to_date" },
+    });
+    expect(resolveProjectOverviewProfile(metadata, "customer-project")).toMatchObject({
       rendererKey: "ngee-ann-overview",
       rendererVersion: "1",
       contractVersion: "project-analysis-snapshot@1",
-      horizons: {
-        latestStatus: "latest-complete-day",
-        shortTermDays: 7,
-        mainDays: 28,
-      },
+      currentAnalysisWindow: "current-month-to-date",
+      source: "overview-definition",
     });
-    expect(resolveProjectOverviewProfile("preschool-demo")?.rendererKey)
-      .toBe("preschool-overview");
   });
 
   it("does not invent a customer renderer for an unregistered project", () => {
-    expect(resolveProjectOverviewProfile("new-project")).toBeNull();
+    expect(resolveProjectOverviewProfile(definitionMetadata(null), "new-project")).toBeNull();
   });
 });
+
+function definitionMetadata(input: null | {
+  projectId: string;
+  rendererKey: "ngee-ann-overview" | "preschool-overview";
+  strategy: { kind: "calendar_month_to_date" } | { kind: "rolling_complete_days"; days: number };
+}): MetadataStore {
+  const revisionId = input ? `${input.projectId}-template-v1` : null;
+  return {
+    energyIq: {
+      templates: {
+        getLatestProjectRevision: (projectId: string) => projectId === input?.projectId
+          ? { revision_id: revisionId }
+          : null,
+      },
+      overviewDefinitions: {
+        get: (candidateRevisionId: string) => candidateRevisionId === revisionId && input
+          ? {
+              renderer_key: input.rendererKey,
+              time_policy_revision_id: "project-overview-time@1",
+              definition: {
+                sections: [{ primaryWindowId: "primary" }],
+              },
+            }
+          : null,
+      },
+      reportTimePolicies: {
+        get: (projectId: string, policyRevisionId: string) => projectId === input?.projectId
+          && policyRevisionId === "project-overview-time@1"
+          ? { policy: { windows: [{ windowId: "primary", strategy: input.strategy }] } }
+          : null,
+      },
+    },
+  } as unknown as MetadataStore;
+}

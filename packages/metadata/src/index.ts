@@ -35,7 +35,10 @@ import {
 import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
 import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 import { initializeEnergyIqTemplateChangeSchema } from "./energyiq-template-change.js";
-import { initializeEnergyIqOverviewDefinitionSchema } from "./energyiq-overview-definition-store.js";
+import {
+  ensureEnergyIqOverviewDefinitionRendererSchema,
+  initializeEnergyIqOverviewDefinitionSchema,
+} from "./energyiq-overview-definition-store.js";
 import { initializeEnergyIqReportTimePolicySchema } from "./energyiq-report-time-policy-store.js";
 
 export * from "./config-store.js";
@@ -4139,6 +4142,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0037_energyiq_report_time_policy", "Persist immutable Project Report Time Policy revisions", () => {
     initializeEnergyIqReportTimePolicySchema(db);
+  });
+  runSchemaMigration(db, "0038_energyiq_overview_definition_renderer", "Bind Overview Definitions to the internal customer Renderer", () => {
+    ensureEnergyIqOverviewDefinitionRendererSchema(db);
   });
 };
 

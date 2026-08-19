@@ -186,6 +186,7 @@ export const createProjectAnalysisSnapshotContextItem = (input: {
     meterMappingRevisionId: snapshot.context.meterMappingRevisionId,
     metricVersion: snapshot.context.metricVersion,
     businessCalendarVersion: snapshot.context.businessCalendarVersion,
+    reportTimeContext: snapshot.reportTimeContext,
     dataQuality: snapshot.dataQuality,
     evidence: snapshot.evidence,
     findings: snapshot.findings,

@@ -42,6 +42,7 @@ describe("EnergyIQ template change API", () => {
         published_at: "2026-08-13T00:01:00.000Z",
       });
       const current = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        renderer_key: "preschool-overview",
         project_id: project.id,
         expected_base_revision_id: base.revision_id,
         definition: {
