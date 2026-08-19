@@ -1,8 +1,8 @@
 ---
 title: "Project 通用 Report Time Context 与 Overview 复用决策"
-summary: "平台统一时间窗口、身份与变化治理，Project Profile 只组合已注册策略并保留自己的 Section 业务语义。"
+summary: "平台统一时间窗口、身份与变化治理；Agent 通过单一声明式 Overview Definition 组合已注册能力，不直接操作 Renderer 或 UI Patch。"
 doc_type: decision
-tags: [Overview, ReportTimeContext, ProjectProfile, 时间语义, 平台复用]
+tags: [Overview, ReportTimeContext, OverviewDefinition, Stage5Agent, 时间语义, 平台复用]
 updated_at: "2026-08-19"
 related:
   - "CONTEXT.md"
@@ -29,11 +29,11 @@ EnergyIQ 当前采用“定制化服务通用化”：先在真实 Project 中�
 | A. 全平台唯一日期范围 | 一个 `from/to` 控制所有 Overview Sections | 实现简单 | 运营、月度趋势、预测和异常基线被迫使用错误窗口 |
 | B. 每项目自由实现 | 每个 Renderer/Web 自己计算时间 | 定制快 | projectId 分支、历史恢复和 AI identity 无法治理 |
 | C. 任意日期表达式平台 | Project 上传表达式或代码 | 表面灵活 | 形成低代码日期引擎，难验证、难迁移、难解释 |
-| D. 可信锚点 + 版本化命名窗口 | 平台解析窗口，Project Profile 只引用已注册策略 | 同时保留业务意义、可复跑和跨项目复用 | 需要一次合同迁移 |
+| D. 可信锚点 + 声明式 Overview Definition | 平台解析窗口，Overview Definition 只引用已注册策略与能力 | 同时保留业务意义、可复跑和跨项目复用 | 需要一次合同迁移 |
 
 ## 3. 决定
 
-**选择 D：平台级 `Report Time Context` + 版本化 `Project Overview Profile`。**
+**选择 D：平台级 `Report Time Context` + 版本化 `Overview Definition Revision`。**
 
 Overview 顶部只有一个可信锚点：`Data through`、`Last refreshed`、Timezone 和 Data Snapshot。各 Section 可以使用不同的 named windows，但必须显示用途、精确范围和 `Complete / Partial / Forecast` 状态。
 
@@ -51,7 +51,7 @@ Overview 顶部只有一个可信锚点：`Data through`、`Last refreshed`、Ti
 | What changed compatibility | 对平台策略的新需求输入 |
 | 普通读取零 Provider | 人工价值审核 |
 
-Project 不能提供任意日期函数。它只能发布 Profile，选择平台已注册的 strategy，并把自己的 Section 绑定到 window roles。
+Project 不能提供任意日期函数。它只能发布 Overview Definition，选择平台已注册的 strategy/capability，并把自己的 Section 绑定到 window roles。
 
 ## 5. 深模块接口
 
@@ -76,7 +76,7 @@ resolveReportTimeContext({
 - named windows 的 role、strategy、`from/toExclusive`、segments、phase、complete-day count；
 - 用于 What changed 的 comparison compatibility key。
 
-Section 侧只消费：
+Overview Definition 中的 Section 只消费：
 
 ```text
 Section Time Binding
@@ -85,7 +85,45 @@ Section Time Binding
 → 每条 Fact/Evidence 记录实际 windowId
 ```
 
-## 6. 首批平台策略
+## 6. Stage 5 Agent 的单一协议
+
+Stage 5 的任务不是编写 React 页面，而是提出“Overview 应该表达什么”。Agent 面前只保留五个概念：
+
+1. `Overview`：页面目的和可信时间策略；
+2. `Section`：一个管理问题及其顺序；
+3. `Block`：引用 Catalog 中已发布的分析/展示能力；
+4. `Window`：引用 Report Time Context 的命名窗口；
+5. `Presentation intent`：`primary / standard / supporting` 等少量语义意图。
+
+```ts
+type OverviewDefinition = {
+  contractRevision: "energyiq-overview-definition@1";
+  timePolicyRevisionId: string;
+  sections: Array<{
+    key: string;
+    title: string;
+    managementQuestion: string;
+    primaryWindowId: string;
+    supportingWindowIds?: string[];
+    blocks: Array<{
+      key: string;
+      capabilityRevisionId: string;
+      windowId?: string;
+      emphasis?: "primary" | "standard" | "supporting";
+    }>;
+  }>;
+};
+```
+
+Agent 返回完整的期望 Definition；服务端负责 canonicalize、校验、计算语义 Diff、编译 Render Plan、生成固定 Snapshot Preview。Overview 规模有限，完整声明比一串有顺序依赖的 `add/move/update placement` Patch 更稳定，也更容易审计。
+
+以下内容不进入 Agent 协议：`placementId`、grid span/height、renderer key、React/CSS、图表库 option、SQL、Artifact Store、Provider 生命周期。它们是编译器和运行时实现细节。
+
+Catalog 缺少能力时，系统返回 `capability_required` Development Proposal；Stage 5 不得为了满足请求临时生成页面代码。新增能力属于独立 Coding Agent/工程发布流程，发布为 Catalog Revision 后才能被 Overview Definition 引用。
+
+现有 `EnergyIQ Template Revision` 不再与 `Project Overview Profile` 形成两套真相源。迁移目标是：Overview Definition 成为 Template Revision 的 authoring contract；Placement/Renderer 配置成为确定性编译产物，Render Plan 继续是临时结果。
+
+## 7. 首批平台策略
 
 | Strategy | 典型用途 |
 | --- | --- |
@@ -96,13 +134,13 @@ Section Time Binding
 | `next_complete_calendar_month` | 下一个完整自然月预测 |
 | `same_day_type_baseline(n)` | Workday/Weekend/Holiday 异常基线 |
 
-这些是平台算法，不是 Ngee Ann 常量。Ngee Ann 与 Preschool 分别通过 Profile 选择不同组合。
+这些是平台算法，不是 Ngee Ann 常量。Ngee Ann 与 Preschool 分别通过 Overview Definition 选择不同组合。
 
-## 7. 定制能力如何晋升为平台能力
+## 8. 定制能力如何晋升为平台能力
 
 ```text
 真实 Project 管理问题
-→ Project Adapter/Profile 中受控验证
+→ Project Adapter/Overview Definition 中受控验证
 → 第二个场景证明可复用
 → 提交平台 Strategy/Capability Proposal
 → 自动合同测试 + 人工批准
@@ -120,7 +158,7 @@ Section Time Binding
 
 不能满足时，能力继续留在 Project Adapter。平台不为了“看起来通用”而吸收项目专属指标或固定 Sections。
 
-## 8. 具体项目映射
+## 9. 具体项目映射
 
 ### Ngee Ann
 
@@ -137,7 +175,7 @@ Section Time Binding
 - Monthly Outlook：继续使用自然月计划、实际和展望；
 - Benchmark/operational Sections：按自己的管理问题绑定平台窗口，不复制 Ngee Ann Sections。
 
-## 9. Holiday 状态
+## 10. Holiday 状态
 
 Business Calendar 是平台能力。任何 Project 都必须区分：
 
@@ -147,19 +185,20 @@ Business Calendar 是平台能力。任何 Project 都必须区分：
 
 不得把后两种状态都写成“Holiday 未配置”。
 
-## 10. 后果与失效条件
+## 11. 后果与失效条件
 
 ### 正面后果
 
 - 新项目接入不再修改 Web 日期代码；
+- Stage 5 只操作稳定业务语义，不依赖当前 React/图表库实现；
 - AI/Saved/What changed 可以解释每条结论使用了哪个窗口；
 - Excel 和 API 持续进数共享同一 Snapshot → Time Context → Overview 流程；
-- 新定制可通过 Profile 快速验证，稳定后再提升为平台 revision。
+- 新定制可通过 Overview Definition 快速验证，稳定后再提升为平台 revision。
 
 ### 代价
 
 - 现有 Ngee Ann/Preschool period 逻辑需要迁移；
-- Artifact identity 必须纳入 Policy/Profile revision；
+- Artifact identity 必须纳入 Policy/Overview Definition revision；
 - UI 需要在 Section 级显示时间标签，不能只显示一个含糊全页日期。
 
 ### 失效条件
@@ -168,15 +207,14 @@ Business Calendar 是平台能力。任何 Project 都必须区分：
 
 - 大量 Project 需要平台策略目录无法表达的实时/事件窗口；
 - Overview 的核心任务从管理报告转成自由探索；
-- 同一 Section 的窗口组合无法通过静态 Profile 表达；
+- 同一 Section 的窗口组合无法通过静态 Definition 表达；
 - 第二种真正独立的 Calendar/Forecast 实现出现，需要形成新的 Adapter seam。
 
-## 11. 执行入口
+## 12. 执行入口
 
 - Map：GitHub #75
 - Contract/resolver：#79
-- Project Overview Profile：#80
+- Agent-friendly Overview Definition：#80
 - Ngee Ann/Preschool migration：#81
 - Saved/AI/What changed provenance：#82
 - 持续 API 数据复跑：#83
-
