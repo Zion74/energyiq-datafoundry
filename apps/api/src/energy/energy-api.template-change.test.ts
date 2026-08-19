@@ -26,25 +26,72 @@ describe("EnergyIQ template change API", () => {
         published_by: "dev-user",
         published_at: "2026-08-13T00:00:00.000Z",
       });
-      const placement = base.document.templates[0]!.components[0]!;
+      const policy = metadata.energyIq.reportTimePolicies.publish({
+        project_id: project.id,
+        policy: {
+          policyId: "preschool-overview-time",
+          revision: "1",
+          windows: [{
+            windowId: "recent-28d",
+            role: "recent_operations",
+            label: "Recent 28 complete days",
+            strategy: { kind: "rolling_complete_days", days: 28 },
+          }],
+        },
+        published_by: "dev-user",
+        published_at: "2026-08-13T00:01:00.000Z",
+      });
+      const current = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        project_id: project.id,
+        expected_base_revision_id: base.revision_id,
+        definition: {
+          contractRevision: "energyiq-overview-definition@1",
+          timePolicyRevisionId: policy.revision_id,
+          sections: [{
+            key: "performance",
+            title: "Current performance",
+            managementQuestion: "Where should management focus first?",
+            primaryWindowId: "recent-28d",
+            blocks: [{ key: "consumption", capabilityRevisionId: "overview.consumption@1" }],
+          }],
+        },
+        report_time_policy: policy.policy,
+        published_by: "dev-user",
+        published_at: "2026-08-13T00:02:00.000Z",
+      });
+      const desiredDefinition = {
+        ...current.record.definition,
+        sections: [
+          ...current.record.definition.sections,
+          {
+            key: "actions",
+            title: "Recommended actions",
+            managementQuestion: "What should management do next?",
+            primaryWindowId: "recent-28d",
+            supportingWindowIds: [],
+            blocks: [{
+              key: "recommended-actions",
+              capabilityRevisionId: "decision.recommended_actions@1",
+              windowId: "recent-28d",
+              emphasis: "primary" as const,
+            }],
+          },
+        ],
+      };
       const templateChangeWorkflow = {
         propose: vi.fn(async () => ({
           proposal: {
-            title: "Highlight the first decision card",
-            rationale: "It should be visually prominent for managers.",
-            operations: [{
-              op: "update_presentation" as const,
-              templateId: "project",
-              placementId: placement.placement_id!,
-              presentation: { tone: "highlight" as const },
-            }],
+            contractRevision: "energyiq-overview-definition-change@1" as const,
+            title: "Add recommended actions",
+            rationale: "Managers need a clear next decision after reviewing performance.",
+            desiredDefinition,
           },
           identity: {
             workspaceId: project.workspace_id,
             projectId: project.id,
             scopeId: project.root_scope_id,
             dataSnapshotId: project.data_snapshot_id,
-            projectReleaseId: base.revision_id,
+            projectReleaseId: current.revision.revision_id,
           },
           runId: "template-proposal-run",
           sessionId: "template-proposal-session",
@@ -68,9 +115,9 @@ describe("EnergyIQ template change API", () => {
       );
       expect(proposalResponse).toMatchObject({
         status: 201,
-        body: { success: true, data: { proposal: { status: "pending_review", base_revision_id: base.revision_id } } },
+        body: { success: true, data: { proposal: { status: "pending_review", base_revision_id: current.revision.revision_id } } },
       });
-      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(base);
+      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(current.revision);
       const proposalId = ((proposalResponse.body as { data: { proposal: { id: string } } }).data.proposal.id);
 
       const previewResponse = await handleEnergyApiRequest(
@@ -85,13 +132,13 @@ describe("EnergyIQ template change API", () => {
           data: {
             fixedIdentity: {
               dataSnapshotId: project.data_snapshot_id,
-              projectReleaseId: base.revision_id,
+              projectReleaseId: current.revision.revision_id,
             },
-            proposal: { diff: [{ kind: "presentation_updated" }] },
+            proposal: { diff: [{ kind: "section_added", sectionKey: "actions" }] },
           },
         },
       });
-      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(base);
+      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(current.revision);
 
       metadata.users.upsertDevUser({
         id: "template-viewer",
@@ -116,7 +163,7 @@ describe("EnergyIQ template change API", () => {
         { ...context, userId: "template-viewer" },
       );
       expect(forbidden.status).toBe(403);
-      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(base);
+      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)).toEqual(current.revision);
 
       const published = await handleEnergyApiRequest(
         jsonRequest("POST", {}),
@@ -129,13 +176,13 @@ describe("EnergyIQ template change API", () => {
           success: true,
           data: {
             proposal: { status: "published" },
-            revision: { revision_id: "preschool-demo-template-v2" },
+            revision: { revision_id: "preschool-demo-template-v3" },
           },
         },
       });
-      expect(metadata.energyIq.templates.getProjectRevision(base.revision_id)).toEqual(base);
-      expect(metadata.energyIq.templates.getLatestProjectRevision(project.id)?.document.templates[0]
-        ?.components[0]?.presentation?.tone).toBe("highlight");
+      expect(metadata.energyIq.templates.getProjectRevision(current.revision.revision_id)).toEqual(current.revision);
+      expect(metadata.energyIq.overviewDefinitions.get("preschool-demo-template-v3")?.definition)
+        .toEqual(desiredDefinition);
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });

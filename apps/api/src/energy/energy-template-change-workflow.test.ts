@@ -22,13 +22,49 @@ describe("EnergyIQ template change model workflow", () => {
         published_by: "dev-user",
         published_at: "2026-08-13T00:00:00.000Z",
       });
+      metadata.energyIq.reportTimePolicies.publish({
+        project_id: project.id,
+        policy: {
+          policyId: "preschool-overview-time",
+          revision: "1",
+          windows: [{
+            windowId: "recent-28d",
+            role: "recent_operations",
+            label: "Recent 28 complete days",
+            strategy: { kind: "rolling_complete_days", days: 28 },
+          }],
+        },
+        published_by: "dev-user",
+        published_at: "2026-08-13T00:01:00.000Z",
+      });
+      const current = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        project_id: project.id,
+        expected_base_revision_id: revision.revision_id,
+        definition: {
+          contractRevision: "energyiq-overview-definition@1",
+          timePolicyRevisionId: "preschool-overview-time@1",
+          sections: [{
+            key: "current-performance",
+            title: "Current performance",
+            managementQuestion: "Where should management focus first?",
+            primaryWindowId: "recent-28d",
+            blocks: [{
+              key: "consumption",
+              capabilityRevisionId: "overview.consumption@1",
+            }],
+          }],
+        },
+        report_time_policy: metadata.energyIq.reportTimePolicies.get(project.id, "preschool-overview-time@1")!.policy,
+        published_by: "dev-user",
+        published_at: "2026-08-13T00:02:00.000Z",
+      });
       const identity = {
         workspaceId: project.workspace_id,
         projectId: project.id,
         scopeId: project.root_scope_id,
         resource: "electricity" as const,
         dataSnapshotId: project.data_snapshot_id,
-        projectReleaseId: revision.revision_id,
+        projectReleaseId: current.revision.revision_id,
         analysisPeriodFrom: "2026-04-30T16:00:00.000Z",
         analysisPeriodTo: "2026-05-31T16:00:00.000Z",
         rendererKey: "preschool-overview",
@@ -50,13 +86,28 @@ describe("EnergyIQ template change model workflow", () => {
       const resolveIdentity = vi.fn(async () => identity);
       const runProposal = vi.fn(async (input: { prompt: string; runId: string; sessionId: string }) => ({
         answer: JSON.stringify({
-          title: "Bring Monthly Outlook forward",
-          rationale: "It contains the next planning decision.",
-          operations: [{
-            op: "move_placement",
-            templateId: "project",
-            placementId: revision.document.templates[0]?.components[0]?.placement_id,
-          }],
+          contractRevision: "energyiq-overview-definition-change@1",
+          title: "Add a planning section",
+          rationale: "Managers need a separate forward-looking decision point.",
+          desiredDefinition: {
+            ...current.record.definition,
+            sections: [
+              ...current.record.definition.sections,
+              {
+                key: "planning",
+                title: "Planning outlook",
+                managementQuestion: "What should management prepare for next?",
+                primaryWindowId: "recent-28d",
+                supportingWindowIds: [],
+                blocks: [{
+                  key: "planning-summary",
+                  capabilityRevisionId: "decision.executive_actions@1",
+                  windowId: "recent-28d",
+                  emphasis: "standard",
+                }],
+              },
+            ],
+          },
         }),
         runId: input.runId,
         sessionId: input.sessionId,
@@ -70,15 +121,17 @@ describe("EnergyIQ template change model workflow", () => {
       });
 
       expect(result.identity).toBe(identity);
-      expect(result.proposal.operations[0]?.op).toBe("move_placement");
+      expect(result.proposal.desiredDefinition.sections.at(-1)?.key).toBe("planning");
       const prompt = JSON.parse(runProposal.mock.calls[0]![0].prompt) as Record<string, unknown>;
       expect(prompt).toMatchObject({
         fixed_identity: {
           dataSnapshotId: project.data_snapshot_id,
-          projectReleaseId: revision.revision_id,
+          projectReleaseId: current.revision.revision_id,
         },
         administrator_request: "Move the planning summary to the end.",
+        current_overview_definition: current.record.definition,
       });
+      expect(JSON.stringify(prompt)).not.toMatch(/placementId|rendererKey|span|height|operation_contract/u);
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });

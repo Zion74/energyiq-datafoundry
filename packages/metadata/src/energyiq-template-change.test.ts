@@ -11,6 +11,104 @@ import {
 import { createDefaultTemplateDocument } from "./energyiq-template-store.js";
 
 describe("EnergyIQ template change proposal module", () => {
+  it("previews and publishes a desired Overview Definition through the existing human review lifecycle", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-definition-change-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedPublishedProject(metadata);
+      const legacyBase = metadata.energyIq.templates.getLatestProjectRevision("project-change")!;
+      const policy = metadata.energyIq.reportTimePolicies.publish({
+        project_id: "project-change",
+        policy: {
+          policyId: "project-change-time",
+          revision: "1",
+          windows: [{
+            windowId: "recent-28d",
+            role: "recent_operations",
+            label: "Recent 28 complete days",
+            strategy: { kind: "rolling_complete_days", days: 28 },
+          }],
+        },
+        published_by: "dev-user",
+        published_at: "2026-08-19T00:00:00.000Z",
+      });
+      const current = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        project_id: "project-change",
+        expected_base_revision_id: legacyBase.revision_id,
+        definition: {
+          contractRevision: "energyiq-overview-definition@1",
+          timePolicyRevisionId: policy.revision_id,
+          sections: [{
+            key: "performance",
+            title: "Current performance",
+            managementQuestion: "Where should management focus first?",
+            primaryWindowId: "recent-28d",
+            blocks: [{ key: "consumption", capabilityRevisionId: "overview.consumption@1" }],
+          }],
+        },
+        report_time_policy: policy.policy,
+        published_by: "dev-user",
+        published_at: "2026-08-19T00:01:00.000Z",
+      });
+      const desiredDefinition = {
+        ...current.record.definition,
+        sections: [
+          ...current.record.definition.sections,
+          {
+            key: "actions",
+            title: "Recommended actions",
+            managementQuestion: "What should management do next?",
+            primaryWindowId: "recent-28d",
+            supportingWindowIds: [],
+            blocks: [{
+              key: "recommended-actions",
+              capabilityRevisionId: "decision.recommended_actions@1",
+              windowId: "recent-28d",
+              emphasis: "primary" as const,
+            }],
+          },
+        ],
+      };
+      const proposal = metadata.energyIq.templateChanges.create({
+        id: "definition-proposal",
+        workspace_id: "workspace-change",
+        project_id: "project-change",
+        base_revision_id: current.revision.revision_id,
+        data_snapshot_id: "snapshot-change",
+        scope_id: "project-change-root",
+        instruction: "Add a clear management action section.",
+        proposal: {
+          contractRevision: "energyiq-overview-definition-change@1",
+          title: "Add a management action section",
+          rationale: "Managers need the next decision after reviewing performance.",
+          desiredDefinition,
+        },
+        created_by: "dev-user",
+        created_at: "2026-08-19T00:02:00.000Z",
+      });
+
+      expect(proposal.status).toBe("pending_review");
+      expect(proposal.diff).toContainEqual({ kind: "section_added", sectionKey: "actions", index: 1 });
+      expect(metadata.energyIq.templates.getLatestProjectRevision("project-change")?.revision_id)
+        .toBe(current.revision.revision_id);
+
+      const published = metadata.energyIq.templateChanges.publish({
+        id: proposal.id,
+        project_id: "project-change",
+        published_by: "dev-user",
+        published_at: "2026-08-19T00:03:00.000Z",
+      });
+      expect(published.revision.revision_id).toBe("project-change-template-v3");
+      expect(metadata.energyIq.overviewDefinitions.get(published.revision.revision_id)?.definition)
+        .toEqual(desiredDefinition);
+      expect(metadata.energyIq.overviewDefinitions.get(current.revision.revision_id)?.definition)
+        .toEqual(current.record.definition);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("applies a typed move, layout and presentation proposal without mutating the base revision", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-template-change-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

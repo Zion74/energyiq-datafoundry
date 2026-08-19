@@ -11,6 +11,18 @@ import {
   type EnergyIqTemplateDensity,
   type EnergyIqTemplateTone,
 } from "./energyiq-template-store.js";
+import {
+  ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION,
+  type EnergyIqOverviewDefinitionChangeProposal,
+  type ReportTimePolicyRevision,
+} from "@datafoundry/contracts";
+import {
+  compileEnergyIqOverviewDefinition,
+  parseEnergyIqOverviewDefinition,
+  type EnergyIqOverviewDefinitionDiffItem,
+} from "./energyiq-overview-definition.js";
+import { EnergyIqOverviewDefinitionStore } from "./energyiq-overview-definition-store.js";
+import { EnergyIqReportTimePolicyStore } from "./energyiq-report-time-policy-store.js";
 import type { DatabaseSync } from "node:sqlite";
 
 export type EnergyIqTemplateChangeOperation =
@@ -58,6 +70,10 @@ export type EnergyIqTemplateChangeProposal = {
   operations: EnergyIqTemplateChangeOperation[];
 };
 
+export type EnergyIqTemplateChangeProposalValue =
+  | EnergyIqTemplateChangeProposal
+  | EnergyIqOverviewDefinitionChangeProposal;
+
 export type EnergyIqTemplateChangeDiffItem = {
   kind:
     | "placement_added"
@@ -71,11 +87,15 @@ export type EnergyIqTemplateChangeDiffItem = {
   summary: string;
 };
 
+export type EnergyIqTemplateChangeDiffValue =
+  | EnergyIqTemplateChangeDiffItem
+  | EnergyIqOverviewDefinitionDiffItem;
+
 export type EnergyIqTemplateChangePreview = {
   base_revision_id: string;
-  proposal: EnergyIqTemplateChangeProposal;
+  proposal: EnergyIqTemplateChangeProposalValue;
   document: EnergyIqTemplateDraftDocument;
-  diff: EnergyIqTemplateChangeDiffItem[];
+  diff: EnergyIqTemplateChangeDiffValue[];
 };
 
 export type EnergyIqTemplateChangeProposalStatus = "pending_review" | "rejected" | "published";
@@ -128,9 +148,13 @@ export const initializeEnergyIqTemplateChangeSchema = (db: DatabaseSync): void =
 
 export class EnergyIqTemplateChangeStore {
   private readonly templates: EnergyIqTemplateStore;
+  private readonly overviewDefinitions: EnergyIqOverviewDefinitionStore;
+  private readonly reportTimePolicies: EnergyIqReportTimePolicyStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.templates = new EnergyIqTemplateStore(db);
+    this.overviewDefinitions = new EnergyIqOverviewDefinitionStore(db);
+    this.reportTimePolicies = new EnergyIqReportTimePolicyStore(db);
   }
 
   create(input: {
@@ -141,7 +165,7 @@ export class EnergyIqTemplateChangeStore {
     data_snapshot_id: string;
     scope_id: string;
     instruction: string;
-    proposal: EnergyIqTemplateChangeProposal;
+    proposal: EnergyIqTemplateChangeProposalValue;
     created_by: string;
     created_at: string;
   }): EnergyIqTemplateChangeProposalRecord {
@@ -159,17 +183,15 @@ export class EnergyIqTemplateChangeStore {
     const latest = this.templates.getLatestProjectRevision(input.project_id);
     if (!base || base.project_id !== input.project_id) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_INVALID");
     if (!latest || latest.revision_id !== base.revision_id) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_STALE");
-    const tierDefinitionIds = base.document.templates
-      .filter((template) => template.target_kind === "tier")
-      .map((template) => template.tier_definition_id)
-      .filter((value): value is string => Boolean(value));
-    const preview = createEnergyIqTemplateChangePreview({
-      base_revision_id: base.revision_id,
-      document: base.document,
-      catalog: this.templates.listComponentRevisions(),
-      tier_definition_ids: tierDefinitionIds,
-      proposal: input.proposal,
-    });
+    const preview = isOverviewDefinitionProposal(input.proposal)
+      ? this.createDefinitionPreview(base.revision_id, base.document, input.project_id, input.proposal)
+      : createEnergyIqTemplateChangePreview({
+          base_revision_id: base.revision_id,
+          document: base.document,
+          catalog: this.templates.listComponentRevisions(),
+          tier_definition_ids: tierDefinitionIds(base.document),
+          proposal: input.proposal,
+        });
     const instruction = requireSafeText(input.instruction, "ENERGYIQ_TEMPLATE_CHANGE_INSTRUCTION_INVALID", 2_000);
     this.db.prepare(`
       INSERT INTO energyiq_template_change_proposals (
@@ -232,13 +254,25 @@ export class EnergyIqTemplateChangeStore {
     try {
       const proposal = this.requireForProject(input.id, input.project_id);
       if (proposal.status !== "pending_review") throw new Error("ENERGYIQ_TEMPLATE_CHANGE_STATUS_INVALID");
-      const revision = this.templates.publishDocumentFromRevisionWithinTransaction({
-        project_id: input.project_id,
-        expected_base_revision_id: proposal.base_revision_id,
-        document: proposal.document,
-        published_by: input.published_by,
-        published_at: input.published_at,
-      });
+      const revision = isOverviewDefinitionProposal(proposal.proposal)
+        ? this.overviewDefinitions.publishFromRevisionWithinTransaction({
+            project_id: input.project_id,
+            expected_base_revision_id: proposal.base_revision_id,
+            definition: proposal.proposal.desiredDefinition,
+            report_time_policy: this.requireReportTimePolicy(
+              input.project_id,
+              proposal.proposal.desiredDefinition.timePolicyRevisionId,
+            ),
+            published_by: input.published_by,
+            published_at: input.published_at,
+          }).revision
+        : this.templates.publishDocumentFromRevisionWithinTransaction({
+            project_id: input.project_id,
+            expected_base_revision_id: proposal.base_revision_id,
+            document: proposal.document,
+            published_by: input.published_by,
+            published_at: input.published_at,
+          });
       this.db.prepare(`
         UPDATE energyiq_template_change_proposals
         SET status = 'published', reviewed_by = ?, reviewed_at = ?, published_revision_id = ?
@@ -270,6 +304,46 @@ export class EnergyIqTemplateChangeStore {
       SELECT 1 FROM energyiq_project_nodes WHERE project_id = ? AND id = ?
     `).get(projectId, scopeId));
   }
+
+  private createDefinitionPreview(
+    baseRevisionId: string,
+    baseDocument: EnergyIqTemplateDraftDocument,
+    projectId: string,
+    proposal: EnergyIqOverviewDefinitionChangeProposal,
+  ): EnergyIqTemplateChangePreview {
+    const baseDefinition = this.overviewDefinitions.get(baseRevisionId)?.definition;
+    if (!baseDefinition) throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_BASE_REQUIRED");
+    const policy = this.requireReportTimePolicy(projectId, proposal.desiredDefinition.timePolicyRevisionId);
+    const canonicalProposal = parseEnergyIqOverviewDefinitionChangeProposal(proposal, {
+      baseDefinition,
+      catalog: this.templates.listComponentRevisions(),
+      reportTimePolicy: policy,
+    });
+    const compiled = compileEnergyIqOverviewDefinition({
+      definition: canonicalProposal.desiredDefinition,
+      baseDefinition,
+      catalog: this.templates.listComponentRevisions(),
+      reportTimePolicy: policy,
+    });
+    return {
+      base_revision_id: baseRevisionId,
+      proposal: canonicalProposal,
+      document: {
+        schema_version: 2,
+        templates: [
+          compiled.templateDocument.templates[0]!,
+          ...baseDocument.templates.filter((template) => template.target_kind === "tier"),
+        ],
+      },
+      diff: compiled.diff,
+    };
+  }
+
+  private requireReportTimePolicy(projectId: string, revisionId: string): ReportTimePolicyRevision {
+    const record = this.reportTimePolicies.get(projectId, revisionId);
+    if (!record) throw new Error("ENERGYIQ_REPORT_TIME_POLICY_REQUIRED");
+    return record.policy;
+  }
 }
 
 export const parseEnergyIqTemplateChangeProposal = (value: unknown): EnergyIqTemplateChangeProposal => {
@@ -283,6 +357,47 @@ export const parseEnergyIqTemplateChangeProposal = (value: unknown): EnergyIqTem
     title: requireSafeText(record.title, "ENERGYIQ_TEMPLATE_CHANGE_TITLE_INVALID", 120),
     rationale: requireSafeText(record.rationale, "ENERGYIQ_TEMPLATE_CHANGE_RATIONALE_INVALID", 1_000),
     operations: operations.map(parseOperation),
+  };
+};
+
+export const parseEnergyIqOverviewDefinitionChangeProposal = (
+  value: unknown,
+  input: {
+    baseDefinition: unknown;
+    catalog: readonly EnergyIqComponentRevisionRecord[];
+    reportTimePolicy: ReportTimePolicyRevision;
+  },
+): EnergyIqOverviewDefinitionChangeProposal => {
+  const record = requireRecord(value, "ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_PROPOSAL_INVALID");
+  requireExactKeys(record, ["contractRevision", "title", "rationale", "desiredDefinition"]);
+  if (record.contractRevision !== ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION) {
+    throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_CONTRACT_INVALID");
+  }
+  const compiled = compileEnergyIqOverviewDefinition({
+    definition: record.desiredDefinition,
+    baseDefinition: input.baseDefinition,
+    catalog: input.catalog,
+    reportTimePolicy: input.reportTimePolicy,
+  });
+  return {
+    contractRevision: ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION,
+    title: requireSafeText(record.title, "ENERGYIQ_TEMPLATE_CHANGE_TITLE_INVALID", 120),
+    rationale: requireSafeText(record.rationale, "ENERGYIQ_TEMPLATE_CHANGE_RATIONALE_INVALID", 1_000),
+    desiredDefinition: compiled.definition,
+  };
+};
+
+export const parseEnergyIqTemplateChangeProposalValue = (value: unknown): EnergyIqTemplateChangeProposalValue => {
+  const record = requireRecord(value, "ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_INVALID");
+  if (record.contractRevision !== ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION) {
+    return parseEnergyIqTemplateChangeProposal(value);
+  }
+  requireExactKeys(record, ["contractRevision", "title", "rationale", "desiredDefinition"]);
+  return {
+    contractRevision: ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION,
+    title: requireSafeText(record.title, "ENERGYIQ_TEMPLATE_CHANGE_TITLE_INVALID", 120),
+    rationale: requireSafeText(record.rationale, "ENERGYIQ_TEMPLATE_CHANGE_RATIONALE_INVALID", 1_000),
+    desiredDefinition: parseEnergyIqOverviewDefinition(record.desiredDefinition),
   };
 };
 
@@ -554,8 +669,8 @@ const requireTone = (value: unknown): EnergyIqTemplateTone => {
 const cloneDocument = (document: EnergyIqTemplateDraftDocument): EnergyIqTemplateDraftDocument =>
   JSON.parse(JSON.stringify(document)) as EnergyIqTemplateDraftDocument;
 
-const cloneProposal = (proposal: EnergyIqTemplateChangeProposal): EnergyIqTemplateChangeProposal =>
-  JSON.parse(JSON.stringify(proposal)) as EnergyIqTemplateChangeProposal;
+const cloneProposal = <T extends EnergyIqTemplateChangeProposalValue>(proposal: T): T =>
+  JSON.parse(JSON.stringify(proposal)) as T;
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -582,9 +697,9 @@ const mapProposalRecord = (row: Record<string, unknown>): EnergyIqTemplateChange
     data_snapshot_id: requiredRowString(row, "data_snapshot_id"),
     scope_id: requiredRowString(row, "scope_id"),
     instruction: requiredRowString(row, "instruction"),
-    proposal: parseEnergyIqTemplateChangeProposal(proposal),
+    proposal: parseEnergyIqTemplateChangeProposalValue(proposal),
     document: document as EnergyIqTemplateDraftDocument,
-    diff: diff as EnergyIqTemplateChangeDiffItem[],
+    diff: diff as EnergyIqTemplateChangeDiffValue[],
     status,
     created_by: requiredRowString(row, "created_by"),
     created_at: requiredRowString(row, "created_at"),
@@ -611,3 +726,14 @@ const requiredRowString = (row: Record<string, unknown>, key: string): string =>
 
 const optionalRowString = (value: unknown): string | undefined =>
   typeof value === "string" && value ? value : undefined;
+
+const isOverviewDefinitionProposal = (
+  proposal: EnergyIqTemplateChangeProposalValue,
+): proposal is EnergyIqOverviewDefinitionChangeProposal =>
+  "contractRevision" in proposal
+    && proposal.contractRevision === ENERGYIQ_OVERVIEW_DEFINITION_CHANGE_REVISION;
+
+const tierDefinitionIds = (document: EnergyIqTemplateDraftDocument): string[] => document.templates
+  .filter((template) => template.target_kind === "tier")
+  .map((template) => template.tier_definition_id)
+  .filter((value): value is string => Boolean(value));

@@ -7,6 +7,7 @@ import {
   type EnergyComponentRevisionDto,
   type EnergyProjectSetupDocumentDto,
   type EnergyTemplateChangeContextDto,
+  type EnergyTemplateChangeDiffItemDto,
   type EnergyTemplateChangePreviewDto,
   type EnergyTemplateChangeProposalDto,
 } from "../../../lib/config-api";
@@ -164,7 +165,7 @@ export function TemplateChangeProposalPanel({
               <span className="rounded-full bg-step-warning/10 px-2 py-0.5 text-[9px] font-semibold text-step-warning">ADMIN REVIEW</span>
             </div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
-              Ask AI to reorganise existing catalog modules. It can propose controlled placement, section, layout and presentation changes; it cannot write code or publish them.
+              Describe what the Overview should help users understand. AI proposes a complete Section and capability definition; the server validates, previews and diffs it before you decide whether to publish.
             </p>
           </div>
           {context ? (
@@ -180,7 +181,7 @@ export function TemplateChangeProposalPanel({
           <textarea
             value={instruction}
             onChange={(event) => setInstruction(event.target.value)}
-            placeholder="For example: Move the planning outlook closer to the executive summary and highlight the module that contains the next management action."
+            placeholder="For example: Put the most important management actions first, then show the evidence and monthly outlook that support them."
             rows={4}
             maxLength={2_000}
             className="mt-2 w-full resize-y rounded-lg border border-border bg-background px-3 py-3 text-sm font-normal leading-6 text-foreground outline-none focus:border-foreground/30"
@@ -188,7 +189,7 @@ export function TemplateChangeProposalPanel({
         </label>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
           <p className="text-[11px] leading-5 text-muted">
-            The model returns typed operations only. Server validation creates the diff and fixed-Snapshot preview.
+            AI cannot write page code or publish directly. The preview uses the selected Snapshot and the same compiler as publishing.
           </p>
           <button
             type="button"
@@ -208,18 +209,18 @@ export function TemplateChangeProposalPanel({
           <div className="border-b border-border p-5 xl:border-b-0 xl:border-r">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className={statusBadge(preview.proposal.status)}>{statusLabel(preview.proposal.status)}</span>
-              <span className="text-[10px] text-muted-light">{preview.proposal.diff.length} controlled changes</span>
+              <span className="text-[10px] text-muted-light">{preview.proposal.diff.length} reviewed changes</span>
             </div>
             <h5 className="mt-4 text-lg font-semibold leading-7">{preview.proposal.proposal.title}</h5>
             <p className="mt-2 text-sm leading-6 text-muted">{preview.proposal.proposal.rationale}</p>
 
             <ol className="mt-5 space-y-3">
               {preview.proposal.diff.map((item, index) => (
-                <li key={`${item.kind}:${item.placement_id}:${index}`} className="flex gap-3 rounded-lg bg-background p-3">
+                <li key={templateChangeDiffKey(item, index)} className="flex gap-3 rounded-lg bg-background p-3">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-[10px] font-semibold text-background">{index + 1}</span>
                   <div className="min-w-0">
-                    <p className="text-xs font-medium leading-5 text-foreground">{item.summary}</p>
-                    <p className="mt-1 font-mono text-[9px] text-muted-light">{item.template_id} · {item.placement_id}</p>
+                    <p className="text-xs font-medium leading-5 text-foreground">{templateChangeDiffSummary(item)}</p>
+                    <p className="mt-1 text-[10px] text-muted-light">{templateChangeDiffContext(item)}</p>
                   </div>
                 </li>
               ))}
@@ -321,4 +322,31 @@ function statusBadge(status: EnergyTemplateChangeProposalDto["status"]): string 
 
 function errorMessage(reason: unknown): string {
   return reason instanceof Error ? reason.message : "Template change request failed.";
+}
+
+function templateChangeDiffKey(item: EnergyTemplateChangeDiffItemDto, index: number): string {
+  if ("placement_id" in item) return `${item.kind}:${item.placement_id}:${index}`;
+  if ("blockKey" in item) return `${item.kind}:${item.sectionKey}:${item.blockKey}:${index}`;
+  if ("sectionKey" in item) return `${item.kind}:${item.sectionKey}:${index}`;
+  return `${item.kind}:${index}`;
+}
+
+function templateChangeDiffSummary(item: EnergyTemplateChangeDiffItemDto): string {
+  if ("summary" in item) return item.summary;
+  if (item.kind === "section_added") return `Add the ${item.sectionKey} section.`;
+  if (item.kind === "section_removed") return `Remove the ${item.sectionKey} section.`;
+  if (item.kind === "section_order_changed") return "Change the Section reading order.";
+  if (item.kind === "section_updated") return `Update the ${item.sectionKey} section.`;
+  if (item.kind === "block_added") return `Add ${item.blockKey} to ${item.sectionKey}.`;
+  if (item.kind === "block_removed") return `Remove ${item.blockKey} from ${item.sectionKey}.`;
+  if (item.kind === "block_order_changed") return `Change the Block order in ${item.sectionKey}.`;
+  if (item.kind === "block_updated") return `Update ${item.blockKey} in ${item.sectionKey}.`;
+  return "Update the Overview definition.";
+}
+
+function templateChangeDiffContext(item: EnergyTemplateChangeDiffItemDto): string {
+  if ("placement_id" in item) return `${item.template_id} · ${item.placement_id}`;
+  if ("changedFields" in item) return `Changed: ${item.changedFields.join(", ")}`;
+  if ("before" in item) return `${item.before.join(" → ")} becomes ${item.after.join(" → ")}`;
+  return `Position ${item.index + 1}`;
 }
