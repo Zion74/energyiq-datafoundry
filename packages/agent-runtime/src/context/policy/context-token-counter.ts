@@ -10,6 +10,16 @@ export type ContextTokenCounterOptions = {
   cache_dir?: string;
 };
 
+export const resolveContextTokenizerCacheDir = (input: {
+  configuredCacheDir?: string;
+  storageRoot?: string;
+  cwd?: string;
+} = {}): string => {
+  if (input.configuredCacheDir) return input.configuredCacheDir;
+  if (input.storageRoot) return join(input.storageRoot, "cache", "tokenizers");
+  return join(input.cwd ?? process.cwd(), ".cache", "tokenizers");
+};
+
 // Maps model name patterns to HuggingFace model IDs.
 // Keys are matched via substring; order matters — more specific patterns should
 // come before broader ones so "qwen3-max" hits before "qwen".
@@ -146,7 +156,10 @@ export class ContextTokenCounter {
   private cacheDir: string;
 
   constructor(options: ContextTokenCounterOptions = {}) {
-    this.cacheDir = options.cache_dir ?? join(process.cwd(), ".cache", "tokenizers");
+    this.cacheDir = resolveContextTokenizerCacheDir({
+      ...(options.cache_dir ? { configuredCacheDir: options.cache_dir } : {}),
+      ...(process.env.STORAGE_ROOT_DIR ? { storageRoot: process.env.STORAGE_ROOT_DIR } : {}),
+    });
     if (!existsSync(this.cacheDir)) {
       mkdirSync(this.cacheDir, { recursive: true });
     }
