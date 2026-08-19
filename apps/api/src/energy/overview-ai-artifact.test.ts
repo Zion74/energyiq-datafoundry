@@ -143,6 +143,37 @@ describe("createOverviewAiArtifactIdentity", () => {
       .not.toEqual(createOverviewAiArtifactIdentity(base));
     expect(createOverviewAiArtifactIdentity({ ...base, analysisPeriodTo: "2026-06-02T00:00:00.000Z" }))
       .not.toEqual(createOverviewAiArtifactIdentity(base));
+
+    const reportTimeBasis = {
+      contractRevision: "energyiq-report-time-context@1" as const,
+      timezone: "Asia/Singapore",
+      acceptedDataEndExclusive: "2026-06-01T00:00:00.000Z",
+      dataThroughLocalDate: "2026-05-31",
+      policyId: "preschool-overview-time",
+      policyRevision: "v1",
+      windows: [{
+        windowId: "current-overview",
+        role: "primary",
+        label: "Rolling 28 complete days",
+        strategy: { kind: "rolling_complete_days" as const, days: 28 },
+        phase: "complete" as const,
+        from: "2026-05-04T00:00:00.000Z",
+        toExclusive: "2026-06-01T00:00:00.000Z",
+        completeDayCount: 28,
+        segments: [{ from: "2026-05-04T00:00:00.000Z", toExclusive: "2026-06-01T00:00:00.000Z" }],
+        comparisonCompatibilityKey: "rolling-28",
+      }],
+    };
+    const versioned = createOverviewAiArtifactIdentity({ ...base, reportTimeBasis });
+    expect(versioned).toMatchObject({
+      reportTimePolicyId: "preschool-overview-time",
+      reportTimePolicyRevision: "v1",
+      reportTimeContextFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(createOverviewAiArtifactIdentity({
+      ...base,
+      reportTimeBasis: { ...reportTimeBasis, policyRevision: "v2" },
+    })).not.toEqual(versioned);
   });
 
   it("fails closed for a Renderer without a released Overview AI contract", () => {

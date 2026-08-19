@@ -3,11 +3,13 @@ import {
   createSuccessResult,
   filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
+  reportTimeBasisFromContext,
   type AdditionalAiInsightEvaluationBatch,
   type AdditionalAiInsightEvaluationHumanReview,
   type AdditionalAiInsightHumanScores,
   type AdditionalAiInsightTransitionEvaluationRecord,
   type AppErrorCode,
+  type ReportTimeBasis,
 } from "@datafoundry/contracts";
 import {
   assertEnergyCurrentSnapshotFacts,
@@ -2214,6 +2216,7 @@ type SavedAnalysisAiLegacyArtifactInput = {
   rendererKey: "ngee-ann-overview" | "preschool-overview";
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: Record<string, unknown> & {
     status: "available";
     providerProfileId: string;
@@ -2227,6 +2230,7 @@ type SavedAnalysisAiSectionedArtifactInput = {
   rendererKey: "preschool-overview";
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: PreschoolOverviewAiReadModel;
 };
 
@@ -2235,6 +2239,7 @@ type SavedAnalysisAiProjectArtifactInput = {
   rendererKey: "ngee-ann-overview";
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: ProjectOverviewAiReadModel;
 };
 
@@ -2273,6 +2278,7 @@ const parseRequestedSavedAnalysisAiArtifact = async (
       rendererVersion: snapshot.renderer.version,
       modelProfileId: artifact.result.binding.modelProfileId,
       modelProfileRevision: artifact.result.binding.modelProfileRevision,
+      ...(artifact.reportTimeBasis ? { reportTimeBasis: artifact.reportTimeBasis } : {}),
     });
     const sectionRevision = savedSectionContractRevision(artifact.result);
     const canonical = sectionRevision === "preschool-section-interpretation-v3"
@@ -2299,6 +2305,7 @@ const parseRequestedSavedAnalysisAiArtifact = async (
       rendererVersion: snapshot.renderer.version,
       modelProfileId: artifact.result.binding.modelProfileId,
       modelProfileRevision: artifact.result.binding.modelProfileRevision,
+      ...(artifact.reportTimeBasis ? { reportTimeBasis: artifact.reportTimeBasis } : {}),
     });
     const adapter = findProjectOverviewAiAdapter(context.projectOverviewAiAdapters, artifact.rendererKey);
     if (!adapter
@@ -2362,6 +2369,7 @@ const parseStoredSavedAnalysisAiArtifact = (
   }
   const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot, {
     allowLegacyProjectEmptyWithoutRunId: true,
+    allowMissingReportTimeBasis: true,
   });
   if (!isRecord(value) || typeof value.completedAt !== "string" || !Number.isFinite(Date.parse(value.completedAt))) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
@@ -2390,8 +2398,12 @@ const parseSavedAnalysisAiRunProvenance = (
 const parseSavedAnalysisAiArtifactInput = (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
-  options: { allowLegacyProjectEmptyWithoutRunId?: boolean } = {},
+  options: {
+    allowLegacyProjectEmptyWithoutRunId?: boolean;
+    allowMissingReportTimeBasis?: boolean;
+  } = {},
 ): SavedAnalysisAiArtifactInput => {
+  requireSavedReportTimeBasis(value, snapshot, options.allowMissingReportTimeBasis === true);
   if (isRecord(value) && value.contract === "energyiq-saved-ai-result@2") {
     if (value.rendererKey !== "preschool-overview"
       || snapshot.renderer.key !== "preschool-overview"
@@ -2467,6 +2479,26 @@ const parseSavedAnalysisAiArtifactInput = (
   const serialized = JSON.stringify(artifact);
   if (serialized.length > 262_144) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_TOO_LARGE");
   return artifact;
+};
+
+const requireSavedReportTimeBasis = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+  allowMissing: boolean,
+): void => {
+  if (!isRecord(value)) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  const expected = snapshot.reportTimeContext
+    ? reportTimeBasisFromContext(snapshot.reportTimeContext)
+    : undefined;
+  if (value.reportTimeBasis === undefined) {
+    if (expected && !allowMissing && value.contract !== "energyiq-saved-ai-result@1") {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!expected || !isDeepStrictEqual(value.reportTimeBasis, expected)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
 };
 
 const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): string[] => {

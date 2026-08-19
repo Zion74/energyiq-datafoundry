@@ -189,11 +189,17 @@ export function OverviewChangeDialog({
                 <VersionCard label="Snapshot B · current Overview" identity={summary.current} current />
               </div>
 
+              <ProvenanceChangeNotice provenance={summary.provenance} />
+
               <section aria-labelledby="overview-change-metrics">
                 <div className="flex flex-wrap items-end justify-between gap-2">
                   <div>
                     <h3 id="overview-change-metrics" className="text-base font-semibold">Decision metrics</h3>
-                    <p className="mt-1 text-sm text-muted">Compared only when the window length and deterministic metric basis match. Shown as A → B.</p>
+                    <p className="mt-1 text-sm text-muted">
+                      {summary.metrics.length === 0
+                        ? "Metric deltas are withheld because the report-time, Template, Calendar, Tariff, mapping, metric, or Renderer basis changed between A and B."
+                        : "Compared only when the report-time and deterministic metric basis are compatible. Shown as A → B."}
+                    </p>
                   </div>
                 </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -236,6 +242,21 @@ export function OverviewChangeDialog({
   );
 }
 
+function ProvenanceChangeNotice({ provenance }: { provenance: OverviewChangeSummary["provenance"] }) {
+  const message = provenance.attribution === "data"
+    ? "The reporting definition is unchanged. Differences below can be read as new-data effects."
+    : provenance.attribution === "analysis-basis"
+      ? "The data Snapshot is unchanged, but the reporting definition or Project Release changed. This is an analysis-basis change, not a new-data effect."
+      : provenance.attribution === "mixed"
+        ? "Both the data Snapshot and the reporting definition changed. Their effects are shown separately and are not attributed to data alone."
+        : "One version predates Report Time provenance. Changes are visible, but cannot be attributed to data alone.";
+  return (
+    <p className="rounded-xl border border-border bg-surface-subtle px-4 py-3 text-sm leading-6 text-muted" role="status">
+      {message}
+    </p>
+  );
+}
+
 function VersionCard({
   label,
   identity,
@@ -246,6 +267,7 @@ function VersionCard({
     snapshotId: string;
     projectReleaseId: string;
     period: { from: string; to: string; timezone: string };
+    reportTime?: OverviewChangeSummary["current"]["reportTime"];
     sequence?: number;
   };
   current?: boolean;
@@ -257,7 +279,24 @@ function VersionCard({
       <dl className="mt-3 grid gap-2 text-xs text-muted">
         <div><dt className="inline font-semibold">Snapshot {current ? "B" : "A"}: </dt><dd className="inline break-all font-mono">{identity.snapshotId}</dd></div>
         <div><dt className="inline font-semibold">Release: </dt><dd className="inline break-all font-mono">{identity.projectReleaseId}</dd></div>
+        {identity.reportTime ? (
+          <div>
+            <dt className="inline font-semibold">Report policy: </dt>
+            <dd className="inline">{identity.reportTime.policyId} · {identity.reportTime.policyRevision}</dd>
+          </div>
+        ) : null}
       </dl>
+      {identity.reportTime ? (
+        <ul className="mt-3 space-y-1 border-t border-border pt-3 text-xs text-muted">
+          {identity.reportTime.windows.map((window) => (
+            <li key={window.windowId}>
+              <span className="font-semibold text-foreground">{window.label}:</span>{" "}
+              {formatPeriod({ from: window.from, to: window.toExclusive, timezone: identity.period.timezone })}
+              {window.phase === "partial" ? " · in progress" : window.phase === "forecast" ? " · forecast" : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </article>
   );
 }
@@ -306,7 +345,9 @@ function AiConclusionComparison({ summary }: { summary: OverviewChangeSummary["a
                 <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.05em] ${CHANGE_STYLES[item.state]}`}>
                   {CHANGE_LABELS[item.state]}
                 </span>
-                <span className="font-semibold text-foreground">{SECTION_LABELS[item.sectionId]}</span>
+                <span className="font-semibold text-foreground">
+                  {SECTION_LABELS[item.sectionId as keyof typeof SECTION_LABELS] ?? item.sectionId}
+                </span>
               </li>
             ))}
           </ul>

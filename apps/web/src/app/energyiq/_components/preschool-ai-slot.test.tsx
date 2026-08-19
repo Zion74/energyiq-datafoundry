@@ -470,13 +470,44 @@ describe("PreschoolAiSlot", () => {
   it("renders a saved v4 Section summary and scoped Insight cards with a structured Explore handoff", async () => {
     const startRun = vi.fn();
     const result = v4ReadModelResult();
+    const snapshot = preschoolGoldenSnapshot();
+    snapshot.reportTimeContext = {
+      contractRevision: "energyiq-report-time-context@1",
+      binding: {
+        workspaceId: snapshot.context.workspaceId,
+        projectId: snapshot.context.projectId,
+        scopeId: snapshot.context.scopeId,
+        resource: snapshot.context.resource,
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+      },
+      timezone: snapshot.context.timezone,
+      asOf: "2026-06-01T01:00:00.000Z",
+      acceptedDataEndExclusive: "2026-05-31T16:00:00.000Z",
+      dataThroughLocalDate: "2026-05-31",
+      lastRefreshedAt: "2026-06-01T00:30:00.000Z",
+      policyId: "preschool-report-time",
+      policyRevision: "v1",
+      windows: [{
+        windowId: "current-overview",
+        role: "overview",
+        label: "Latest 28 complete days",
+        strategy: { kind: "rolling_complete_days", days: 28 },
+        phase: "complete",
+        from: "2026-05-03T16:00:00.000Z",
+        toExclusive: "2026-05-31T16:00:00.000Z",
+        completeDayCount: 28,
+        segments: [{ from: "2026-05-03T16:00:00.000Z", toExclusive: "2026-05-31T16:00:00.000Z" }],
+        comparisonCompatibilityKey: "preschool-report-time:v1:Asia/Singapore:rolling-28",
+      }],
+    };
     const standby = result.sections["standby-wastage"];
     if (standby.status !== "available") throw new Error("v4 fixture missing");
     standby.result.summary.text = standby.result.summary.text.padEnd(416, " useful context");
     expect(standby.result.summary.text).toHaveLength(416);
     await act(async () => root.render(
       <PreschoolAiSlot
-        snapshot={preschoolGoldenSnapshot()}
+        snapshot={snapshot}
         sectionId="standby-wastage"
         mode="saved"
         savedResult={result}
@@ -534,6 +565,18 @@ describe("PreschoolAiSlot", () => {
         to: "2026-05-31T16:00:00.000Z",
       },
       evidenceRefs: ["standby:closing-boundary"],
+      reportTime: {
+        policyId: "preschool-report-time",
+        policyRevision: "v1",
+        dataThroughLocalDate: "2026-05-31",
+        windows: [{
+          windowId: "current-overview",
+          from: "2026-05-03T16:00:00.000Z",
+          toExclusive: "2026-05-31T16:00:00.000Z",
+          phase: "complete",
+          completeDayCount: 28,
+        }],
+      },
     });
     for (const forbiddenProvenance of ["dataCutoff", "deterministicEvidenceIds", "toolCallIds", "auditLogIds"]) {
       expect(evidencePayload).not.toHaveProperty(forbiddenProvenance);
@@ -547,6 +590,8 @@ describe("PreschoolAiSlot", () => {
     expect(handoff).toContain("Insight: standby-schedule-mismatch");
     expect(handoff).toContain("Snapshot reference: preschool-26b85b9c0b95e090");
     expect(handoff).toContain("Project Release reference: legacy-profile:preschool-demo:1");
+    expect(handoff).toContain("Report Time policy: preschool-report-time · v1 · Asia/Singapore");
+    expect(handoff).toContain("Report window current-overview (Latest 28 complete days)");
     expect(handoff).toContain("Cited Evidence refs: standby:closing-boundary");
     expect(handoff).toContain("re-resolve the cited Evidence refs");
     for (const forbiddenProvenance of ["Data cutoff", "Deterministic Evidence IDs", "Tool call IDs", "Audit log IDs"]) {

@@ -141,7 +141,20 @@ export const composeNgeeAnnOverviewAiReadModel = (input: {
       },
       modelProfileId: baseIdentity.modelProfileId,
       modelProfileRevision: baseIdentity.modelProfileRevision,
-      generation: projectOverviewAiGenerationBinding(baseIdentity),
+      generation: {
+        ...projectOverviewAiGenerationBinding(baseIdentity),
+        units: {
+          keyFindings: projectOverviewAiGenerationBinding(executiveIdentity),
+          sections: Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => [
+            sectionId,
+            projectOverviewAiGenerationBinding(createNgeeAnnOverviewAiSectionArtifactIdentity({
+              baseIdentity,
+              targetId: sectionId,
+            })),
+          ])),
+          additionalInsights: projectOverviewAiGenerationBinding(additionalIdentity),
+        },
+      },
     },
     keyFindings: artifactUnit(store.find(executiveIdentity)),
     sections,

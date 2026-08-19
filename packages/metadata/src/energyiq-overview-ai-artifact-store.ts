@@ -25,6 +25,10 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   projectReleaseId: string;
   analysisPeriodFrom: string;
   analysisPeriodTo: string;
+  /** Immutable report-time definition and resolved-window basis. Absent only on historical identities. */
+  reportTimePolicyId?: string;
+  reportTimePolicyRevision?: string;
+  reportTimeContextFingerprint?: string;
   rendererKey: string;
   rendererVersion: string;
   analysisPackId: string;
@@ -357,6 +361,14 @@ const canonicalIdentity = (
     || identity.modelProfileRevision < 1) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_IDENTITY_INVALID");
   }
+  const reportTimeFieldCount = [
+    identity.reportTimePolicyId,
+    identity.reportTimePolicyRevision,
+    identity.reportTimeContextFingerprint,
+  ].filter((value) => value !== undefined).length;
+  if (reportTimeFieldCount !== 0 && reportTimeFieldCount !== 3) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_REPORT_TIME_IDENTITY_INVALID");
+  }
   if (identity.artifactKind !== undefined
     && identity.artifactKind !== "section-interpretation"
     && identity.artifactKind !== "executive-synthesis"
@@ -391,6 +403,11 @@ const canonicalIdentity = (
     projectReleaseId: identity.projectReleaseId,
     analysisPeriodFrom: identity.analysisPeriodFrom,
     analysisPeriodTo: identity.analysisPeriodTo,
+    ...(identity.reportTimePolicyId ? { reportTimePolicyId: identity.reportTimePolicyId } : {}),
+    ...(identity.reportTimePolicyRevision ? { reportTimePolicyRevision: identity.reportTimePolicyRevision } : {}),
+    ...(identity.reportTimeContextFingerprint
+      ? { reportTimeContextFingerprint: identity.reportTimeContextFingerprint }
+      : {}),
     rendererKey: identity.rendererKey,
     rendererVersion: identity.rendererVersion,
     analysisPackId: identity.analysisPackId,

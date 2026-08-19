@@ -1,4 +1,5 @@
 import { LocalDataGateway } from "@datafoundry/data-gateway";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -553,7 +554,9 @@ describe("saved analysis decision-quality boundary", () => {
 
       const frozenSnapshotV2 = JSON.parse(records[0]?.snapshot_json ?? "null") as {
         renderer: { key: string; version: string };
+        reportTimeContext: Parameters<typeof reportTimeBasisFromContext>[0];
       };
+      const reportTimeBasisV2 = reportTimeBasisFromContext(frozenSnapshotV2.reportTimeContext);
       const baseIdentityV2 = createOverviewAiArtifactIdentity({
         workspaceId: bindingV2.workspaceId,
         projectId: bindingV2.projectId,
@@ -566,6 +569,7 @@ describe("saved analysis decision-quality boundary", () => {
         rendererVersion: frozenSnapshotV2.renderer.version,
         modelProfileId: bindingV2.modelProfileId,
         modelProfileRevision: bindingV2.modelProfileRevision,
+        reportTimeBasis: reportTimeBasisV2,
       });
       const artifactStore = metadata.energyIq.overviewAiArtifacts;
       const sectionIdentityV2 = createPreschoolOverviewAiSectionArtifactIdentityV4({
@@ -615,7 +619,11 @@ describe("saved analysis decision-quality boundary", () => {
         baseIdentity: baseIdentityV2,
       });
       expect(canonicalResultV2).not.toBeNull();
-      const canonicalArtifactV2 = { ...aiArtifactV2, result: canonicalResultV2 };
+      const canonicalArtifactV2 = {
+        ...aiArtifactV2,
+        reportTimeBasis: reportTimeBasisV2,
+        result: canonicalResultV2,
+      };
       const attached = await handleEnergyApiRequest(
         jsonPost({ aiArtifact: canonicalArtifactV2 }),
         ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],

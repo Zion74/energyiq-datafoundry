@@ -1,4 +1,5 @@
 import React from "react";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 
 import type {
   EnergyProjectAnalysisSnapshotDto,
@@ -291,10 +292,27 @@ export function NgeeAnnOverviewRenderer({
               rendererKey: "ngee-ann-overview",
               snapshotId: state.snapshot.dataSnapshot.id,
               projectReleaseId: state.snapshot.projectRelease.id,
+              ...(state.snapshot.reportTimeContext
+                ? { reportTimeBasis: reportTimeBasisFromContext(state.snapshot.reportTimeContext) }
+                : {}),
               result,
             }),
           } : {})}
-        /> : <NgeeAnnProjectAiSlots snapshot={state.snapshot} />}
+        /> : <NgeeAnnProjectAiSlots
+          snapshot={state.snapshot}
+          {...(onAiArtifactChange ? {
+            onRestoredModel: (result) => onAiArtifactChange({
+              contract: "energyiq-saved-ai-result@3",
+              rendererKey: "ngee-ann-overview",
+              snapshotId: state.snapshot.dataSnapshot.id,
+              projectReleaseId: state.snapshot.projectRelease.id,
+              ...(state.snapshot.reportTimeContext
+                ? { reportTimeBasis: reportTimeBasisFromContext(state.snapshot.reportTimeContext) }
+                : {}),
+              result,
+            }),
+          } : {})}
+        />}
       </div>
 
       <div id="ngee-ann-evidence" data-overview-section="true" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">

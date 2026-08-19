@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 
 import {
   configApi,
@@ -322,6 +323,15 @@ function PublishedDecisionDashboardView({
   const saveAllowed = Boolean(
     qualityPolicy?.saveAllowed && currentSnapshot?.projectRelease.templateRevisionId,
   );
+  const aiArtifactMatchesCurrent = Boolean(currentSnapshot
+    && aiArtifact
+    && aiArtifact.snapshotId === currentSnapshot.dataSnapshot.id
+    && aiArtifact.rendererKey === currentSnapshot.renderer.key
+    && aiArtifact.projectReleaseId === currentSnapshot.projectRelease.id
+    && (!currentSnapshot.reportTimeContext
+      || Boolean(aiArtifact.reportTimeBasis
+        && JSON.stringify(aiArtifact.reportTimeBasis)
+          === JSON.stringify(reportTimeBasisFromContext(currentSnapshot.reportTimeContext)))));
 
   useEffect(() => {
     setAiArtifact(null);
@@ -330,6 +340,8 @@ function PublishedDecisionDashboardView({
     currentSnapshot?.dataSnapshot.id,
     currentSnapshot?.projectRelease.id,
     currentSnapshot?.renderer.key,
+    currentSnapshot?.reportTimeContext?.policyRevision,
+    currentSnapshot?.reportTimeContext?.acceptedDataEndExclusive,
     projectId,
   ]);
 
@@ -421,9 +433,7 @@ function PublishedDecisionDashboardView({
           comparison: initialViewState.comparison,
           category: initialViewState.category,
         },
-        ...(aiArtifact?.snapshotId === currentSnapshot.dataSnapshot.id
-          && aiArtifact.rendererKey === currentSnapshot.renderer.key
-          && aiArtifact.projectReleaseId === currentSnapshot.projectRelease.id
+        ...(aiArtifactMatchesCurrent && aiArtifact
           ? { aiArtifact }
           : {}),
       });
@@ -659,7 +669,7 @@ function PublishedDecisionDashboardView({
             type="button"
             onClick={() => void saveCurrentAnalysis()}
             disabled={saving || rendererState.status !== "ready" || !saveAllowed}
-            title={aiArtifact?.snapshotId === currentSnapshot?.dataSnapshot.id
+            title={aiArtifactMatchesCurrent
               ? "Save the deterministic report with its completed AI result."
               : "Save the deterministic report now. A still-running AI result is not attached."}
             className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"

@@ -1,4 +1,9 @@
-import type { AdditionalAiInsightsArtifact, EvidenceRef } from "@datafoundry/contracts";
+import type {
+  AdditionalAiInsightsArtifact,
+  EvidenceRef,
+  ReportTimeBasis,
+  ReportTimeContext,
+} from "@datafoundry/contracts";
 
 export type ApiErrorCode =
   | "BAD_REQUEST"
@@ -1893,36 +1898,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
     } | null;
   };
   projectRelease: EnergyPublishedProjectReleaseDto;
-  reportTimeContext?: {
-    contractRevision: "energyiq-report-time-context@1";
-    binding: {
-      workspaceId: string;
-      projectId: string;
-      scopeId: string;
-      resource: string;
-      dataSnapshotId: string;
-      projectReleaseId: string;
-    };
-    timezone: string;
-    asOf: string;
-    acceptedDataEndExclusive: string;
-    dataThroughLocalDate: string;
-    lastRefreshedAt: string;
-    policyId: string;
-    policyRevision: string;
-    windows: Array<{
-      windowId: string;
-      role: string;
-      label: string;
-      strategy: Record<string, unknown> & { kind: string };
-      phase: "complete" | "partial" | "forecast";
-      from: string;
-      toExclusive: string;
-      completeDayCount: number;
-      segments: Array<{ from: string; toExclusive: string }>;
-      comparisonCompatibilityKey: string;
-    }>;
-  };
+  reportTimeContext?: ReportTimeContext;
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
   renderer: EnergyPublishedProjectReleaseDto["renderer"];
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];
@@ -2159,6 +2135,7 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
   rendererKey: EnergyProjectRendererKeyDto;
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: {
     status: "available";
     providerProfileId: string;
@@ -2171,12 +2148,14 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
   rendererKey: "preschool-overview";
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: PreschoolOverviewAiReadModelDto;
 } | {
   contract: "energyiq-saved-ai-result@3";
   rendererKey: "ngee-ann-overview";
   snapshotId: string;
   projectReleaseId: string;
+  reportTimeBasis?: ReportTimeBasis;
   result: EnergyProjectOverviewAiReadModelDto;
 };
 
@@ -2219,7 +2198,16 @@ export type EnergyProjectOverviewAiReadModelDto = {
     analysisPeriod: { from: string; to: string };
     modelProfileId: string;
     modelProfileRevision: number;
-    generation: Record<string, unknown>;
+    generation: Record<string, unknown> & {
+      reportTimePolicyId?: string;
+      reportTimePolicyRevision?: string;
+      reportTimeContextFingerprint?: string;
+      units?: {
+        keyFindings: Record<string, unknown>;
+        sections: Record<string, Record<string, unknown>>;
+        additionalInsights: Record<string, unknown>;
+      };
+    };
   };
   keyFindings: EnergyProjectOverviewAiUnitStatusDto;
   sections: Record<string, EnergyProjectOverviewAiUnitStatusDto>;
@@ -2714,7 +2702,7 @@ export type EnergySavedOverviewComparisonCandidateDto = EnergySavedAnalysisSumma
   analysis: Pick<EnergySavedAnalysisDetailDto["analysis"], "summary">;
   snapshot: Pick<
     NonNullable<EnergySavedAnalysisDetailDto["snapshot"]>,
-    "context" | "dataSnapshot" | "recipe" | "renderer"
+    "context" | "dataSnapshot" | "recipe" | "renderer" | "reportTimeContext"
   > & {
     projectRelease: Pick<NonNullable<EnergySavedAnalysisDetailDto["snapshot"]>["projectRelease"], "id">;
   };

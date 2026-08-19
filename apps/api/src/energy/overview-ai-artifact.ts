@@ -11,7 +11,9 @@ import {
   CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
   CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
   canonicalInsightMethodSetJson,
+  reportTimeBasisFromContext,
   resolveCurrentAdditionalAiInsightMethodSet,
+  type ReportTimeBasis,
 } from "@datafoundry/contracts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -178,9 +180,15 @@ export const createOverviewAiArtifactIdentity = (input: {
   rendererVersion: string;
   modelProfileId: string;
   modelProfileRevision: number;
+  reportTimeBasis?: ReportTimeBasis;
+  reportTimeIdentity?: Pick<EnergyIqOverviewAiArtifactIdentity,
+    "reportTimePolicyId" | "reportTimePolicyRevision" | "reportTimeContextFingerprint">;
 }): OverviewAiArtifactIdentityV13 => {
   const contract = OVERVIEW_AI_CONTRACTS[input.rendererKey];
   if (!contract) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  const reportTimeIdentity = input.reportTimeBasis
+    ? overviewAiReportTimeIdentity(input.reportTimeBasis)
+    : input.reportTimeIdentity;
   return {
     workspaceId: input.workspaceId,
     projectId: input.projectId,
@@ -190,6 +198,15 @@ export const createOverviewAiArtifactIdentity = (input: {
     projectReleaseId: input.projectReleaseId,
     analysisPeriodFrom: input.analysisPeriodFrom,
     analysisPeriodTo: input.analysisPeriodTo,
+    ...(reportTimeIdentity?.reportTimePolicyId
+      ? { reportTimePolicyId: reportTimeIdentity.reportTimePolicyId }
+      : {}),
+    ...(reportTimeIdentity?.reportTimePolicyRevision
+      ? { reportTimePolicyRevision: reportTimeIdentity.reportTimePolicyRevision }
+      : {}),
+    ...(reportTimeIdentity?.reportTimeContextFingerprint
+      ? { reportTimeContextFingerprint: reportTimeIdentity.reportTimeContextFingerprint }
+      : {}),
     rendererKey: input.rendererKey,
     rendererVersion: input.rendererVersion,
     ...contract,
@@ -197,6 +214,15 @@ export const createOverviewAiArtifactIdentity = (input: {
     modelProfileRevision: input.modelProfileRevision,
   };
 };
+
+export const overviewAiReportTimeIdentity = (
+  basis: ReportTimeBasis,
+): Required<Pick<EnergyIqOverviewAiArtifactIdentity,
+  "reportTimePolicyId" | "reportTimePolicyRevision" | "reportTimeContextFingerprint">> => ({
+  reportTimePolicyId: basis.policyId,
+  reportTimePolicyRevision: basis.policyRevision,
+  reportTimeContextFingerprint: createHash("sha256").update(JSON.stringify(basis)).digest("hex"),
+});
 
 export const requireCurrentNgeeAnnBaseIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
@@ -218,6 +244,15 @@ export const requireCurrentNgeeAnnBaseIdentity = (
       rendererVersion: identity.rendererVersion,
       modelProfileId: identity.modelProfileId,
       modelProfileRevision: identity.modelProfileRevision,
+      ...(identity.reportTimePolicyId
+        && identity.reportTimePolicyRevision
+        && identity.reportTimeContextFingerprint ? {
+          reportTimeIdentity: {
+            reportTimePolicyId: identity.reportTimePolicyId,
+            reportTimePolicyRevision: identity.reportTimePolicyRevision,
+            reportTimeContextFingerprint: identity.reportTimeContextFingerprint,
+          },
+        } : {}),
     });
   } catch {
     throw new Error("ENERGYIQ_NGEE_ANN_OVERVIEW_AI_IDENTITY_INVALID");
@@ -268,6 +303,15 @@ export const projectCurrentOverviewAiArtifactBaseIdentity = (
   rendererVersion: identity.rendererVersion,
   modelProfileId: identity.modelProfileId,
   modelProfileRevision: identity.modelProfileRevision,
+  ...(identity.reportTimePolicyId
+    && identity.reportTimePolicyRevision
+    && identity.reportTimeContextFingerprint ? {
+      reportTimeIdentity: {
+        reportTimePolicyId: identity.reportTimePolicyId,
+        reportTimePolicyRevision: identity.reportTimePolicyRevision,
+        reportTimeContextFingerprint: identity.reportTimeContextFingerprint,
+      },
+    } : {}),
 });
 
 export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
@@ -537,6 +581,9 @@ export const overviewAiArtifactIdentityFromSnapshot = (input: {
   rendererVersion: input.snapshot.renderer.version,
   modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   modelProfileRevision: input.modelBinding.revision,
+  ...(input.snapshot.reportTimeContext
+    ? { reportTimeBasis: reportTimeBasisFromContext(input.snapshot.reportTimeContext) }
+    : {}),
 });
 
 export const overviewAiArtifactPinnedLocalPeriod = (input: {
@@ -614,11 +661,7 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
         to: input.pin.to,
         expectedDataSnapshotId: input.pin.dataSnapshotId,
         expectedProjectReleaseId: input.pin.projectReleaseId,
-      } : {
-        analysisWindow: project.id === "ngee-ann-polytechnic"
-          ? "current-month-to-date" as const
-          : "current-overview-28d" as const,
-      }),
+      } : { analysisWindow: "current-project-overview" as const }),
     },
   });
   if (resolution.status !== "ready" || resolution.snapshot.dataSnapshot.id !== project.data_snapshot_id) {

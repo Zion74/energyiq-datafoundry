@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   configApi,
@@ -25,12 +25,15 @@ export function NgeeAnnProjectAiSlots({
   snapshot,
   savedModel,
   restore = defaultRestore,
+  onRestoredModel,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   savedModel?: EnergyProjectOverviewAiReadModelDto;
   restore?: (projectId: string, scopeId: string) => Promise<EnergyProjectOverviewAiReadModelDto>;
+  onRestoredModel?: (model: EnergyProjectOverviewAiReadModelDto) => void;
 }) {
   const identityKey = `${snapshot.context.projectId}:${snapshot.context.scopeId}:${snapshot.dataSnapshot.id}:${snapshot.projectRelease.id}`;
+  const notifiedModelRef = useRef<EnergyProjectOverviewAiReadModelDto | null>(null);
   const [state, setState] = useState<{
     identityKey: string;
     model?: EnergyProjectOverviewAiReadModelDto;
@@ -65,6 +68,13 @@ export function NgeeAnnProjectAiSlots({
   const readyCount = useMemo(() => model
     ? SECTIONS.filter(([sectionId]) => terminal(model.sections[sectionId])).length
     : 0, [model]);
+
+  useEffect(() => {
+    if (model && model !== notifiedModelRef.current && matchesSnapshot(model, snapshot)) {
+      notifiedModelRef.current = model;
+      onRestoredModel?.(model);
+    }
+  }, [identityKey, model, onRestoredModel, snapshot]);
 
   return (
     <section aria-labelledby="ngee-ann-project-ai" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6">

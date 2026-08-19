@@ -3,6 +3,7 @@ import type {
   EnergySavedAnalysisAiArtifactInputDto,
   PreschoolOverviewAiReadModelDto,
 } from "../../../lib/config-api";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 import { configApi, type EnergyProjectOverviewAiReadModelDto } from "../../../lib/config-api";
 import type { PreschoolAiRunResult } from "./preschool-ai-run";
 
@@ -21,6 +22,9 @@ export async function runSavedAnalysisAiForSnapshot(
       rendererKey: "ngee-ann-overview",
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
+      ...(snapshot.reportTimeContext
+        ? { reportTimeBasis: reportTimeBasisFromContext(snapshot.reportTimeContext) }
+        : {}),
       result,
     };
   }
@@ -37,6 +41,9 @@ export async function runSavedAnalysisAiForSnapshot(
         rendererKey: "preschool-overview",
         snapshotId: snapshot.dataSnapshot.id,
         projectReleaseId: snapshot.projectRelease.id,
+        ...(snapshot.reportTimeContext
+          ? { reportTimeBasis: reportTimeBasisFromContext(snapshot.reportTimeContext) }
+          : {}),
         result,
       };
     }
@@ -45,6 +52,9 @@ export async function runSavedAnalysisAiForSnapshot(
       rendererKey: "preschool-overview",
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
+      ...(snapshot.reportTimeContext
+        ? { reportTimeBasis: reportTimeBasisFromContext(snapshot.reportTimeContext) }
+        : {}),
       result,
     };
   }

@@ -10,7 +10,6 @@ import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
 import {
   overviewAiArtifactPinnedLocalPeriod,
-  resolvePinnedOverviewAiArtifactReadIdentity,
   resolveCurrentOverviewAiArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
 } from "./overview-ai-artifact.js";
@@ -102,12 +101,13 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
 
   return {
     resolveReadIdentity: async ({ projectId, scopeId, user, pin }) =>
-      resolvePinnedOverviewAiArtifactReadIdentity({
+      resolveCurrentOverviewAiArtifactIdentity({
         metadataStore: input.metadataStore,
+        dataGateway: input.dataGateway,
         projectId,
         scopeId,
         user,
-        pin,
+        ...(pin ? { pin } : {}),
       }),
     resolveCurrentIdentity: ({ projectId, scopeId, user, pin }) => resolveCurrentOverviewAiArtifactIdentity({
       metadataStore: input.metadataStore,

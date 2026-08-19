@@ -247,7 +247,12 @@ describe("Preschool Overview AI page workflow", () => {
               text: "All four current Sections support a bounded management review.",
               evidenceRefs: PRESCHOOL_SECTION_IDS.map((sectionId) => `evidence:v4:${sectionId}`),
             },
-            findings: [],
+            findings: [{
+              title: "Four-Section review",
+              text: "All four accepted Sections support the bounded management review.",
+              sectionIds: [...PRESCHOOL_SECTION_IDS],
+              evidenceRefs: PRESCHOOL_SECTION_IDS.map((sectionId) => `evidence:v4:${sectionId}`),
+            }],
           }),
           runId,
           sessionId,

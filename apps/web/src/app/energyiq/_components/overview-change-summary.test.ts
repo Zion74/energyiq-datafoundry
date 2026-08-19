@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 
 import type {
   EnergyProjectAnalysisSnapshotDto,
@@ -13,6 +14,115 @@ import {
 } from "./overview-change-summary";
 
 describe("Overview change summary", () => {
+  it("separates data changes from report-time basis changes", () => {
+    const previous = savedDetail({ id: "saved-a", sequence: 1, snapshotId: "snapshot-a" });
+    const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-a" });
+    setReportTimeContext(previous.snapshot!, {
+      policyRevision: "v1",
+      windowId: "current-overview",
+      from: "2026-05-01T00:00:00.000Z",
+      toExclusive: "2026-05-29T00:00:00.000Z",
+    });
+    setReportTimeContext(current, {
+      policyRevision: "v1",
+      windowId: "current-overview",
+      from: "2026-05-08T00:00:00.000Z",
+      toExclusive: "2026-06-05T00:00:00.000Z",
+    });
+
+    const dataOnly = buildOverviewChangeSummary({ previous, current, currentAiArtifact: null });
+
+    expect(dataOnly?.provenance).toMatchObject({
+      dataSnapshotStatus: "changed",
+      reportTimeBasisStatus: "same",
+      attribution: "data",
+    });
+
+    const sameSnapshotPrevious = savedDetail({
+      id: "saved-policy-a",
+      sequence: 2,
+      snapshotId: "snapshot-b",
+      releaseId: "release-b",
+    });
+    setReportTimeContext(sameSnapshotPrevious.snapshot!, {
+      policyRevision: "v1",
+      windowId: "current-overview",
+      from: "2026-05-08T00:00:00.000Z",
+      toExclusive: "2026-06-05T00:00:00.000Z",
+    });
+    setReportTimeContext(current, {
+      policyRevision: "v2",
+      windowId: "current-month-progress",
+      from: "2026-06-01T00:00:00.000Z",
+      toExclusive: "2026-06-05T00:00:00.000Z",
+    });
+
+    const basisOnly = buildOverviewChangeSummary({
+      previous: sameSnapshotPrevious,
+      current,
+      currentAiArtifact: null,
+    });
+    expect(basisOnly?.provenance).toMatchObject({
+      dataSnapshotStatus: "same",
+      reportTimeBasisStatus: "changed",
+      attribution: "analysis-basis",
+    });
+    expect(basisOnly?.metrics).toEqual([]);
+    expect(orderPreviousOverviewCandidates({ items: [sameSnapshotPrevious], current }))
+      .toEqual([sameSnapshotPrevious]);
+
+    const mixed = buildOverviewChangeSummary({ previous, current, currentAiArtifact: null });
+    expect(mixed?.provenance).toMatchObject({
+      dataSnapshotStatus: "changed",
+      reportTimeBasisStatus: "changed",
+      attribution: "mixed",
+    });
+    expect(mixed?.metrics).toEqual([]);
+  });
+
+  it("marks legacy snapshots without Report Time provenance as unversioned", () => {
+    const previous = savedDetail({ id: "saved-a", sequence: 1, snapshotId: "snapshot-a" });
+    const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-b" });
+
+    expect(buildOverviewChangeSummary({ previous, current, currentAiArtifact: null })?.provenance)
+      .toMatchObject({ reportTimeBasisStatus: "unversioned", attribution: "unversioned" });
+  });
+
+  it("compares Ngee Ann @3 Key Findings with exact unit-generation provenance", () => {
+    const previous = savedDetail({
+      id: "ngee-a",
+      sequence: 1,
+      snapshotId: "snapshot-a",
+      rendererKey: "ngee-ann-overview",
+    });
+    previous.aiArtifact = projectAiArtifact("snapshot-a", "release-a", "Retained operating insight");
+    const current = snapshot({
+      snapshotId: "snapshot-b",
+      releaseId: "release-b",
+      rendererKey: "ngee-ann-overview",
+    });
+    const currentAi = projectAiArtifact("snapshot-b", "release-b", "Retained operating insight");
+
+    const result = buildOverviewChangeSummary({ previous, current, currentAiArtifact: currentAi });
+
+    expect(result?.ai.generationBasisStatus).toBe("same");
+    expect(result?.ai.keyFindingChanges).toEqual([
+      expect.objectContaining({ state: "retained", currentTitle: "Retained operating insight" }),
+    ]);
+
+    const changedPrompt = projectAiArtifact("snapshot-b", "release-b", "Retained operating insight");
+    if (changedPrompt.contract === "energyiq-saved-ai-result@3") {
+      const units = changedPrompt.result.binding.generation.units;
+      if (!units) throw new Error("TEST_UNIT_GENERATION_REQUIRED");
+      units.keyFindings.investigatorPromptRevision = "executive-prompt-v-next";
+    }
+    expect(buildOverviewChangeSummary({
+      previous,
+      current,
+      currentAiArtifact: changedPrompt,
+    })?.ai.generationBasisStatus).toBe("changed");
+  });
+
   it("compares immutable A/B identities, decision metrics, and AI conclusions without inventing semantic matches", () => {
     const previous = savedDetail({
       id: "saved-a",
@@ -248,7 +358,7 @@ describe("Overview change summary", () => {
     });
 
     expect(isCompatiblePreviousOverview(shorterWindow, current)).toBe(false);
-    expect(isCompatiblePreviousOverview(differentMetricBasis, current)).toBe(false);
+    expect(isCompatiblePreviousOverview(differentMetricBasis, current)).toBe(true);
     expect(isCompatiblePreviousOverview(futureWindow, current)).toBe(false);
     expect(isCompatiblePreviousOverview(sameCutoff, current)).toBe(false);
     expect(buildOverviewChangeSummary({
@@ -256,6 +366,14 @@ describe("Overview change summary", () => {
       current,
       currentAiArtifact: null,
     })).toBeNull();
+    expect(buildOverviewChangeSummary({
+      previous: differentMetricBasis,
+      current,
+      currentAiArtifact: null,
+    })).toMatchObject({
+      metrics: [],
+      provenance: { deterministicBasisStatus: "changed", attribution: "unversioned" },
+    });
   });
 
   it("does not reuse a stale current Artifact and detects same-title finding content changes", () => {
@@ -286,6 +404,27 @@ describe("Overview change summary", () => {
     const currentAi = aiArtifact("snapshot-b", "release-b", ["Same title"], ["Current explanation"]);
     const changed = buildOverviewChangeSummary({ previous, current, currentAiArtifact: currentAi });
     expect(changed?.ai.keyFindingsChanged).toBe(true);
+
+    setReportTimeContext(current, {
+      policyRevision: "v2",
+      windowId: "current-month-progress",
+      from: "2026-06-01T00:00:00.000Z",
+      toExclusive: "2026-06-05T00:00:00.000Z",
+    });
+    expect(buildOverviewChangeSummary({
+      previous,
+      current,
+      currentAiArtifact: currentAi,
+    })?.ai.currentStatus).toBe("not-available");
+    currentAi.reportTimeBasis = reportTimeBasisFromContext(current.reportTimeContext!);
+    const wrongTimeBasis = structuredClone(currentAi);
+    if (!wrongTimeBasis.reportTimeBasis) throw new Error("TEST_REPORT_TIME_BASIS_REQUIRED");
+    wrongTimeBasis.reportTimeBasis.policyRevision = "stale-policy";
+    expect(buildOverviewChangeSummary({
+      previous,
+      current,
+      currentAiArtifact: wrongTimeBasis,
+    })?.ai.currentStatus).toBe("not-available");
   });
 
   it("separates conclusion changes from Evidence lineage and discloses legacy model-basis uncertainty", () => {
@@ -383,6 +522,51 @@ function snapshot(input: {
       },
     },
   } as unknown as EnergyProjectAnalysisSnapshotDto;
+}
+
+function setReportTimeContext(
+  value: EnergyProjectAnalysisSnapshotDto,
+  input: {
+    policyRevision: string;
+    windowId: string;
+    from: string;
+    toExclusive: string;
+  },
+): void {
+  value.reportTimeContext = {
+    contractRevision: "energyiq-report-time-context@1",
+    binding: {
+      workspaceId: value.context.workspaceId,
+      projectId: value.context.projectId,
+      scopeId: value.context.scopeId,
+      resource: value.context.resource,
+      dataSnapshotId: value.dataSnapshot.id,
+      projectReleaseId: value.projectRelease.id,
+    },
+    timezone: value.context.timezone,
+    asOf: input.toExclusive,
+    acceptedDataEndExclusive: input.toExclusive,
+    dataThroughLocalDate: input.toExclusive.slice(0, 10),
+    lastRefreshedAt: input.toExclusive,
+    policyId: "project-overview-time",
+    policyRevision: input.policyRevision,
+    windows: [{
+      windowId: input.windowId,
+      role: "primary",
+      label: input.windowId,
+      strategy: input.windowId === "current-month-progress"
+        ? { kind: "calendar_month_to_date" }
+        : { kind: "rolling_complete_days", days: 28 },
+      phase: input.windowId === "current-month-progress" ? "partial" : "complete",
+      from: input.from,
+      toExclusive: input.toExclusive,
+      completeDayCount: Math.max(0, Math.round(
+        (Date.parse(input.toExclusive) - Date.parse(input.from)) / 86_400_000,
+      )),
+      segments: [{ from: input.from, toExclusive: input.toExclusive }],
+      comparisonCompatibilityKey: input.windowId,
+    }],
+  };
 }
 
 function savedDetail(input: {
@@ -519,6 +703,86 @@ function aiArtifact(
           })),
         },
       },
+    },
+  };
+}
+
+function projectAiArtifact(
+  snapshotId: string,
+  projectReleaseId: string,
+  findingTitle: string,
+): EnergySavedAnalysisAiArtifactInputDto {
+  const unitGeneration = {
+    rendererVersion: "1",
+    analysisPackId: "ngee-ann-section-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-project-section-interpretation-v1",
+    validatorRevision: "energyiq-project-section-acceptance-v3",
+    workflowRevision: "energyiq-project-section-discover-publish-v1",
+    investigatorPromptRevision: "energyiq-project-section-discovery-v3",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    identityContractRevision: "ngee-ann-section-v4",
+  };
+  return {
+    contract: "energyiq-saved-ai-result@3",
+    rendererKey: "ngee-ann-overview",
+    snapshotId,
+    projectReleaseId,
+    result: {
+      contract: "energyiq-project-overview-ai-read-model@1",
+      rendererKey: "ngee-ann-overview",
+      binding: {
+        workspaceId: "preschool-demo-org",
+        projectId: "preschool-demo",
+        scopeId: "project",
+        dataSnapshotId: snapshotId,
+        projectReleaseId,
+        analysisPeriod: {
+          from: "2026-05-08T00:00:00.000Z",
+          to: "2026-06-05T00:00:00.000Z",
+        },
+        modelProfileId: "workspace-default",
+        modelProfileRevision: 8,
+        generation: {
+          rendererVersion: "1",
+          analysisPackId: "ngee-ann-analysis-pack",
+          analysisPackRevision: "v1",
+          outputContractRevision: "energyiq-project-overview-ai-v1",
+          validatorRevision: "energyiq-project-overview-ai-v1",
+          workflowRevision: "energyiq-project-overview-ai-v1",
+          investigatorPromptRevision: "energyiq-project-overview-ai-v1",
+          editorPromptRevision: "not-applicable-v1",
+          methodSkillId: "none",
+          methodSkillRevision: "not-applicable-v1",
+          units: {
+            keyFindings: { ...unitGeneration, identityContractRevision: "ngee-ann-executive-v4" },
+            sections: { "time-behaviour": { ...unitGeneration } },
+            additionalInsights: {
+              ...unitGeneration,
+              identityContractRevision: "ngee-ann-additional-insights-v3",
+            },
+          },
+        },
+      },
+      keyFindings: {
+        status: "available",
+        artifactId: `executive:${snapshotId}`,
+        result: {
+          findings: [{
+            id: "finding-1",
+            title: findingTitle,
+            text: findingTitle,
+            sectionIds: ["time-behaviour"],
+            evidenceRefs: ["evidence:time"],
+          }],
+        },
+      },
+      sections: {
+        "time-behaviour": { status: "empty", artifactId: `section:${snapshotId}` },
+      },
+      additionalInsights: { status: "empty", artifactId: `additional:${snapshotId}` },
     },
   };
 }

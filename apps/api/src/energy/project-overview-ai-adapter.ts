@@ -48,6 +48,14 @@ export type ProjectOverviewAiReadModel = {
       methodSetId?: string;
       methodSetRevision?: string;
       methodSetFingerprint?: string;
+      reportTimePolicyId?: string;
+      reportTimePolicyRevision?: string;
+      reportTimeContextFingerprint?: string;
+      units?: {
+        keyFindings: Record<string, unknown>;
+        sections: Record<string, Record<string, unknown>>;
+        additionalInsights: Record<string, unknown>;
+      };
     };
   };
   keyFindings: ProjectOverviewAiUnitStatus;
@@ -116,7 +124,10 @@ export const projectOverviewAiReadModelMatchesIdentity = (
   && readModel.binding.generation.canvasRevision === identity.canvasRevision
   && readModel.binding.generation.methodSetId === identity.methodSetId
   && readModel.binding.generation.methodSetRevision === identity.methodSetRevision
-  && readModel.binding.generation.methodSetFingerprint === identity.methodSetFingerprint;
+  && readModel.binding.generation.methodSetFingerprint === identity.methodSetFingerprint
+  && readModel.binding.generation.reportTimePolicyId === identity.reportTimePolicyId
+  && readModel.binding.generation.reportTimePolicyRevision === identity.reportTimePolicyRevision
+  && readModel.binding.generation.reportTimeContextFingerprint === identity.reportTimeContextFingerprint;
 
 export const projectOverviewAiGenerationBinding = (
   identity: EnergyIqOverviewAiArtifactIdentity,
@@ -140,4 +151,11 @@ export const projectOverviewAiGenerationBinding = (
   ...(identity.methodSetId ? { methodSetId: identity.methodSetId } : {}),
   ...(identity.methodSetRevision ? { methodSetRevision: identity.methodSetRevision } : {}),
   ...(identity.methodSetFingerprint ? { methodSetFingerprint: identity.methodSetFingerprint } : {}),
+  ...(identity.reportTimePolicyId ? { reportTimePolicyId: identity.reportTimePolicyId } : {}),
+  ...(identity.reportTimePolicyRevision
+    ? { reportTimePolicyRevision: identity.reportTimePolicyRevision }
+    : {}),
+  ...(identity.reportTimeContextFingerprint
+    ? { reportTimeContextFingerprint: identity.reportTimeContextFingerprint }
+    : {}),
 });

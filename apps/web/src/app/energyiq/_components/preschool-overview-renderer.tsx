@@ -1,4 +1,5 @@
 import React from "react";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 
 import type {
   EnergyProjectAnalysisSnapshotDto,
@@ -681,6 +682,9 @@ const toSavedPreschoolAiArtifact = (
       rendererKey: "preschool-overview",
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
+      ...(snapshot.reportTimeContext
+        ? { reportTimeBasis: reportTimeBasisFromContext(snapshot.reportTimeContext) }
+        : {}),
       result,
     };
   }
@@ -689,6 +693,9 @@ const toSavedPreschoolAiArtifact = (
     rendererKey: "preschool-overview",
     snapshotId: snapshot.dataSnapshot.id,
     projectReleaseId: snapshot.projectRelease.id,
+    ...(snapshot.reportTimeContext
+      ? { reportTimeBasis: reportTimeBasisFromContext(snapshot.reportTimeContext) }
+      : {}),
     result,
   };
 };

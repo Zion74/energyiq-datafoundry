@@ -6,6 +6,7 @@ import type {
   EnergySavedAnalysisSummaryDto,
   PreschoolOverviewAiSectionIdDto,
 } from "../../../lib/config-api";
+import { reportTimeBasisFromContext } from "@datafoundry/contracts";
 
 export type OverviewChangeMetric = {
   id: "usage" | "average-daily-usage" | "peak" | "closed-hours-share";
@@ -26,6 +27,13 @@ export type OverviewConclusionChange = {
 export type OverviewChangeSummary = {
   previous: OverviewVersionIdentity & { analysisId: string; sequence: number };
   current: OverviewVersionIdentity;
+  provenance: {
+    dataSnapshotStatus: "same" | "changed";
+    reportTimeBasisStatus: "same" | "changed" | "unversioned";
+    projectReleaseStatus: "same" | "changed";
+    deterministicBasisStatus: "same" | "changed";
+    attribution: "data" | "analysis-basis" | "mixed" | "unversioned";
+  };
   metrics: OverviewChangeMetric[];
   ai: {
     previousStatus: "available" | "not-saved";
@@ -37,7 +45,7 @@ export type OverviewChangeSummary = {
     currentKeyFindings: string[];
     keyFindingChanges: OverviewConclusionChange[];
     sectionChanges: Array<{
-      sectionId: PreschoolOverviewAiSectionIdDto;
+      sectionId: string;
       previousStatus: string;
       currentStatus: string;
       contentChanged: boolean;
@@ -53,19 +61,36 @@ type OverviewVersionIdentity = {
   snapshotId: string;
   projectReleaseId: string;
   period: { from: string; to: string; timezone: string };
+  reportTime?: {
+    policyId: string;
+    policyRevision: string;
+    dataThroughLocalDate: string;
+    windows: Array<{
+      windowId: string;
+      label: string;
+      phase: "complete" | "partial" | "forecast";
+      from: string;
+      toExclusive: string;
+      completeDayCount: number;
+    }>;
+  };
 };
 
 type OverviewComparableSnapshot = EnergyProjectAnalysisSnapshotDto
   | EnergySavedOverviewComparisonCandidateDto["snapshot"];
 
-export const orderPreviousOverviewCandidates = <T extends EnergySavedAnalysisSummaryDto>(input: {
+export const orderPreviousOverviewCandidates = <T extends EnergySavedAnalysisSummaryDto & {
+  snapshot?: OverviewComparableSnapshot | null;
+}>(input: {
   items: readonly T[];
   current: EnergyProjectAnalysisSnapshotDto;
 }): T[] => input.items
   .filter((item) => item.projectId === input.current.context.projectId
     && item.scopeId === input.current.context.scopeId
     && item.resource === input.current.context.resource
-    && item.dataSnapshotId !== input.current.dataSnapshot.id)
+    && (item.dataSnapshotId !== input.current.dataSnapshot.id
+      || (item.snapshot
+        && reportTimeBasisStatus(item.snapshot, input.current) === "changed")))
   .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)
     || right.sequence - left.sequence
     || right.id.localeCompare(left.id));
@@ -77,23 +102,16 @@ export const isCompatiblePreviousOverview = (
   && previous.projectId === current.context.projectId
   && previous.scopeId === current.context.scopeId
   && previous.resource === current.context.resource
-  && previous.dataSnapshotId !== current.dataSnapshot.id
+  && (previous.dataSnapshotId !== current.dataSnapshot.id
+    || reportTimeBasisStatus(previous.snapshot, current) === "changed")
   && previous.snapshot.context.projectId === current.context.projectId
   && previous.snapshot.context.scopeId === current.context.scopeId
   && previous.snapshot.context.timezone === current.context.timezone
-  && sameWindowLength(previous.snapshot, current)
-  && chronologicallyPrecedes(previous.snapshot, current)
-  && previous.snapshot.context.hierarchyRevisionId === current.context.hierarchyRevisionId
-  && previous.snapshot.context.meterMappingRevisionId === current.context.meterMappingRevisionId
-  && previous.snapshot.context.meterFormulaRevisionId === current.context.meterFormulaRevisionId
-  && previous.snapshot.context.metricVersion === current.context.metricVersion
-  && previous.snapshot.context.businessCalendarVersion === current.context.businessCalendarVersion
-  && previous.snapshot.context.tariffScheduleVersion === current.context.tariffScheduleVersion
-  && previous.snapshot.recipe.id === current.recipe.id
-  && previous.snapshot.recipe.version === current.recipe.version
-  && previous.snapshot.renderer.key === current.renderer.key
-  && previous.snapshot.renderer.version === current.renderer.version
-  && previous.snapshot.renderer.contractVersion === current.renderer.contractVersion);
+  && (hasVersionedReportTime(previous.snapshot) && hasVersionedReportTime(current)
+    || sameWindowLength(previous.snapshot, current))
+  && (previous.dataSnapshotId === current.dataSnapshot.id
+    || chronologicallyPrecedes(previous.snapshot, current))
+  && previous.snapshot.renderer.key === current.renderer.key);
 
 export const buildOverviewChangeSummary = (input: {
   previous: EnergySavedOverviewComparisonCandidateDto;
@@ -105,6 +123,20 @@ export const buildOverviewChangeSummary = (input: {
   }
   const previousAi = extractAiState(input.previous.aiArtifact, input.previous.snapshot);
   const currentAi = extractAiState(input.currentAiArtifact, input.current);
+  const timeBasisStatus = reportTimeBasisStatus(input.previous.snapshot, input.current);
+  const dataSnapshotStatus = input.previous.snapshot.dataSnapshot.id === input.current.dataSnapshot.id
+    ? "same"
+    : "changed";
+  const projectReleaseStatus = input.previous.snapshot.projectRelease.id === input.current.projectRelease.id
+    ? "same"
+    : "changed";
+  const deterministicBasisStatus = stableSerialize(deterministicMetricBasis(input.previous.snapshot))
+    === stableSerialize(deterministicMetricBasis(input.current))
+    ? "same"
+    : "changed";
+  const analysisBasisChanged = timeBasisStatus === "changed"
+    || projectReleaseStatus === "changed"
+    || deterministicBasisStatus === "changed";
   const generationBasisStatus = previousAi && currentAi
     ? previousAi.generationBasisFingerprint !== currentAi.generationBasisFingerprint
       ? "changed"
@@ -114,7 +146,7 @@ export const buildOverviewChangeSummary = (input: {
     : null;
   const previousSummary = input.previous.analysis.summary;
   const currentSummary = input.current.analysis.summary;
-  const metrics = [
+  const comparableMetrics = [
     metric("usage", "Total usage", previousSummary.usageKwh, currentSummary.usageKwh, "kWh"),
     metric(
       "average-daily-usage",
@@ -132,6 +164,9 @@ export const buildOverviewChangeSummary = (input: {
       "%",
     ),
   ].filter((value): value is OverviewChangeMetric => value !== null);
+  const metrics = timeBasisStatus === "changed" || deterministicBasisStatus === "changed"
+    ? []
+    : comparableMetrics;
 
   return {
     previous: {
@@ -140,6 +175,17 @@ export const buildOverviewChangeSummary = (input: {
       ...identityFromSnapshot(input.previous.snapshot),
     },
     current: identityFromSnapshot(input.current),
+    provenance: {
+      dataSnapshotStatus,
+      reportTimeBasisStatus: timeBasisStatus,
+      projectReleaseStatus,
+      deterministicBasisStatus,
+      attribution: timeBasisStatus === "unversioned"
+        ? "unversioned"
+        : analysisBasisChanged
+          ? dataSnapshotStatus === "changed" ? "mixed" : "analysis-basis"
+          : dataSnapshotStatus === "changed" ? "data" : "analysis-basis",
+    },
     metrics,
     ai: {
       previousStatus: previousAi ? "available" : "not-saved",
@@ -157,7 +203,7 @@ export const buildOverviewChangeSummary = (input: {
         ? classifyNarrativeChanges(previousAi.keyFindingEntries, currentAi.keyFindingEntries)
         : [],
       sectionChanges: previousAi && currentAi
-        ? SECTION_IDS.flatMap((sectionId) => {
+        ? [...new Set([...previousAi.sectionStatuses.keys(), ...currentAi.sectionStatuses.keys()])].flatMap((sectionId) => {
             const previousStatus = previousAi.sectionStatuses.get(sectionId);
             const currentStatus = currentAi.sectionStatuses.get(sectionId);
             const contentChanged = previousAi.sectionFingerprints.get(sectionId)
@@ -183,6 +229,54 @@ export const buildOverviewChangeSummary = (input: {
   };
 };
 
+const hasVersionedReportTime = (
+  snapshot: OverviewComparableSnapshot,
+): boolean => snapshot.reportTimeContext?.contractRevision === "energyiq-report-time-context@1";
+
+const reportTimeBasisStatus = (
+  previous: OverviewComparableSnapshot,
+  current: OverviewComparableSnapshot,
+): "same" | "changed" | "unversioned" => {
+  const previousContext = previous.reportTimeContext;
+  const currentContext = current.reportTimeContext;
+  if (!previousContext || !currentContext) return "unversioned";
+  return stableSerialize(reportTimeDefinitionBasis(previousContext))
+    === stableSerialize(reportTimeDefinitionBasis(currentContext))
+    ? "same"
+    : "changed";
+};
+
+const reportTimeDefinitionBasis = (
+  context: NonNullable<OverviewComparableSnapshot["reportTimeContext"]>,
+): unknown => ({
+  contractRevision: context.contractRevision,
+  timezone: context.timezone,
+  policyId: context.policyId,
+  policyRevision: context.policyRevision,
+  windows: context.windows.map((window) => ({
+    windowId: window.windowId,
+    role: window.role,
+    strategy: window.strategy,
+    phase: window.phase,
+    comparisonCompatibilityKey: window.comparisonCompatibilityKey,
+  })),
+});
+
+const deterministicMetricBasis = (snapshot: OverviewComparableSnapshot): unknown => ({
+  hierarchyRevisionId: snapshot.context.hierarchyRevisionId,
+  meterMappingRevisionId: snapshot.context.meterMappingRevisionId,
+  meterFormulaRevisionId: snapshot.context.meterFormulaRevisionId,
+  metricVersion: snapshot.context.metricVersion,
+  businessCalendarVersion: snapshot.context.businessCalendarVersion,
+  tariffScheduleVersion: snapshot.context.tariffScheduleVersion,
+  recipe: { id: snapshot.recipe.id, version: snapshot.recipe.version },
+  renderer: {
+    key: snapshot.renderer.key,
+    version: snapshot.renderer.version,
+    contractVersion: snapshot.renderer.contractVersion,
+  },
+});
+
 const identityFromSnapshot = (snapshot: OverviewComparableSnapshot): OverviewVersionIdentity => ({
   snapshotId: snapshot.dataSnapshot.id,
   projectReleaseId: snapshot.projectRelease.id,
@@ -191,6 +285,21 @@ const identityFromSnapshot = (snapshot: OverviewComparableSnapshot): OverviewVer
     to: snapshot.context.primaryPeriod.endExclusive,
     timezone: snapshot.context.timezone,
   },
+  ...(snapshot.reportTimeContext ? {
+    reportTime: {
+      policyId: snapshot.reportTimeContext.policyId,
+      policyRevision: snapshot.reportTimeContext.policyRevision,
+      dataThroughLocalDate: snapshot.reportTimeContext.dataThroughLocalDate,
+      windows: snapshot.reportTimeContext.windows.map((window) => ({
+        windowId: window.windowId,
+        label: window.label,
+        phase: window.phase,
+        from: window.from,
+        toExclusive: window.toExclusive,
+        completeDayCount: window.completeDayCount,
+      })),
+    },
+  } : {}),
 });
 
 const metric = (
@@ -230,8 +339,8 @@ const extractAiState = (
   keyFindingEntries: NarrativeFinding[];
   keyFindingFingerprints: string[];
   keyFindingEvidenceFingerprints: string[];
-  sectionStatuses: Map<PreschoolOverviewAiSectionIdDto, string>;
-  sectionFingerprints: Map<PreschoolOverviewAiSectionIdDto, string>;
+  sectionStatuses: Map<string, string>;
+  sectionFingerprints: Map<string, string>;
   additionalStatus: string;
   additionalFindingEntries: NarrativeFinding[];
   additionalFingerprint: string;
@@ -268,6 +377,41 @@ const extractAiState = (
         providerProfileId: artifact.result.providerProfileId,
       }),
       generationBasisExact: false,
+    };
+  }
+  if (artifact.contract === "energyiq-saved-ai-result@3") {
+    const keyFindingEntries = narrativeFindingsFromUnit(artifact.result.keyFindings);
+    const keyFindingRecords = availableFindingRecords(artifact.result.keyFindings);
+    const generation = artifact.result.binding.generation;
+    const sections = Object.entries(artifact.result.sections);
+    const additional = artifact.result.additionalInsights;
+    return {
+      keyFindings: keyFindingEntries.map(({ title }) => title),
+      keyFindingEntries,
+      keyFindingFingerprints: keyFindingRecords.map((finding) => stableSerialize({
+        title: finding.title,
+        text: finding.text,
+        sectionIds: Array.isArray(finding.sectionIds) ? [...finding.sectionIds].sort() : [],
+        epistemicStatus: finding.epistemicStatus ?? null,
+      })),
+      keyFindingEvidenceFingerprints: keyFindingRecords.map((finding) => stableSerialize(
+        Array.isArray(finding.evidenceRefs) ? [...finding.evidenceRefs].sort() : [],
+      )),
+      sectionStatuses: new Map(sections.map(([sectionId, unit]) => [sectionId, unit.status])),
+      sectionFingerprints: new Map(sections.map(([sectionId, unit]) => [
+        sectionId,
+        sectionSemanticFingerprint(unit),
+      ])),
+      additionalStatus: additional.status,
+      additionalFindingEntries: narrativeFindingsFromUnit(additional),
+      additionalFingerprint: sectionSemanticFingerprint(additional),
+      additionalBasisFingerprint: stableSerialize(generation.units?.additionalInsights ?? "unversioned"),
+      generationBasisFingerprint: stableSerialize({
+        modelProfileId: artifact.result.binding.modelProfileId,
+        modelProfileRevision: artifact.result.binding.modelProfileRevision,
+        generation,
+      }),
+      generationBasisExact: Boolean(generation.units),
     };
   }
   if (artifact.contract !== "energyiq-saved-ai-result@2") return null;
@@ -337,11 +481,36 @@ const extractAiState = (
   };
 };
 
+const availableFindingRecords = (unit: unknown): Array<Record<string, unknown>> => {
+  if (!unit || typeof unit !== "object" || !("status" in unit) || !("result" in unit)) return [];
+  const statusUnit = unit as { status: unknown; result?: unknown };
+  if (statusUnit.status !== "available" || !statusUnit.result || typeof statusUnit.result !== "object") return [];
+  const findings = (statusUnit.result as { findings?: unknown }).findings;
+  return Array.isArray(findings) ? findings.filter(isRecord) : [];
+};
+
+const narrativeFindingsFromUnit = (unit: unknown): NarrativeFinding[] => availableFindingRecords(unit)
+  .flatMap((finding) => {
+    const title = typeof finding.title === "string" ? finding.title.trim() : "";
+    const text = typeof finding.text === "string" ? finding.text.trim() : title;
+    if (!title || !text) return [];
+    return [{
+      title,
+      text,
+      sectionIds: Array.isArray(finding.sectionIds)
+        ? finding.sectionIds.filter((value): value is string => typeof value === "string").sort()
+        : [],
+    }];
+  });
+
 type NarrativeFinding = {
   title: string;
   text: string;
   sectionIds: string[];
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 const classifySectionChange = (
   previousStatus: string,
@@ -509,6 +678,13 @@ const matchesArtifactIdentity = (
   if (artifact.snapshotId !== expected.dataSnapshot.id
     || artifact.projectReleaseId !== expected.projectRelease.id
     || artifact.rendererKey !== expected.renderer.key) return false;
+  if (expected.reportTimeContext) {
+    if (!artifact.reportTimeBasis
+      || stableSerialize(artifact.reportTimeBasis)
+        !== stableSerialize(reportTimeBasisFromContext(expected.reportTimeContext))) return false;
+  } else if (artifact.reportTimeBasis) {
+    return false;
+  }
   if (artifact.contract === "energyiq-saved-ai-result@1") return true;
   const binding = artifact.result.binding;
   return binding.projectId === expected.context.projectId

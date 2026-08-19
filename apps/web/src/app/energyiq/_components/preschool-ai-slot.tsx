@@ -504,6 +504,7 @@ function SectionUnit({
       <SectionInterpretationV4Unit
         artifactId={unit.artifactId}
         result={unit.result}
+        reportTimeContext={snapshot.reportTimeContext}
         aiAnalystHref={aiAnalystHref}
       />
     );
@@ -554,10 +555,12 @@ function SectionUnit({
 function SectionInterpretationV4Unit({
   artifactId,
   result,
+  reportTimeContext,
   aiAnalystHref,
 }: {
   artifactId: string;
   result: PreschoolSectionInterpretationV4AvailableResult;
+  reportTimeContext?: EnergyProjectAnalysisSnapshotDto["reportTimeContext"];
   aiAnalystHref?: string;
 }) {
   return (
@@ -572,7 +575,7 @@ function SectionInterpretationV4Unit({
           <div className={`grid gap-3 ${result.insights.length > 1 ? "lg:grid-cols-2" : ""}`} aria-label="Section AI insights">
           {result.insights.map((insight) => {
             const exploreHref = insight.deepDiveQuestion && aiAnalystHref
-              ? buildSectionInsightHref(aiAnalystHref, artifactId, result, insight)
+              ? buildSectionInsightHref(aiAnalystHref, artifactId, result, insight, reportTimeContext)
               : null;
             return (
               <article key={insight.id} className="rounded-xl border border-primary/15 bg-surface px-4 py-4 lg:px-5">
@@ -1221,6 +1224,7 @@ function buildSectionInsightHref(
   artifactId: string,
   result: PreschoolSectionInterpretationV4AvailableResult,
   insight: PreschoolSectionInterpretationV4AvailableResult["insights"][number],
+  reportTimeContext?: EnergyProjectAnalysisSnapshotDto["reportTimeContext"],
 ): string {
   const [path, query = ""] = base.split("?", 2);
   const params = new URLSearchParams(query);
@@ -1246,6 +1250,24 @@ function buildSectionInsightHref(
     projectReleaseId: result.binding.projectReleaseId,
     evidenceRefs: insight.evidenceRefs,
     period: result.binding.analysisPeriod,
+    ...(reportTimeContext ? {
+      reportTime: {
+        contractRevision: reportTimeContext.contractRevision,
+        timezone: reportTimeContext.timezone,
+        acceptedDataEndExclusive: reportTimeContext.acceptedDataEndExclusive,
+        dataThroughLocalDate: reportTimeContext.dataThroughLocalDate,
+        policyId: reportTimeContext.policyId,
+        policyRevision: reportTimeContext.policyRevision,
+        windows: reportTimeContext.windows.map((window) => ({
+          windowId: window.windowId,
+          label: window.label,
+          phase: window.phase,
+          from: window.from,
+          toExclusive: window.toExclusive,
+          completeDayCount: window.completeDayCount,
+        })),
+      },
+    } : {}),
     note: result.limitation ?? "Use only the cited Evidence within the pinned Snapshot and Release.",
   }));
   return `${path}?${params.toString()}`;

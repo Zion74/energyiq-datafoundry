@@ -1,4 +1,5 @@
 import { createMetadataStore } from "@datafoundry/metadata";
+import { reportTimeBasisFromContext, type ReportTimeContext } from "@datafoundry/contracts";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
@@ -43,6 +44,36 @@ describe("Ngee Ann Saved Project AI", () => {
         from: "2026-05-19T16:00:00.000Z",
         to: "2026-06-16T16:00:00.000Z",
       };
+      const reportTimeContext: ReportTimeContext = {
+        contractRevision: "energyiq-report-time-context@1",
+        binding: {
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: project.id,
+          scopeId: project.root_scope_id,
+          resource: "electricity",
+          dataSnapshotId: project.data_snapshot_id,
+          projectReleaseId: templateRevision.revision_id,
+        },
+        timezone: "Asia/Singapore",
+        asOf: period.to,
+        acceptedDataEndExclusive: period.to,
+        dataThroughLocalDate: "2026-06-16",
+        lastRefreshedAt: period.to,
+        policyId: "ngee-ann-overview-time",
+        policyRevision: "v1",
+        windows: [{
+          windowId: "current-month-progress",
+          role: "primary",
+          label: "Current month to date",
+          strategy: { kind: "calendar_month_to_date" },
+          phase: "partial",
+          from: "2026-06-01T00:00:00.000Z",
+          toExclusive: period.to,
+          completeDayCount: 16,
+          segments: [{ from: "2026-06-01T00:00:00.000Z", toExclusive: period.to }],
+          comparisonCompatibilityKey: "calendar-month-progress",
+        }],
+      };
       const snapshot = {
         context: {
           workspaceId: NGEE_ANN_WORKSPACE_ID,
@@ -60,6 +91,7 @@ describe("Ngee Ann Saved Project AI", () => {
         },
         renderer: { key: "ngee-ann-overview", version: "1", contractVersion: "project-analysis-snapshot@1" },
         dataSnapshot: { id: project.data_snapshot_id, importBatchIds: [], lastSeenAt: period.to },
+        reportTimeContext,
         analysis: { provenance: { dataSnapshotId: project.data_snapshot_id } },
       } as unknown as ProjectAnalysisSnapshot;
       const baseIdentity = createOverviewAiArtifactIdentity({
@@ -74,6 +106,7 @@ describe("Ngee Ann Saved Project AI", () => {
         rendererVersion: "1",
         modelProfileId: "workspace-default-model-profile",
         modelProfileRevision: 8,
+        reportTimeBasis: reportTimeBasisFromContext(reportTimeContext),
       });
       const runId = "saved-ngee-project-ai-run";
       const emptyRunId = "saved-ngee-project-ai-empty-run";
@@ -165,8 +198,32 @@ describe("Ngee Ann Saved Project AI", () => {
         rendererKey: "ngee-ann-overview",
         snapshotId: project.data_snapshot_id,
         projectReleaseId: templateRevision.revision_id,
+        reportTimeBasis: reportTimeBasisFromContext(reportTimeContext),
         result: model,
       } as const;
+
+      expect(await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...artifact, reportTimeBasis: undefined } }),
+        ["projects", project.id, "saved-analyses", saved.id, "ai-result"],
+        context,
+      )).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
+
+      expect(await handleEnergyApiRequest(
+        jsonPost({
+          aiArtifact: {
+            ...artifact,
+            reportTimeBasis: { ...artifact.reportTimeBasis, policyRevision: "tampered" },
+          },
+        }),
+        ["projects", project.id, "saved-analyses", saved.id, "ai-result"],
+        context,
+      )).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
 
       const attached = await handleEnergyApiRequest(
         jsonPost({ aiArtifact: artifact }),
@@ -235,6 +292,7 @@ describe("Ngee Ann Saved Project AI", () => {
         title: "Ngee AI historical empty",
         ai_result_json: JSON.stringify({
           ...artifact,
+          reportTimeBasis: undefined,
           result: historicalEmptyModel,
           completedAt: "2026-08-17T00:00:00.000Z",
         }),

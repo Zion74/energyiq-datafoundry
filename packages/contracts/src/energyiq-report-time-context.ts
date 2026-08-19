@@ -56,3 +56,40 @@ export type ReportTimeContext = {
   windows: ResolvedReportWindow[];
 };
 
+/**
+ * Immutable report-time provenance persisted beside a Saved or generated AI
+ * result. Volatile resolution timestamps are deliberately excluded.
+ */
+export type ReportTimeBasis = {
+  contractRevision: typeof ENERGYIQ_REPORT_TIME_CONTEXT_REVISION;
+  timezone: string;
+  acceptedDataEndExclusive: string;
+  dataThroughLocalDate: string;
+  policyId: string;
+  policyRevision: string;
+  windows: Array<Pick<ResolvedReportWindow,
+    "windowId" | "role" | "label" | "strategy" | "phase" | "from" | "toExclusive"
+    | "completeDayCount" | "segments" | "comparisonCompatibilityKey">>;
+};
+
+export const reportTimeBasisFromContext = (context: ReportTimeContext): ReportTimeBasis => ({
+  contractRevision: context.contractRevision,
+  timezone: context.timezone,
+  acceptedDataEndExclusive: context.acceptedDataEndExclusive,
+  dataThroughLocalDate: context.dataThroughLocalDate,
+  policyId: context.policyId,
+  policyRevision: context.policyRevision,
+  windows: context.windows.map((window) => ({
+    windowId: window.windowId,
+    role: window.role,
+    label: window.label,
+    strategy: window.strategy,
+    phase: window.phase,
+    from: window.from,
+    toExclusive: window.toExclusive,
+    completeDayCount: window.completeDayCount,
+    segments: window.segments.map((segment) => ({ ...segment })),
+    comparisonCompatibilityKey: window.comparisonCompatibilityKey,
+  })),
+});
+
