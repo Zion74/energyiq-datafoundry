@@ -325,12 +325,7 @@ const parseProposal = (
   if (answer.length === 0 || answer.length > MAX_ANSWER_CHARS || !answer.startsWith("{")) {
     throw new Error("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer) as unknown;
-  } catch {
-    throw new Error("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
-  }
+  const parsed = parseNgeeAnnProposalEnvelope(answer);
   if (!isRecord(parsed)
     || parsed.sectionId !== sectionId
     || (parsed.status !== "available" && parsed.status !== "empty")
@@ -448,7 +443,7 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
     return {
       ...common,
       projection: {
-        revision: "ngee-ann-section-prompt-projection-v2",
+        revision: "ngee-ann-section-prompt-projection-v3",
         rowPolicy: "all-section-rows",
         omittedRepeatedFields: ["baselineSamples", "hourlyComparison", "detailSeries"],
         projectedRowCount: facts.dailyUsageAnomalies?.status === "available"
@@ -471,7 +466,7 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
     return {
       ...common,
       projection: {
-        revision: "ngee-ann-section-prompt-projection-v2",
+        revision: "ngee-ann-section-prompt-projection-v3",
         rowPolicy: "all-section-rows",
         projectedRowCount,
         valueSemantics: {
@@ -491,7 +486,7 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
   return {
     ...common,
     projection: {
-      revision: "ngee-ann-section-prompt-projection-v2",
+      revision: "ngee-ann-section-prompt-projection-v3",
       rowPolicy: "all-section-rows",
     },
     facts: pack.sectionId === "circuit-concentration"
@@ -503,6 +498,38 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
           ),
         }
       : pack.facts,
+  };
+};
+
+const parseNgeeAnnProposalEnvelope = (answer: string): unknown => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(answer) as unknown;
+  } catch {
+    try {
+      parsed = JSON.parse(`${answer}}`) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (!isRecord(parsed) || Array.isArray(parsed.candidates) || !isRecord(parsed.summary)) {
+    return parsed;
+  }
+  const summary = parsed.summary;
+  if (!Array.isArray(summary.candidates)
+    || Object.keys(parsed).some((key) => !["sectionId", "status", "summary"].includes(key))
+    || Object.keys(summary).some((key) => ![
+      "text", "evidenceRefs", "candidates", "limitation",
+    ].includes(key))) return parsed;
+  return {
+    sectionId: parsed.sectionId,
+    status: parsed.status,
+    summary: {
+      text: summary.text,
+      evidenceRefs: summary.evidenceRefs,
+    },
+    candidates: summary.candidates,
+    ...(summary.limitation !== undefined ? { limitation: summary.limitation } : {}),
   };
 };
 
@@ -617,7 +644,7 @@ const projectTimeBehaviour = (
     timezone: value.timezone,
     queryId: value.queryId,
     cellFieldOrder: [
-      "localDate", "localHour", "usageKwh", "coveragePct",
+      "localDate", "localHourLocal", "usageKwh", "coveragePct",
       "expectedMeterIntervalCount", "validIntervalCount", "qualityEventCount",
     ],
     scopes: value.scopes.map((scope) => ({
@@ -626,7 +653,7 @@ const projectTimeBehaviour = (
       scopeType: scope.scopeType,
       cells: scope.cells.map((cell) => [
         cell.localDate,
-        cell.localHour,
+        localHourLabel(cell.localHour),
         cell.usageKwh,
         cell.dataHealth.coveragePct,
         cell.dataHealth.expectedMeterIntervalCount,
@@ -641,8 +668,8 @@ const projectTimeBehaviour = (
           scopeName: profile.scopeName,
           status: profile.status,
           sampleDayCount: profile.sampleDayCount,
-          valueFieldOrder: ["localHour", "usageKwh"],
-          values: profile.values.map(({ localHour, usageKwh }) => [localHour, usageKwh]),
+          valueFieldOrder: ["localHourLocal", "usageKwh"],
+          values: profile.values.map(({ localHour, usageKwh }) => [localHourLabel(localHour), usageKwh]),
         }
       : profile),
   };
@@ -659,7 +686,7 @@ const projectComponentHourlyProfiles = (
     grain: value.grain,
     unit: value.unit,
     timezone: value.timezone,
-    valueFieldOrder: ["localHour", "usageKwh"],
+    valueFieldOrder: ["localHourLocal", "usageKwh"],
     scopes: value.scopes.map((scope) => ({
       scopeId: scope.scopeId,
       scopeName: scope.scopeName,
@@ -671,13 +698,13 @@ const projectComponentHourlyProfiles = (
             sampleDayCount: profile.sampleDayCount,
             categories: profile.categories.map((category) => ({
               category: category.category,
-              values: category.values.map(({ localHour, usageKwh }) => [localHour, usageKwh]),
+              values: category.values.map(({ localHour, usageKwh }) => [localHourLabel(localHour), usageKwh]),
             })),
             circuits: profile.circuits.map((circuit) => ({
               meterNodeId: circuit.meterNodeId,
               name: circuit.name,
               category: circuit.category,
-              values: circuit.values.map(({ localHour, usageKwh }) => [localHour, usageKwh]),
+              values: circuit.values.map(({ localHour, usageKwh }) => [localHourLabel(localHour), usageKwh]),
             })),
           }
         : profile),
@@ -685,12 +712,19 @@ const projectComponentHourlyProfiles = (
   };
 };
 
+const localHourLabel = (localHour: number): string => {
+  if (!Number.isInteger(localHour) || localHour < 0 || localHour > 23) {
+    throw new Error("ENERGYIQ_NGEE_ANN_SECTION_REPORT_TIME_INVALID");
+  }
+  return `${String(localHour).padStart(2, "0")}:00`;
+};
+
 const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  const expectedPromptRevision = "energyiq-project-section-discovery-v4";
-  if (identity.identityContractRevision !== "ngee-ann-section-v7"
+  const expectedPromptRevision = "energyiq-project-section-discovery-v5";
+  if (identity.identityContractRevision !== "ngee-ann-section-v8"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

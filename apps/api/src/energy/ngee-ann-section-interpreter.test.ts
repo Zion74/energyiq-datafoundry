@@ -344,6 +344,83 @@ describe("buildNgeeAnnSectionPrompt", () => {
     expect(() => resultFor("06:15")).toThrow("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
   });
 
+  it("projects local-hour buckets as readable clock labels and accepts an exact local-hour conclusion", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    const timeBehaviour = pack.facts.timeBehaviour;
+    if (!timeBehaviour) throw new Error("TEST_TIME_BEHAVIOUR_REQUIRED");
+    pack.facts.timeBehaviour = {
+      ...timeBehaviour,
+      scopes: [{
+        scopeId: "project",
+        scopeName: "Ngee Ann Polytechnic",
+        scopeType: "project",
+        cells: [{
+          localDate: "2026-06-05",
+          localHour: 18,
+          from: "2026-06-05T10:00:00.000Z",
+          to: "2026-06-05T11:00:00.000Z",
+          usageKwh: 4.6,
+          dataHealth: {
+            status: "complete",
+            coveragePct: 100,
+            expectedMeterIntervalCount: 2,
+            validIntervalCount: 2,
+            qualityEventCount: 0,
+          },
+        }],
+      }],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const prompt = buildNgeeAnnSectionPrompt(pack);
+
+    expect(prompt).toContain('"cellFieldOrder":["localDate","localHourLocal"');
+    expect(prompt).toContain('"18:00"');
+    expect(materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "The accepted weekday profile drops after 18:00 local time.",
+          evidenceRefs: [pack.evidence[0]!.id],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:local-hour",
+    })).toMatchObject({ status: "available" });
+  });
+
+  it("recovers only the observed root-anchored summary-wrapper punctuation defect", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const malformed = `{"sectionId":"${pack.sectionId}","status":"available","summary":{"text":"The current Pack supports a useful conclusion.","evidenceRefs":["${pack.evidence[0]!.id}"],"candidates":[],"limitation":"No occupancy data was supplied."}`;
+
+    expect(materializeNgeeAnnSectionResult({
+      answer: malformed,
+      pack,
+      identity,
+      runId: "run:ngee:bounded-envelope-repair",
+    })).toMatchObject({
+      status: "available",
+      summary: { text: "The current Pack supports a useful conclusion." },
+      limitation: "No occupancy data was supplied.",
+      publication: { discoveredCount: 0 },
+    });
+    expect(() => materializeNgeeAnnSectionResult({
+      answer: `Here is the result: ${malformed}`,
+      pack,
+      identity,
+      runId: "run:ngee:no-preamble-repair",
+    })).toThrow("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
+  });
+
   it("keeps every current time cell in a compact projection instead of rejecting a complete Pack", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const timeBehaviour = pack.facts.timeBehaviour;

@@ -434,6 +434,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnSectionIdentity("snapshot-ngee-prior-action-calibration", "time-behaviour"),
         identityContractRevision: "ngee-ann-section-v6",
         analysisPackRevision: "v1",
+        validatorRevision: "energyiq-project-section-acceptance-v5",
         investigatorPromptRevision: "energyiq-project-section-discovery-v3",
       };
       const priorActionCalibrationArtifact = completeSectionV4(
@@ -443,6 +444,20 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       );
       expect(store.energyIq.overviewAiArtifacts.get(priorActionCalibrationIdentity))
         .toMatchObject({ id: priorActionCalibrationArtifact.id, status: "available" });
+
+      const priorTimezoneIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-prior-timezone", "time-behaviour"),
+        identityContractRevision: "ngee-ann-section-v7",
+        validatorRevision: "energyiq-project-section-acceptance-v5",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v4",
+      };
+      const priorTimezoneArtifact = completeSectionV4(
+        store,
+        priorTimezoneIdentity,
+        ngeeAnnSectionResult(priorTimezoneIdentity, "available"),
+      );
+      expect(store.energyIq.overviewAiArtifacts.get(priorTimezoneIdentity))
+        .toMatchObject({ id: priorTimezoneArtifact.id, status: "available" });
 
       const readableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-readable", "time-behaviour");
       const readableBase = ngeeAnnSectionResult(readableIdentity, "available");
@@ -1033,13 +1048,13 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v7",
+  identityContractRevision: "ngee-ann-section-v8",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v5",
+  validatorRevision: "energyiq-project-section-acceptance-v6",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
-  investigatorPromptRevision: "energyiq-project-section-discovery-v4",
+  investigatorPromptRevision: "energyiq-project-section-discovery-v5",
   capabilityRevision: "pack-only-v1",
   publicationRevision: "energyiq-project-section-publication-v1",
 });

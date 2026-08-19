@@ -571,7 +571,8 @@ const requireSectionInterpretationResult = (
     || identity.identityContractRevision === "ngee-ann-section-v4"
     || identity.identityContractRevision === "ngee-ann-section-v5"
     || identity.identityContractRevision === "ngee-ann-section-v6"
-    || identity.identityContractRevision === "ngee-ann-section-v7") {
+    || identity.identityContractRevision === "ngee-ann-section-v7"
+    || identity.identityContractRevision === "ngee-ann-section-v8") {
     requireProjectSectionInterpretationResultV1(parsed, identity);
     return;
   }
@@ -600,11 +601,14 @@ const requireProjectSectionInterpretationResultV1 = (
   const publication = parsed.publication;
   if (identity.rendererKey !== "ngee-ann-overview"
     || identity.analysisPackId !== "ngee-ann-section-pack"
-    || (identity.identityContractRevision === "ngee-ann-section-v7"
+    || ((identity.identityContractRevision === "ngee-ann-section-v7"
+      || identity.identityContractRevision === "ngee-ann-section-v8")
       ? identity.analysisPackRevision !== "v2"
       : identity.analysisPackRevision !== "v1")
     || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
-    || !((identity.identityContractRevision === "ngee-ann-section-v7"
+    || !((identity.identityContractRevision === "ngee-ann-section-v8"
+      && identity.validatorRevision === "energyiq-project-section-acceptance-v6")
+      || (identity.identityContractRevision === "ngee-ann-section-v7"
       && identity.validatorRevision === "energyiq-project-section-acceptance-v5")
       || (identity.identityContractRevision === "ngee-ann-section-v6"
       && identity.validatorRevision === "energyiq-project-section-acceptance-v5")
@@ -671,7 +675,11 @@ const validProjectSectionPromptRevision = (
     && identity.identityContractRevision !== "ngee-ann-section-v4"
     && identity.identityContractRevision !== "ngee-ann-section-v5"
     && identity.identityContractRevision !== "ngee-ann-section-v6"
-    && identity.identityContractRevision !== "ngee-ann-section-v7") return false;
+    && identity.identityContractRevision !== "ngee-ann-section-v7"
+    && identity.identityContractRevision !== "ngee-ann-section-v8") return false;
+  if (identity.identityContractRevision === "ngee-ann-section-v8") {
+    return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v5";
+  }
   if (identity.identityContractRevision === "ngee-ann-section-v7") {
     return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v4";
   }
