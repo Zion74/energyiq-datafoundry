@@ -33,6 +33,7 @@ describe("EnergyIQ template change proposal module", () => {
         published_at: "2026-08-19T00:00:00.000Z",
       });
       const current = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        renderer_key: "preschool-overview",
         project_id: "project-change",
         expected_base_revision_id: legacyBase.revision_id,
         definition: {

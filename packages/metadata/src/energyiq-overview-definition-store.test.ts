@@ -14,6 +14,7 @@ describe("EnergyIqOverviewDefinitionStore", () => {
       const base = metadata.energyIq.templates.getLatestProjectRevision("project-definition")!;
 
       const published = metadata.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+        renderer_key: "ngee-ann-overview",
         project_id: "project-definition",
         expected_base_revision_id: base.revision_id,
         definition: {

@@ -93,12 +93,12 @@ export const compileEnergyIqOverviewDefinition = (input: {
             navigation_label: section.title,
             description: section.managementQuestion,
           })),
-          components: definition.sections.flatMap((section) => section.blocks.map((block) => ({
-            placement_id: block.key,
-            component_revision_id: block.capabilityRevisionId,
-            enabled: true,
-            section_id: section.key,
-          }))),
+          // The Overview Definition may reuse one Capability across different
+          // report windows. The legacy Template document only permits one
+          // placement per Component revision, so keep its first placement as
+          // a compatibility projection; the immutable Definition remains the
+          // complete Stage 5 rendering contract.
+          components: uniqueCapabilityPlacements(definition),
         },
       ],
     },
@@ -129,6 +129,22 @@ export const compileEnergyIqOverviewDefinition = (input: {
     templateDocument: canonicalTemplate,
     diff: baseDefinition ? describeDefinitionChanges(baseDefinition, definition) : [],
   };
+};
+
+const uniqueCapabilityPlacements = (
+  definition: EnergyIqOverviewDefinition,
+): EnergyIqTemplateDraftDocument["templates"][number]["components"] => {
+  const seen = new Set<string>();
+  return definition.sections.flatMap((section) => section.blocks.flatMap((block) => {
+    if (seen.has(block.capabilityRevisionId)) return [];
+    seen.add(block.capabilityRevisionId);
+    return [{
+      placement_id: block.key,
+      component_revision_id: block.capabilityRevisionId,
+      enabled: true,
+      section_id: section.key,
+    }];
+  }));
 };
 
 export const parseEnergyIqOverviewDefinition = (value: unknown): EnergyIqOverviewDefinition =>

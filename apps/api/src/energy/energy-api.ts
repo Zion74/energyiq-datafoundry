@@ -581,7 +581,7 @@ export const handleEnergyApiRequest = async (
       const projectId = decodeURIComponent(segments[1] ?? "");
       const access = requireEnergyProjectAccess(context, user, projectId);
       const project = context.metadataStore.energyIq.getProject(projectId);
-      const rendererKey = resolveProjectOverviewProfile(projectId)?.rendererKey ?? null;
+      const rendererKey = resolveProjectOverviewProfile(context.metadataStore, projectId)?.rendererKey ?? null;
       const projectAdapter = findProjectOverviewAiAdapter(context.projectOverviewAiAdapters, rendererKey);
       const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
       const scopeId = requestUrl.searchParams.get("scopeId") ?? project.root_scope_id;
@@ -1028,7 +1028,7 @@ export const handleEnergyApiRequest = async (
           status: 200,
           body: createSuccessResult({
             project: context.metadataStore.energyIq.getProject(projectId),
-            overviewProfile: resolveProjectOverviewProfile(projectId),
+            overviewProfile: resolveProjectOverviewProfile(context.metadataStore, projectId),
             draft,
             validation: context.metadataStore.energyIq.projectSetup.validateDraft(projectId),
             published: {
@@ -1242,7 +1242,7 @@ export const handleEnergyApiRequest = async (
           proposals: context.metadataStore.energyIq.templateChanges.listProject(projectId),
           rendererBoundary: {
             previewRenderer: "structured-template",
-            customerRenderer: resolveProjectOverviewProfile(projectId)?.rendererKey ?? "energy-template",
+            customerRenderer: resolveProjectOverviewProfile(context.metadataStore, projectId)?.rendererKey ?? "energy-template",
             customerRendererAutomaticallyReordered: false,
             message: "This preview validates the structured Template Revision. A registered customer renderer remains unchanged until its renderer bridge or Coding Agent stage is approved.",
           },
@@ -1778,7 +1778,7 @@ const requireProjectOverviewReleaseRules = (
   user: UserRecord,
   dependencies: EnergyApiDependencies,
 ): Promise<void> => {
-  const profile = resolveProjectOverviewProfile(projectId);
+  const profile = resolveProjectOverviewProfile(context.metadataStore, projectId);
   if (profile?.rendererKey !== "ngee-ann-overview") return Promise.resolve();
   const selectedRuleRevisionIds = context.metadataStore.energyIq.rules
     .getProjectConfig(projectId).selected_rule_revision_ids;
@@ -2119,7 +2119,7 @@ const generateOverviewAiAfterProjectMutation = async (input: {
   operation: "materialization" | "Project publish";
 }): Promise<Record<string, unknown>> => {
   const project = input.context.metadataStore.energyIq.getProject(input.projectId);
-  const profile = resolveProjectOverviewProfile(project.id);
+  const profile = resolveProjectOverviewProfile(input.context.metadataStore, project.id);
   if (profile?.rendererKey === "preschool-overview") {
     const identity = await input.context.overviewAiWorkflow.resolveCurrentIdentity({
       projectId: project.id,
@@ -2949,6 +2949,7 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
   if (value.analysisWindow !== undefined
     && value.analysisWindow !== "latest-complete-day"
     && value.analysisWindow !== "latest-complete-7d"
+    && value.analysisWindow !== "current-project-overview"
     && value.analysisWindow !== "current-overview-28d"
     && value.analysisWindow !== "current-month-to-date") {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_INVALID");
@@ -2965,6 +2966,7 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     ...(typeof value.to === "string" ? { to: value.to } : {}),
     ...(value.analysisWindow === "latest-complete-day"
       || value.analysisWindow === "latest-complete-7d"
+      || value.analysisWindow === "current-project-overview"
       || value.analysisWindow === "current-overview-28d"
       || value.analysisWindow === "current-month-to-date"
       ? { analysisWindow: value.analysisWindow }

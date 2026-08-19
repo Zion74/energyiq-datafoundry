@@ -33,6 +33,7 @@ import {
 } from "./overview-section-navigation";
 import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { OverviewChangeDialog } from "./overview-change-dialog";
+import { formatReportDataThrough } from "./overview-report-time";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
 import { buildPreschoolAiRunInput, invalidatePreschoolAiRun } from "./preschool-ai-run";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
@@ -528,11 +529,13 @@ function PublishedDecisionDashboardView({
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
                 <span className="font-semibold text-foreground">{selectedProject?.name}</span>
-                {isNgeeAnnRenderer ? <span>Calendar month to date</span> : null}
+                {currentSnapshot?.reportTimeContext?.windows[0]?.label ? (
+                  <span>{currentSnapshot.reportTimeContext.windows[0].label}</span>
+                ) : isNgeeAnnRenderer ? <span>Calendar month to date</span> : null}
                 {currentSnapshot ? <span>{formatAnalysisWindow(currentSnapshot)}</span> : null}
                 {currentAnalysis ? <span>{currentAnalysis.context.timezone}</span> : null}
-                {isNgeeAnnRenderer && currentSnapshot ? (
-                  <span>Data through {formatDataThrough(currentSnapshot)}</span>
+                {currentSnapshot ? (
+                  <span>Data through {formatReportDataThrough(currentSnapshot)}</span>
                 ) : null}
               </div>
             </>
@@ -886,9 +889,7 @@ export function currentOverviewAnalysisRequest(
     projectId,
     scopeId: view.scopeId?.trim() || "project",
     resource: view.resource ?? "electricity",
-    analysisWindow: projectId === "ngee-ann-polytechnic"
-      ? "current-month-to-date"
-      : "current-overview-28d",
+    analysisWindow: "current-project-overview",
     ...(view.currentOverviewPin ? {
       from: view.currentOverviewPin.from,
       to: view.currentOverviewPin.to,
@@ -1091,15 +1092,6 @@ function formatAnalysisWindow(snapshot: EnergyProjectAnalysisSnapshotDto): strin
   const from = formatter.format(new Date(snapshot.context.from));
   const to = formatter.format(new Date(Date.parse(snapshot.context.to) - 1));
   return `${from}–${to}`;
-}
-
-function formatDataThrough(snapshot: EnergyProjectAnalysisSnapshotDto): string {
-  return new Intl.DateTimeFormat("en-SG", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    timeZone: snapshot.context.timezone,
-  }).format(new Date(Date.parse(snapshot.context.to) - 1));
 }
 
 function sectionDomId(sectionId: string): string {

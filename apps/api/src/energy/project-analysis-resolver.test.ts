@@ -229,7 +229,7 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "project",
           resource: "electricity",
-          analysisWindow: "current-month-to-date",
+          analysisWindow: "current-project-overview",
         },
         databasePath,
         now: new Date("2026-08-05T00:00:00.000Z"),
@@ -241,6 +241,44 @@ describe("ProjectAnalysisResolver", () => {
         from: "2026-05-31T16:00:00.000Z",
         to: NGEE_ANN_GOLDEN.selection.period.to,
       });
+      expect(currentProjectResult.snapshot.reportTimeContext).toMatchObject({
+        contractRevision: "energyiq-report-time-context@1",
+        binding: {
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          dataSnapshotId: currentProjectResult.snapshot.dataSnapshot.id,
+          projectReleaseId: currentProjectResult.snapshot.projectRelease.id,
+        },
+        timezone: "Asia/Singapore",
+        asOf: "2026-08-05T00:00:00.000Z",
+        acceptedDataEndExclusive: NGEE_ANN_GOLDEN.selection.period.to,
+        dataThroughLocalDate: "2026-06-16",
+        lastRefreshedAt: "2026-08-05T00:00:00.000Z",
+        policyId: "ngee-ann-report-time",
+        policyRevision: "1",
+      });
+      expect(currentProjectResult.snapshot.reportTimeContext?.windows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          windowId: "current-month-progress",
+          label: "Current month to date",
+          phase: "partial",
+          from: "2026-05-31T16:00:00.000Z",
+          toExclusive: NGEE_ANN_GOLDEN.selection.period.to,
+        }),
+        expect.objectContaining({
+          windowId: "recent-operations",
+          label: "Recent 28 complete days",
+          completeDayCount: 28,
+        }),
+        expect.objectContaining({
+          windowId: "next-month-outlook",
+          phase: "forecast",
+          from: "2026-06-30T16:00:00.000Z",
+          toExclusive: "2026-07-31T16:00:00.000Z",
+        }),
+      ]));
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(currentProjectResult.snapshot.projectRelease.ruleRevisionIds)
         .toContain("comparison.daily_usage_above_baseline@1");
@@ -662,9 +700,10 @@ describe("ProjectAnalysisResolver", () => {
           projectId: PRESCHOOL_GOLDEN.projectId,
           scopeId: "project",
           resource: "electricity",
-          analysisWindow: "current-overview-28d",
+          analysisWindow: "current-project-overview",
         },
         databasePath,
+        now: new Date("2026-08-05T00:00:00.000Z"),
       });
       expect(current.status).toBe("ready");
       if (current.status !== "ready") throw new Error("Expected current Preschool analysis");
@@ -685,6 +724,7 @@ describe("ProjectAnalysisResolver", () => {
           expectedProjectReleaseId: current.snapshot.projectRelease.id,
         },
         databasePath,
+        now: new Date("2026-08-05T00:00:00.000Z"),
       });
 
       expect(pinned.status).toBe("ready");
@@ -695,6 +735,26 @@ describe("ProjectAnalysisResolver", () => {
         dataSnapshotId: current.snapshot.context.dataSnapshotId,
         projectReleaseId: current.snapshot.projectRelease.id,
       });
+      expect(pinned.snapshot.reportTimeContext).toMatchObject({
+        policyId: "preschool-report-time",
+        policyRevision: "1",
+        dataThroughLocalDate: "2026-07-07",
+      });
+      expect(pinned.snapshot.reportTimeContext?.windows).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          windowId: "current-overview",
+          label: "Recent 28 complete days",
+          phase: "complete",
+          from: "2026-06-09T16:00:00.000Z",
+          toExclusive: "2026-07-07T16:00:00.000Z",
+          completeDayCount: 28,
+        }),
+        expect.objectContaining({
+          windowId: "next-month-outlook",
+          label: "Next complete calendar month",
+          phase: "forecast",
+        }),
+      ]));
     } finally {
       metadata.close();
       removeTemporaryFixture(root);

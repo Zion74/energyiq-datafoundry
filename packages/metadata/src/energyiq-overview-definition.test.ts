@@ -96,6 +96,48 @@ describe("compileEnergyIqOverviewDefinition", () => {
     });
   });
 
+  it("keeps repeated Capability windows in the Definition while projecting one legacy placement", () => {
+    const result = compileEnergyIqOverviewDefinition({
+      definition: {
+        contractRevision: "energyiq-overview-definition@1",
+        timePolicyRevisionId: "operations-policy@1",
+        sections: [
+          {
+            key: "current-performance",
+            title: "Current performance",
+            managementQuestion: "What is happening now?",
+            primaryWindowId: "month-to-date",
+            blocks: [{ key: "current-consumption", capabilityRevisionId: "overview.consumption@1" }],
+          },
+          {
+            key: "historical-trend",
+            title: "Historical trend",
+            managementQuestion: "How does the current result compare with complete months?",
+            primaryWindowId: "completed-months",
+            blocks: [{ key: "historical-consumption", capabilityRevisionId: "overview.consumption@1" }],
+          },
+        ],
+      },
+      catalog: [consumptionCapability()],
+      reportTimePolicy: {
+        policyId: "operations-policy",
+        revision: "1",
+        windows: [
+          { windowId: "month-to-date", role: "current", label: "Month to date", strategy: { kind: "calendar_month_to_date" } },
+          { windowId: "completed-months", role: "trend", label: "Completed months", strategy: { kind: "completed_calendar_months", months: 3 } },
+        ],
+      },
+    });
+
+    expect(result.definition.sections).toHaveLength(2);
+    expect(result.definition.sections[1]?.blocks[0]).toMatchObject({
+      key: "historical-consumption",
+      windowId: "completed-months",
+    });
+    expect(result.templateDocument.templates[0]?.components).toHaveLength(1);
+    expect(result.templateDocument.templates[0]?.components[0]?.placement_id).toBe("current-consumption");
+  });
+
   it("rejects Renderer and layout implementation details outside the Agent contract", () => {
     expect(() => compileEnergyIqOverviewDefinition({
       definition: {

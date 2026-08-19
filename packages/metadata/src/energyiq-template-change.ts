@@ -263,6 +263,7 @@ export class EnergyIqTemplateChangeStore {
               input.project_id,
               proposal.proposal.desiredDefinition.timePolicyRevisionId,
             ),
+            renderer_key: this.requireBaseRendererKey(proposal.base_revision_id),
             published_by: input.published_by,
             published_at: input.published_at,
           }).revision
@@ -343,6 +344,14 @@ export class EnergyIqTemplateChangeStore {
     const record = this.reportTimePolicies.get(projectId, revisionId);
     if (!record) throw new Error("ENERGYIQ_REPORT_TIME_POLICY_REQUIRED");
     return record.policy;
+  }
+
+  private requireBaseRendererKey(
+    templateRevisionId: string,
+  ): "ngee-ann-overview" | "preschool-overview" {
+    const rendererKey = this.overviewDefinitions.get(templateRevisionId)?.renderer_key;
+    if (!rendererKey) throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_BASE_REQUIRED");
+    return rendererKey;
   }
 }
 

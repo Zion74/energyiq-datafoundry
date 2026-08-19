@@ -11,6 +11,8 @@ describe("presentAdminOverviewProfile", () => {
       rendererKey: "preschool-overview",
       rendererVersion: "1",
       contractVersion: "project-analysis-snapshot@1",
+      currentAnalysisWindow: "current-overview-28d",
+      source: "overview-definition",
       horizons: {
         latestStatus: "latest-complete-day",
         shortTermDays: 7,
@@ -21,7 +23,7 @@ describe("presentAdminOverviewProfile", () => {
       revisionLabel: "preschool-overview@1",
       latestStatusLabel: "Latest complete day",
       shortTermLabel: "Rolling 7 days",
-      mainRangeLabel: "Rolling 28 days",
+      mainRangeLabel: "Rolling 28 complete days",
     });
   });
 
@@ -30,6 +32,8 @@ describe("presentAdminOverviewProfile", () => {
       rendererKey: "ngee-ann-overview" as const,
       rendererVersion: "1" as const,
       contractVersion: "project-analysis-snapshot@1" as const,
+      currentAnalysisWindow: "current-month-to-date" as const,
+      source: "overview-definition" as const,
       horizons: {
         latestStatus: "latest-complete-day" as const,
         shortTermDays: 7 as const,

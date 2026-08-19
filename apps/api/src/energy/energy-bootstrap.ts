@@ -1,4 +1,8 @@
 import type {
+  EnergyIqOverviewDefinition,
+  ReportTimePolicyRevision,
+} from "@datafoundry/contracts";
+import type {
   EnergyIqProjectSetupDocument,
   MetadataStore
 } from "@datafoundry/metadata";
@@ -83,7 +87,139 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     user_id: "dev-user",
     role: "editor"
   });
+
+  ensurePilotOverviewDefinition(
+    metadataStore,
+    NGEE_ANN_PROJECT_ID,
+    "ngee-ann-overview",
+    NGEE_ANN_REPORT_TIME_POLICY,
+    NGEE_ANN_OVERVIEW_DEFINITION,
+  );
+  ensurePilotOverviewDefinition(
+    metadataStore,
+    PRESCHOOL_PROJECT_ID,
+    "preschool-overview",
+    PRESCHOOL_REPORT_TIME_POLICY,
+    PRESCHOOL_OVERVIEW_DEFINITION,
+  );
 };
+
+const ensurePilotOverviewDefinition = (
+  metadataStore: MetadataStore,
+  projectId: string,
+  rendererKey: "ngee-ann-overview" | "preschool-overview",
+  policy: ReportTimePolicyRevision,
+  definition: EnergyIqOverviewDefinition,
+): void => {
+  const policyRecord = metadataStore.energyIq.reportTimePolicies.publish({
+    project_id: projectId,
+    policy,
+    published_by: "dev-user",
+    published_at: new Date().toISOString(),
+  });
+  const revision = metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+  if (!revision || metadataStore.energyIq.overviewDefinitions.get(revision.revision_id)) return;
+  metadataStore.energyIq.overviewDefinitions.attachMigrationRecord({
+    project_id: projectId,
+    template_revision_id: revision.revision_id,
+    renderer_key: rendererKey,
+    definition,
+    report_time_policy: policyRecord.policy,
+  });
+};
+
+const NGEE_ANN_REPORT_TIME_POLICY: ReportTimePolicyRevision = {
+  policyId: "ngee-ann-report-time",
+  revision: "1",
+  windows: [
+    { windowId: "current-month-progress", role: "current_progress", label: "Current month to date", strategy: { kind: "calendar_month_to_date" } },
+    { windowId: "recent-operations", role: "recent_operations", label: "Recent 28 complete days", strategy: { kind: "rolling_complete_days", days: 28 } },
+    { windowId: "completed-month-trend", role: "historical_trend", label: "Previous 3 complete months", strategy: { kind: "completed_calendar_months", months: 3 } },
+    { windowId: "same-progress-comparison", role: "comparison", label: "Previous months at the same progress", strategy: { kind: "prior_equivalent_progress", months: 3, sourceWindowId: "current-month-progress" } },
+    { windowId: "next-month-outlook", role: "forecast", label: "Next complete calendar month", strategy: { kind: "next_complete_calendar_month" } },
+    { windowId: "day-type-reference", role: "day_type_baseline", label: "Workday, weekend and public holiday reference", strategy: { kind: "same_day_type_baseline", lookbackDays: 90, sourceWindowId: "recent-operations" } },
+  ],
+};
+
+const NGEE_ANN_OVERVIEW_DEFINITION: EnergyIqOverviewDefinition = {
+  contractRevision: "energyiq-overview-definition@1",
+  timePolicyRevisionId: "ngee-ann-report-time@1",
+  sections: [
+    section("executive-summary", "Executive summary", "What needs management attention this month?", "current-month-progress", [
+      block("ngee-executive-actions", "decision.executive_actions@1", "current-month-progress", "primary"),
+      block("ngee-consumption", "overview.consumption@1", "current-month-progress", "primary"),
+    ]),
+    section("cost-and-trend", "Cost and trend", "How is current-month performance changing against comparable history?", "current-month-progress", [
+      block("ngee-month-trend", "overview.consumption@1", "completed-month-trend"),
+      block("ngee-same-progress", "comparison.child_scope_ranking@1", "same-progress-comparison"),
+    ], ["completed-month-trend", "same-progress-comparison"]),
+    section("operating-patterns", "Operating patterns", "Which hours and day types explain the current operating pattern?", "recent-operations", [
+      block("ngee-operating-pattern", "time.operating_pattern@1", "recent-operations"),
+      block("ngee-off-hours", "time.off_hours@1", "day-type-reference"),
+    ], ["day-type-reference"]),
+    section("circuit-analysis", "Circuit analysis", "Which Levels and Circuits account for the observed use?", "recent-operations", [
+      block("ngee-circuit-breakdown", "composition.project_meter_breakdown@1", "recent-operations"),
+      block("ngee-recommendations", "decision.recommended_actions@1", "recent-operations"),
+    ]),
+  ],
+};
+
+const PRESCHOOL_REPORT_TIME_POLICY: ReportTimePolicyRevision = {
+  policyId: "preschool-report-time",
+  revision: "1",
+  windows: [
+    { windowId: "current-overview", role: "recent_operations", label: "Recent 28 complete days", strategy: { kind: "rolling_complete_days", days: 28 } },
+    { windowId: "current-month-progress", role: "current_progress", label: "Current month to date", strategy: { kind: "calendar_month_to_date" } },
+    { windowId: "next-month-outlook", role: "forecast", label: "Next complete calendar month", strategy: { kind: "next_complete_calendar_month" } },
+    { windowId: "day-type-reference", role: "day_type_baseline", label: "Workday, weekend and public holiday reference", strategy: { kind: "same_day_type_baseline", lookbackDays: 90, sourceWindowId: "current-overview" } },
+  ],
+};
+
+const PRESCHOOL_OVERVIEW_DEFINITION: EnergyIqOverviewDefinition = {
+  contractRevision: "energyiq-overview-definition@1",
+  timePolicyRevisionId: "preschool-report-time@1",
+  sections: [
+    section("portfolio-review", "Portfolio review", "What changed across all Centres and what needs attention?", "current-overview", [
+      block("preschool-executive-actions", "decision.executive_actions@1", "current-overview", "primary"),
+      block("preschool-consumption", "overview.consumption@1", "current-overview", "primary"),
+    ]),
+    section("benchmark-analysis", "Benchmark analysis", "Which Centres remain unusual after normalising for area and people?", "current-overview", [
+      block("preschool-area-intensity", "comparison.area_intensity@1", "current-overview"),
+      block("preschool-people-intensity", "comparison.people_intensity@1", "current-overview"),
+    ]),
+    section("standby-energy", "Standby energy", "What remains powered after closing?", "current-overview", [
+      block("preschool-off-hours", "time.off_hours@1", "day-type-reference"),
+    ], ["day-type-reference"]),
+    section("operating-hours", "Operating hours", "Which operating-hour patterns deserve review?", "current-overview", [
+      block("preschool-operating-pattern", "time.operating_pattern@1", "current-overview"),
+      block("preschool-meter-breakdown", "composition.project_meter_breakdown@1", "current-overview"),
+    ]),
+    section("monthly-outlook", "Monthly energy outlook", "How is the current month tracking and what is the next-month outlook?", "current-month-progress", [
+      block("preschool-month-progress", "overview.consumption@1", "current-month-progress"),
+      block("preschool-outlook-evidence", "evidence.exceptions@1", "next-month-outlook", "supporting"),
+    ], ["next-month-outlook"]),
+  ],
+};
+
+function section(
+  key: string,
+  title: string,
+  managementQuestion: string,
+  primaryWindowId: string,
+  blocks: EnergyIqOverviewDefinition["sections"][number]["blocks"],
+  supportingWindowIds: string[] = [],
+): EnergyIqOverviewDefinition["sections"][number] {
+  return { key, title, managementQuestion, primaryWindowId, supportingWindowIds, blocks };
+}
+
+function block(
+  key: string,
+  capabilityRevisionId: string,
+  windowId: string,
+  emphasis: "primary" | "standard" | "supporting" = "standard",
+): EnergyIqOverviewDefinition["sections"][number]["blocks"][number] {
+  return { key, capabilityRevisionId, windowId, emphasis };
+}
 
 const ensureNgeeAnnDefaultRuleConfig = (metadataStore: MetadataStore): void => {
   const config = metadataStore.energyIq.rules.getProjectConfig(NGEE_ANN_PROJECT_ID);

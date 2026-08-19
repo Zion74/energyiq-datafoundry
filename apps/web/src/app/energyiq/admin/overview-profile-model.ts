@@ -19,7 +19,9 @@ export function presentAdminOverviewProfile(
     revisionLabel: `${profile.rendererKey}@${profile.rendererVersion}`,
     latestStatusLabel: "Latest complete day",
     shortTermLabel: `Rolling ${profile.horizons.shortTermDays} days`,
-    mainRangeLabel: `Rolling ${profile.horizons.mainDays} days`,
+    mainRangeLabel: profile.currentAnalysisWindow === "current-month-to-date"
+      ? "Calendar month to date"
+      : `Rolling ${profile.horizons.mainDays} complete days`,
   };
 }
 
