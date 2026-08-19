@@ -177,8 +177,11 @@ describe("Overview AI server stage options", () => {
       additionalAiInsightSubmission: true,
       disableTools: false,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
+      runTimeoutMs: 120_000,
       trustedStageCapability: "energyiq-additional-insight-discovery",
     });
+    expect(resolveOverviewAiAgentRuntimeOptions("additional-insights-discovery", trusted))
+      .toMatchObject({ runTimeoutMs: 120_000 });
     expect(trusted?.structuredOutput).toBeUndefined();
     expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
     expect(Object.keys(createPreschoolAdditionalAiInsightTrustedStageTools({

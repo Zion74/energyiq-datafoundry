@@ -187,6 +187,7 @@ type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewA
 type OverviewAiTrustedRuntimeOverride = {
   structuredOutput?: OverviewAiStructuredOutput | undefined;
   conversationMessageMaxChars: number;
+  runTimeoutMs?: number;
   additionalAiInsightSubmission?: true;
   disableTools?: false;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
@@ -194,6 +195,7 @@ type OverviewAiTrustedRuntimeOverride = {
 };
 
 const PACK_V2_SECTION_MESSAGE_MAX_CHARS = 110_000;
+const PRESCHOOL_ADDITIONAL_DISCOVERY_RUN_TIMEOUT_MS = 120_000;
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -297,6 +299,9 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
             ? { additionalAiInsightSubmission: true as const }
             : {}),
         }
+      : {}),
+    ...(nativeAdditionalSubmission
+      ? { runTimeoutMs: PRESCHOOL_ADDITIONAL_DISCOVERY_RUN_TIMEOUT_MS }
       : {}),
     ...(input.stage === "additional-insights-transition"
       && input.identity
@@ -410,6 +415,7 @@ export const resolveOverviewAiAgentRuntimeOptions = (
   overviewAiCandidateSubmission: boolean;
   additionalAiInsightSubmission?: boolean;
   reasoningModel: false;
+  runTimeoutMs?: number;
   structuredOutput?: OverviewAiStructuredOutput | undefined;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
   trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
@@ -1502,7 +1508,12 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
               ? { trustedModelProfileSnapshot: this.input.trustedModelProfileSnapshot }
               : {}),
           }));
-          if (overviewAiStageOptions) reasoningModel = overviewAiStageOptions.reasoningModel;
+          if (overviewAiStageOptions) {
+            reasoningModel = overviewAiStageOptions.reasoningModel;
+            if (overviewAiStageOptions.runTimeoutMs !== undefined) {
+              runTimeoutMs = overviewAiStageOptions.runTimeoutMs;
+            }
+          }
           if (useEnergyContext && energyScopedDataSource) {
             effectiveRunConfig = {
               ...effectiveRunConfig,
