@@ -32,7 +32,7 @@ import type {
 import {
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
-  parseEnergyIqTemplateChangeProposal,
+  parseEnergyIqTemplateChangeProposalValue,
   resolveEnergyIqMaterializationBlockingReasons,
   resolveEnergyIqProjectDataReadiness,
 } from "@datafoundry/metadata";
@@ -1287,7 +1287,7 @@ export const handleEnergyApiRequest = async (
           data_snapshot_id: generated.identity.dataSnapshotId,
           scope_id: generated.identity.scopeId,
           instruction,
-          proposal: parseEnergyIqTemplateChangeProposal(generated.proposal),
+          proposal: parseEnergyIqTemplateChangeProposalValue(generated.proposal),
           created_by: user.id,
           created_at: new Date().toISOString(),
         });

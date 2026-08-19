@@ -131,6 +131,9 @@ export const compileEnergyIqOverviewDefinition = (input: {
   };
 };
 
+export const parseEnergyIqOverviewDefinition = (value: unknown): EnergyIqOverviewDefinition =>
+  canonicalizeDefinition(value);
+
 const describeDefinitionChanges = (
   base: EnergyIqOverviewDefinition,
   desired: EnergyIqOverviewDefinition,

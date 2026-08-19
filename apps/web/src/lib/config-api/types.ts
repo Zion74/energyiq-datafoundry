@@ -2916,6 +2916,51 @@ export type EnergyTemplateChangeDiffItemDto = {
   template_id: string;
   placement_id: string;
   summary: string;
+} | {
+  kind: "section_added" | "section_removed";
+  sectionKey: string;
+  index: number;
+} | {
+  kind: "section_order_changed";
+  before: string[];
+  after: string[];
+} | {
+  kind: "section_updated";
+  sectionKey: string;
+  changedFields: string[];
+} | {
+  kind: "block_added" | "block_removed";
+  sectionKey: string;
+  blockKey: string;
+  index: number;
+} | {
+  kind: "block_order_changed";
+  sectionKey: string;
+  before: string[];
+  after: string[];
+} | {
+  kind: "block_updated";
+  sectionKey: string;
+  blockKey: string;
+  changedFields: string[];
+};
+
+export type EnergyOverviewDefinitionDto = {
+  contractRevision: "energyiq-overview-definition@1";
+  timePolicyRevisionId: string;
+  sections: Array<{
+    key: string;
+    title: string;
+    managementQuestion: string;
+    primaryWindowId: string;
+    supportingWindowIds: string[];
+    blocks: Array<{
+      key: string;
+      capabilityRevisionId: string;
+      windowId: string;
+      emphasis: "primary" | "standard" | "supporting";
+    }>;
+  }>;
 };
 
 export type EnergyTemplateChangeProposalDto = {
@@ -2930,6 +2975,11 @@ export type EnergyTemplateChangeProposalDto = {
     title: string;
     rationale: string;
     operations: Array<Record<string, unknown>>;
+  } | {
+    contractRevision: "energyiq-overview-definition-change@1";
+    title: string;
+    rationale: string;
+    desiredDefinition: EnergyOverviewDefinitionDto;
   };
   document: EnergyTemplateDraftDocumentDto;
   diff: EnergyTemplateChangeDiffItemDto[];

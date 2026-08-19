@@ -820,7 +820,7 @@ describe("Overview AI server stage options", () => {
     expect(resolveOverviewAiStageStructuredOutput("template-proposal")?.schema).toMatchObject({
       type: "object",
       additionalProperties: false,
-      required: ["title", "rationale", "operations"],
+      required: ["contractRevision", "title", "rationale", "desiredDefinition"],
     });
     expect(shouldUseEnergyContextForOverviewAiStage("template-proposal")).toBe(false);
     expect(shouldIncludeProjectAnalysisEvidenceContext("template-proposal")).toBe(false);
