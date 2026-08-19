@@ -116,7 +116,7 @@ Mapping schema v2 的不可变身份，指纹覆盖 Physical Meter identity、Pu
 平台发布的不可变时间窗口规则版本，定义 Rolling complete days、Month-to-date、完整历史月、同进度比较、Forecast horizon 或 Day-type baseline 等算法。Project 只能引用已注册 Revision，不能注入任意日期代码。
 
 **Section Time Binding**<br>
-Project Overview Profile 中 Section 到 primary/supporting named windows 的绑定。每条 Fact、Evidence 和 AI Finding 必须记录实际使用的 windowId，不能用含糊的全页 Period 冒充。
+Overview Definition 中 Section 到 primary/supporting named windows 的绑定。每条 Fact、Evidence 和 AI Finding 必须记录实际使用的 windowId，不能用含糊的全页 Period 冒充。
 
 **Data Freshness**<br>
 最新已接受读数相对 Project 计划同步时间的新鲜程度。每日批次只能证明数据最近收到，不能证明设备此刻实时在线。
@@ -167,11 +167,11 @@ EnergyIQ 自己维护、允许模板引用的版本化模块注册表。每个 C
 **Component Revision**<br>
 Catalog 中一个不可变模块定义版本。只有受控发布流程可以新增；Template 和 Agent 必须引用明确 Revision，不能使用未注册的临时代码。
 
-**EnergyIQ Template Schema**<br>
-EnergyIQ 自有的版本化模板协议。它定义 Section、Placement、Component Revision、Query Policy 与 Interaction，只保存稳定业务语义，不保存任意 SQL、React、CSS 或底层图表库配置。
+**Overview Definition Revision**<br>
+EnergyIQ 面向管理员与 Stage 5 Agent 的单一、不可变 Overview authoring contract。它只描述 Overview、Section、Catalog Block、命名 Window 与 Presentation intent；不包含 Renderer key、React/CSS、图表库 option、SQL、Artifact Store 或 Provider 生命周期。经校验和人工发布后，它就是 Project Template Revision 的业务定义，不再另建 Project Overview Profile 真相源。
 
 **Placement**<br>
-某个 Component Revision 在模板中的实例位置，包含稳定 placement_id、所在 Section、顺序、受控 Layout 与 Presentation。Agent 创建的是 Placement 或组合，不是新的 React 代码。
+Overview Definition 经服务端编译后产生的内部组件实例。它可以包含 placement_id、Layout 与具体 Presentation，但不是 Stage 5 Agent 的输入或输出协议。
 
 **Analysis Spec**<br>
 Placement 使用的受控分析描述，引用已发布 Metric/Rule，并从白名单选择 Dimension、Time Grain、Comparison、Normalisation、Ranking、Share、Filter 和营业/非营业切片。它由确定性查询模块编译，不允许任意 SQL。
@@ -188,9 +188,6 @@ Template Revision、Component Catalog、Energy Query Context、Metric/Rule 结�
 **Project Template**  
 项目总览使用的结构化模板。
 
-**Project Overview Profile Revision**<br>
-Project Template/Renderer、Section Time Binding 与所需平台 Capability 的不可变组合。它保留项目业务语义，但只组合平台已发布的时间策略和能力。
-
 **Tier Template**  
 某个 Tier Definition 下全部节点共用的结构化模板。首期不提供 per-node override。
 
@@ -198,7 +195,7 @@ Project Template/Renderer、Section Time Binding 与所需平台 Capability 的�
 尚未发布的结构化模板，可以由 AI 辅助生成并由 admin 调整。
 
 **Template Revision**  
-经过校验、预览和人工发布的不可变模板版本。
+经过校验、固定 Snapshot 预览和人工发布的不可变 Overview Definition；服务端可由它确定性编译 Placement 和 Render Plan。
 
 **Analysis Run**  
 因 Save analysis、Generate report、定时报告或保存 AI 正式结果而产生的不可变分析记录，固定 Template Revision、Scope、Period、Data Snapshot、结果和有关版本。Run 归属 Workspace、共享可见，并记录创建人和创建时间；普通 Interactive Analysis 不创建 Run。

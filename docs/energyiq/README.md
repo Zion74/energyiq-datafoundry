@@ -19,7 +19,7 @@
 11. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
 12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力、2026-08-15 Preschool Stage 1–3 v12 可用化、真实 Provider、A→B、多账户与 Ngee Ann 后续依赖计划；
 13. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
-14. [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md)：平台统一命名窗口、身份与变化治理，Project Profile 保留自己的 Sections、事实投影和 AI 方法。
+14. [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md)：平台统一命名窗口、身份与变化治理；Stage 5 通过单一声明式 Overview Definition 组合 Sections、Catalog 能力与 AI 方法。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
 
