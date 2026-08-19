@@ -50,6 +50,7 @@ export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
 export * from "./energyiq-template-change.js";
+export * from "./energyiq-overview-definition.js";
 export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
