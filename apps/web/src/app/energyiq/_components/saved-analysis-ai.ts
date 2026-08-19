@@ -30,8 +30,8 @@ export async function runSavedAnalysisAiForSnapshot(
   }
 
   if (snapshot.renderer.key === "preschool-overview") {
-    const { buildPreschoolAiRunInput, getOrStartPreschoolAiRun } = await import("./preschool-ai-run");
-    const input = buildPreschoolAiRunInput(snapshot);
+    const { buildPreschoolAiArtifactReadInput, getOrStartPreschoolAiRun } = await import("./preschool-ai-run");
+    const input = buildPreschoolAiArtifactReadInput(snapshot);
     if (!input) return null;
     const result = await getOrStartPreschoolAiRun(input);
     if (result.status !== "available") return null;

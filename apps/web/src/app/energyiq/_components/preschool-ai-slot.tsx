@@ -14,13 +14,13 @@ import type {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import {
-  buildPreschoolAiRunInput,
+  buildPreschoolAiArtifactReadInput,
   getOrStartPreschoolAiRun,
   isPendingPreschoolSectionedReadModel,
   type PreschoolAiFinding,
   type PreschoolAiLegacyRunResult,
   type PreschoolAiProgress,
-  type PreschoolAiRunInput,
+  type PreschoolAiArtifactReadInput,
   type PreschoolAiRunResult,
   type PreschoolAiSectionId,
 } from "./preschool-ai-run";
@@ -67,11 +67,11 @@ export function PreschoolAiSlot({
   liveResult?: PreschoolAiRunResult;
   onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
-  startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
+  startRun?: (input: PreschoolAiArtifactReadInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
   additionalFeedbackClient?: PreschoolAdditionalFeedbackClient;
   additionalMethodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
-  const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
+  const input = useMemo(() => buildPreschoolAiArtifactReadInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
   const onResultRef = useRef(onResult);

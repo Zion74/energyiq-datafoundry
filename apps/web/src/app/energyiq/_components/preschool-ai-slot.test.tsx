@@ -45,6 +45,36 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("never starts a new AI run");
   });
 
+  it("restores current Layer 1-2 artifacts even when Layer 3 discovery inputs are unavailable", async () => {
+    const snapshot = preschoolGoldenSnapshot();
+    snapshot.preschoolAppliances = {
+      status: "unavailable",
+      reason: {
+        code: "PRESCHOOL_APPLIANCE_ALIAS_CONTRACT_UNSUPPORTED",
+        message: "The published Circuit aliases do not match the accepted Preschool Appliance contract.",
+      },
+      evidence: {
+        projectReleaseId: snapshot.projectRelease.id,
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        hierarchyRevisionId: snapshot.context.hierarchyRevisionId,
+        meterMappingRevisionId: snapshot.context.meterMappingRevisionId,
+        sourceKind: "circuit",
+      },
+    };
+    const startRun = vi.fn(() => new Promise<PreschoolAiRunResult>(() => undefined));
+
+    await act(async () => root.render(
+      <PreschoolAiSlot snapshot={snapshot} sectionId="page-synthesis" startRun={startRun} />,
+    ));
+
+    expect(startRun).toHaveBeenCalledOnce();
+    expect(startRun.mock.calls[0]?.[0]).toMatchObject({
+      snapshotId: snapshot.dataSnapshot.id,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
+    expect(container.textContent).toContain("deterministic Overview is ready");
+  });
+
   it("restores a frozen AI result without starting a new Run", async () => {
     const snapshot = preschoolGoldenSnapshot();
     const startRun = vi.fn();

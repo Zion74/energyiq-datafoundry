@@ -112,7 +112,7 @@ type PreschoolAiDecisionSignals = {
   }>;
 };
 
-export type PreschoolAiRunInput = {
+export type PreschoolAiArtifactReadInput = {
   identityKey: string;
   projectId: "preschool-demo";
   projectName: string;
@@ -124,6 +124,10 @@ export type PreschoolAiRunInput = {
   projectReleaseId: string;
   analysisFrom: string;
   analysisTo: string;
+  analysisPeriod: { from: string; to: string };
+};
+
+export type PreschoolAiRunInput = PreschoolAiArtifactReadInput & {
   decisionSignals: PreschoolAiDecisionSignals;
   discoveryEvidence: PreschoolDiscoveryEvidenceBundleV1;
   coverage: PreschoolOverviewCoverageV1;
@@ -171,23 +175,20 @@ export function resetPreschoolAiRunsForTests(): void {
   currentRuns.clear();
 }
 
-export function buildPreschoolAiRunInput(
+export function buildPreschoolAiArtifactReadInput(
   snapshot: EnergyProjectAnalysisSnapshotDto,
-): PreschoolAiRunInput | null {
-  const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
-  const coverage = buildPreschoolOverviewCoverage(snapshot);
-  const decisionSignals = snapshot.preschoolDecisionSignals;
+): PreschoolAiArtifactReadInput | null {
   if (
-    !discoveryEvidence
-    || !coverage
+    snapshot.renderer.key !== "preschool-overview"
+    || snapshot.context.projectId !== "preschool-demo"
     || snapshot.context.resource !== "electricity"
-    || !decisionSignals
-    || decisionSignals.status !== "available"
-    || decisionSignals.context.dataSnapshotId !== snapshot.dataSnapshot.id
-    || decisionSignals.context.projectReleaseId !== snapshot.projectRelease.id
   ) return null;
-  const analysisFrom = localDate(new Date(discoveryEvidence.identity.period.from), snapshot.context.timezone);
-  const analysisTo = localDate(new Date(Date.parse(discoveryEvidence.identity.period.to) - 1), snapshot.context.timezone);
+  const analysisPeriod = {
+    from: snapshot.context.primaryPeriod.start,
+    to: snapshot.context.primaryPeriod.endExclusive,
+  };
+  const analysisFrom = localDate(new Date(analysisPeriod.from), snapshot.context.timezone);
+  const analysisTo = localDate(new Date(Date.parse(analysisPeriod.to) - 1), snapshot.context.timezone);
   const identityKey = [
     snapshot.context.userId,
     snapshot.context.workspaceId,
@@ -225,6 +226,28 @@ export function buildPreschoolAiRunInput(
     projectReleaseId: snapshot.projectRelease.id,
     analysisFrom,
     analysisTo,
+    analysisPeriod,
+  };
+}
+
+export function buildPreschoolAiRunInput(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): PreschoolAiRunInput | null {
+  const readInput = buildPreschoolAiArtifactReadInput(snapshot);
+  const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
+  const coverage = buildPreschoolOverviewCoverage(snapshot);
+  const decisionSignals = snapshot.preschoolDecisionSignals;
+  if (
+    !readInput
+    || !discoveryEvidence
+    || !coverage
+    || !decisionSignals
+    || decisionSignals.status !== "available"
+    || decisionSignals.context.dataSnapshotId !== snapshot.dataSnapshot.id
+    || decisionSignals.context.projectReleaseId !== snapshot.projectRelease.id
+  ) return null;
+  return {
+    ...readInput,
     decisionSignals: compactDecisionSignals(decisionSignals),
     discoveryEvidence,
     coverage,
@@ -247,7 +270,7 @@ function compactDecisionSignals(signals: PreschoolDecisionSignalsDto): Preschool
 }
 
 export function getOrStartPreschoolAiRun(
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   const existing = currentRuns.get(input.identityKey);
@@ -289,7 +312,7 @@ export function getOrStartPreschoolAiRun(
 }
 
 async function restoreOrExecutePreschoolAiRun(
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
@@ -315,7 +338,7 @@ async function restoreOrExecutePreschoolAiRun(
 }
 
 export async function retryPreschoolAiRun(
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
   onProgress?: ProgressCallback,
   targetId?: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook" | "executive-synthesis",
 ): Promise<PreschoolAiRunResult> {
@@ -355,7 +378,7 @@ export async function retryPreschoolAiRun(
   );
 }
 
-export function invalidatePreschoolAiRun(input: PreschoolAiRunInput | null): void {
+export function invalidatePreschoolAiRun(input: PreschoolAiArtifactReadInput | null): void {
   if (input) currentRuns.delete(input.identityKey);
 }
 
@@ -379,7 +402,7 @@ const isRefreshableUnavailable = (
   result.status === "unavailable" && result.retryable === true;
 
 function acceptedSharedPreschoolAiArtifact(
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
   artifact: EnergyOverviewAiArtifactDto,
 ): Extract<PreschoolAiRunResult, { status: "available" }> | null {
   if (artifact.status !== "available"
@@ -387,18 +410,21 @@ function acceptedSharedPreschoolAiArtifact(
     || artifact.projectReleaseId !== input.projectReleaseId
     || !artifact.result) return null;
   if (isExactPreschoolSectionedReadModel(artifact.result, input)) return artifact.result;
-  const exact = selectPreschoolAiSectionInterpretation(
-    artifact.result,
-    input.coverage.binding,
-    "preschool.overall-key-findings",
-  );
+  if (!isPreschoolAiRunInput(input)) return null;
+  const exact = selectPreschoolAiSectionInterpretation(artifact.result, input.coverage.binding, "preschool.overall-key-findings");
   return exact.status === "available"
     ? artifact.result as unknown as PreschoolAiAcceptedArtifact
     : null;
 }
 
+function isPreschoolAiRunInput(input: PreschoolAiArtifactReadInput): input is PreschoolAiRunInput {
+  return "coverage" in input
+    && "decisionSignals" in input
+    && "discoveryEvidence" in input;
+}
+
 async function waitForSharedPreschoolAiArtifact(
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
@@ -428,7 +454,7 @@ async function waitForSharedPreschoolAiArtifact(
   return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
 }
 
-function overviewAiArtifactPin(input: PreschoolAiRunInput): {
+function overviewAiArtifactPin(input: PreschoolAiArtifactReadInput): {
   from: string;
   to: string;
   dataSnapshotId: string;
@@ -451,7 +477,7 @@ type PreschoolAiEventStreamInput = {
 
 const isExactPreschoolSectionedReadModel = (
   value: EnergyOverviewAiArtifactDto["result"],
-  input: PreschoolAiRunInput,
+  input: PreschoolAiArtifactReadInput,
 ): value is PreschoolOverviewAiReadModelDto => {
   if (!value || value.artifactKind !== "preschool-overview-ai-read-model") return false;
   const candidate = value as PreschoolOverviewAiReadModelDto;
@@ -460,8 +486,8 @@ const isExactPreschoolSectionedReadModel = (
     && candidate.binding.scopeId === input.scopeId
     && candidate.binding.dataSnapshotId === input.snapshotId
     && candidate.binding.projectReleaseId === input.projectReleaseId
-    && candidate.binding.analysisPeriod.from === input.coverage.binding.analysisPeriod.from
-    && candidate.binding.analysisPeriod.to === input.coverage.binding.analysisPeriod.to;
+    && candidate.binding.analysisPeriod.from === input.analysisPeriod.from
+    && candidate.binding.analysisPeriod.to === input.analysisPeriod.to;
 };
 
 export const isPendingPreschoolSectionedReadModel = (

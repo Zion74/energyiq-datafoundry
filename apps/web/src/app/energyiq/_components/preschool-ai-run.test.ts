@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { configApi } from "../../../lib/config-api";
 import type { PreschoolOverviewAiReadModelDto } from "../../../lib/config-api";
 import {
+  buildPreschoolAiArtifactReadInput,
   buildPreschoolAiRunInput,
   getOrStartPreschoolAiRun,
   invalidatePreschoolAiRun,
@@ -69,6 +70,34 @@ describe("Preschool AI Run", () => {
     snapshot.preschoolDecisionSignals!.items = [];
 
     expect(buildPreschoolAiRunInput(snapshot)).not.toBeNull();
+  });
+
+  it("keeps the exact Layer 1-2 Artifact read available when Layer 3 discovery inputs are unavailable", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    snapshot.preschoolAppliances = {
+      status: "unavailable",
+      reason: {
+        code: "PRESCHOOL_APPLIANCE_ALIAS_CONTRACT_UNSUPPORTED",
+        message: "The published Circuit aliases do not match the accepted Preschool Appliance contract.",
+      },
+      evidence: {
+        projectReleaseId: snapshot.projectRelease.id,
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        hierarchyRevisionId: snapshot.context.hierarchyRevisionId,
+        meterMappingRevisionId: snapshot.context.meterMappingRevisionId,
+        sourceKind: "circuit",
+      },
+    };
+
+    expect(buildPreschoolAiRunInput(snapshot)).toBeNull();
+    expect(buildPreschoolAiArtifactReadInput(snapshot)).toMatchObject({
+      projectId: "preschool-demo",
+      scopeId: snapshot.context.scopeId,
+      snapshotId: snapshot.dataSnapshot.id,
+      projectReleaseId: snapshot.projectRelease.id,
+      analysisFrom: "2026-05-01",
+      analysisTo: "2026-05-31",
+    });
   });
 
   it.each([
