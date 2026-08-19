@@ -21,13 +21,22 @@ describe("assembleNgeeAnnSectionPacks", () => {
     expect(Object.values(packs).every((pack) => (
       pack.binding.dataSnapshotId === "snapshot-a"
       && pack.binding.projectReleaseId === "release-a"
-      && pack.contract.revision === "ngee-ann-section-pack-v1"
+      && pack.contract.revision === "ngee-ann-section-pack-v2"
       && pack.capabilities.tools.length === 0
     ))).toBe(true);
     expect(packs["trend-and-demand"].facts.summary).toMatchObject({ usageKwh: 9_736.42, peakKw: 138.8 });
     expect(packs["time-behaviour"].facts.timeBehaviour).toMatchObject({ metricId: "energy.total_usage_kwh@1" });
     expect(packs["circuit-concentration"].facts.circuits).toHaveLength(6);
     expect(packs["decision-priorities"].facts.decisionPriorities).toMatchObject({ status: "available" });
+    expect(packs["trend-and-demand"].reportTime).toEqual({
+      timezone: "Asia/Singapore",
+      analysisWindow: {
+        fromLocalDate: "2026-05-20",
+        toExclusiveLocalDate: "2026-06-17",
+        inclusiveToLocalDate: "2026-06-16",
+        displayLabel: "20 May 2026–16 Jun 2026",
+      },
+    });
     expect(JSON.stringify(packs)).not.toContain("Centre G");
     expect(JSON.stringify(packs)).not.toContain("check the heater first");
   });
@@ -105,6 +114,7 @@ const snapshot = (
     projectId: "ngee-ann-polytechnic",
     scopeId: "ngee-ann-polytechnic",
     primaryPeriod: { start: "2026-05-19T16:00:00.000Z", endExclusive: "2026-06-16T16:00:00.000Z" },
+    timezone: "Asia/Singapore",
   } as ProjectAnalysisSnapshot["context"],
   projectRelease: { id: "release-a" } as ProjectAnalysisSnapshot["projectRelease"],
   recipe: { id: "energy-scope-analysis", version: "1" },
@@ -132,7 +142,14 @@ const snapshot = (
   analysis: {
     context: {} as never,
     latestAcceptedReading: { status: "not_applicable", queryId: "latest_accepted_reading_v1", reason: { code: "INTERVAL_USAGE_SOURCE", message: "Interval source" } },
-    summary: { usageKwh, averageDailyUsageKwh: usageKwh / 28, peakKw, validIntervalCount: 100, qualityEventCount: 0 },
+    summary: {
+      usageKwh,
+      averageDailyUsageKwh: usageKwh / 28,
+      peakKw,
+      peakAt: "2026-06-05T06:15:00.000Z",
+      validIntervalCount: 100,
+      qualityEventCount: 0,
+    },
     hourlyProfile: [{ hour: 9, usageKwh: 100, averageKw: 12, peakKw: 18, observationCount: 28 }],
     dailyTotals: { metricId: "energy.total_usage_kwh@1", grain: "day", timezone: "Asia/Singapore", scopes: [] },
     timeBehaviour: { metricId: "energy.total_usage_kwh@1", grain: "hour", unit: "kWh", timezone: "Asia/Singapore", queryId: "time_bucket_grid_v1", scopes: [], dayProfiles: [] },

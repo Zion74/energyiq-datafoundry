@@ -19,6 +19,16 @@ type NgeeAnnSectionPackBinding = {
   rendererKey: ProjectAnalysisSnapshot["renderer"]["key"];
 };
 
+type NgeeAnnSectionPackReportTime = {
+  timezone: string;
+  analysisWindow: {
+    fromLocalDate: string;
+    toExclusiveLocalDate: string;
+    inclusiveToLocalDate: string;
+    displayLabel: string;
+  };
+};
+
 type NgeeAnnSectionPackFacts = {
   "trend-and-demand": {
     summary: ProjectAnalysisSnapshot["analysis"]["summary"];
@@ -51,12 +61,13 @@ type NgeeAnnSectionPackFacts = {
 export type NgeeAnnSectionPack<SectionId extends NgeeAnnSectionId = NgeeAnnSectionId> = {
   contract: {
     id: "ngee-ann-section-pack";
-    revision: "ngee-ann-section-pack-v1";
+    revision: "ngee-ann-section-pack-v2";
   };
   sectionId: SectionId;
   audience: "facilities and energy managers";
   analysisGoal: string;
   binding: NgeeAnnSectionPackBinding;
+  reportTime: NgeeAnnSectionPackReportTime;
   evidence: ProjectAnalysisSnapshot["evidence"];
   facts: NgeeAnnSectionPackFacts[SectionId];
   dataQuality: ProjectAnalysisSnapshot["dataQuality"];
@@ -98,17 +109,22 @@ export const assembleNgeeAnnSectionPacks = (
     },
     rendererKey: snapshot.renderer.key,
   };
+  const reportTime = resolvePackReportTime(snapshot);
   const common = <SectionId extends NgeeAnnSectionId>(
     sectionId: SectionId,
   ): Omit<NgeeAnnSectionPack<SectionId>, "facts"> => ({
     contract: {
       id: "ngee-ann-section-pack" as const,
-      revision: "ngee-ann-section-pack-v1" as const,
+      revision: "ngee-ann-section-pack-v2" as const,
     },
     sectionId,
     audience: "facilities and energy managers" as const,
     analysisGoal: ANALYSIS_GOALS[sectionId],
     binding: { ...binding, analysisPeriod: { ...binding.analysisPeriod } },
+    reportTime: {
+      timezone: reportTime.timezone,
+      analysisWindow: { ...reportTime.analysisWindow },
+    },
     evidence: snapshot.evidence.map((item) => ({ ...item, queryIds: [...item.queryIds] })),
     dataQuality: { ...snapshot.dataQuality, importBatchIds: [...snapshot.dataQuality.importBatchIds] },
     limitations: limitations(snapshot, sectionId),
@@ -161,6 +177,54 @@ export const assembleNgeeAnnSectionPacks = (
     },
   };
 };
+
+const resolvePackReportTime = (
+  snapshot: ProjectAnalysisSnapshot,
+): NgeeAnnSectionPackReportTime => {
+  const timezone = snapshot.reportTimeContext?.timezone ?? snapshot.context.timezone;
+  if (!timezone) throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_TIMEZONE_REQUIRED");
+  const fromLocalDate = localDate(snapshot.context.primaryPeriod.start, timezone);
+  const toExclusiveLocalDate = localDate(snapshot.context.primaryPeriod.endExclusive, timezone);
+  const inclusiveToLocalDate = previousDate(toExclusiveLocalDate);
+  return {
+    timezone,
+    analysisWindow: {
+      fromLocalDate,
+      toExclusiveLocalDate,
+      inclusiveToLocalDate,
+      displayLabel: `${displayDate(fromLocalDate)}–${displayDate(inclusiveToLocalDate)}`,
+    },
+  };
+};
+
+const localDate = (value: string, timezone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  const result = `${part("year")}-${part("month")}-${part("day")}`;
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(result)) {
+    throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_REPORT_TIME_INVALID");
+  }
+  return result;
+};
+
+const previousDate = (value: string): string => {
+  const timestamp = Date.parse(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(timestamp)) throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_REPORT_TIME_INVALID");
+  return new Date(timestamp - 86_400_000).toISOString().slice(0, 10);
+};
+
+const displayDate = (value: string): string => new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+}).format(new Date(`${value}T00:00:00.000Z`));
 
 const limitations = (
   snapshot: ProjectAnalysisSnapshot,

@@ -61,7 +61,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v6")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v7")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(sectionProfileSnapshots).toEqual(Array.from({ length: 4 }, () => trustedSnapshot));
     expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);
@@ -142,7 +142,7 @@ const modelProfileSnapshot = () => ({
 }) as never;
 
 const packs = (): NgeeAnnSectionPacks => Object.fromEntries(NGEE_ANN_SECTION_IDS.map((sectionId) => [sectionId, {
-  contract: { id: "ngee-ann-section-pack", revision: "ngee-ann-section-pack-v1" },
+  contract: { id: "ngee-ann-section-pack", revision: "ngee-ann-section-pack-v2" },
   sectionId,
   audience: "facilities and energy managers",
   analysisGoal: "Find a useful current angle.",
@@ -152,8 +152,33 @@ const packs = (): NgeeAnnSectionPacks => Object.fromEntries(NGEE_ANN_SECTION_IDS
     analysisPeriod: { from: "2026-05-19T16:00:00.000Z", to: "2026-06-16T16:00:00.000Z" },
     rendererKey: "ngee-ann-overview",
   },
+  reportTime: {
+    timezone: "Asia/Singapore",
+    analysisWindow: {
+      fromLocalDate: "2026-05-20",
+      toExclusiveLocalDate: "2026-06-17",
+      inclusiveToLocalDate: "2026-06-16",
+      displayLabel: "20 May 2026–16 Jun 2026",
+    },
+  },
   evidence: [{ id: "evidence:ngee", metricId: "energy.total_usage_kwh@1", queryIds: ["scope_summary_v1"] }],
-  facts: {},
+  facts: sectionId === "trend-and-demand" ? {
+    summary: {
+      usageKwh: 100,
+      averageDailyUsageKwh: 10,
+      peakKw: 20,
+      peakAt: "2026-06-05T06:15:00.000Z",
+      validIntervalCount: 1,
+      qualityEventCount: 0,
+    },
+    comparison: {
+      from: "2026-04-21T16:00:00.000Z",
+      to: "2026-05-19T16:00:00.000Z",
+      usageKwh: 90,
+      changeKwh: 10,
+      changePct: 11.11,
+    },
+  } : {},
   dataQuality: { status: "complete", coveragePct: 100, importBatchIds: [] },
   limitations: [],
   missingEvidence: [],

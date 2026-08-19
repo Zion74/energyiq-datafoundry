@@ -303,6 +303,47 @@ describe("materializeNgeeAnnSectionResult", () => {
 });
 
 describe("buildNgeeAnnSectionPrompt", () => {
+  it("gives the Provider authoritative project-local report dates and peak time instead of raw UTC instants", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+
+    const prompt = buildNgeeAnnSectionPrompt(pack);
+
+    expect(prompt).toContain('"timezone":"Asia/Singapore"');
+    expect(prompt).toContain('"displayLabel":"20 May 2026–16 Jun 2026"');
+    expect(prompt).toContain('"peakAtLocal":"2026-06-05 14:15"');
+    expect(prompt).toContain('"fromLocalDate":"2026-04-22"');
+    expect(prompt).toContain('"toExclusiveLocalDate":"2026-05-20"');
+    expect(prompt).not.toContain("2026-06-05T06:15:00.000Z");
+    expect(prompt).not.toContain("2026-04-21T16:00:00.000Z");
+    expect(prompt).not.toContain('"analysisPeriod":{"from":"2026-05-19T16:00:00.000Z"');
+  });
+
+  it("accepts an exact project-local peak time and rejects the raw UTC clock time", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const resultFor = (clockTime: string) => materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: `Peak demand was recorded at ${clockTime} project time.`,
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:local-time",
+    });
+
+    expect(resultFor("14:15")).toMatchObject({ status: "available" });
+    expect(() => resultFor("06:15")).toThrow("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
+  });
+
   it("keeps every current time cell in a compact projection instead of rejecting a complete Pack", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const timeBehaviour = pack.facts.timeBehaviour;
@@ -475,6 +516,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     projectId: "ngee-ann-polytechnic",
     scopeId: "ngee-ann-polytechnic",
     primaryPeriod: { start: "2026-05-19T16:00:00.000Z", endExclusive: "2026-06-16T16:00:00.000Z" },
+    timezone: "Asia/Singapore",
   } as ProjectAnalysisSnapshot["context"],
   projectRelease: { id: "release-ngee" } as ProjectAnalysisSnapshot["projectRelease"],
   recipe: { id: "energy-scope-analysis", version: "1" },
@@ -488,7 +530,14 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
   analysis: {
     context: {} as never,
     latestAcceptedReading: { status: "not_applicable", queryId: "latest_accepted_reading_v1", reason: { code: "INTERVAL_USAGE_SOURCE", message: "Interval source" } },
-    summary: { usageKwh: 9_736.42, averageDailyUsageKwh: 347.73, peakKw: 138.8, validIntervalCount: 1, qualityEventCount: 0 },
+    summary: {
+      usageKwh: 9_736.42,
+      averageDailyUsageKwh: 347.73,
+      peakKw: 138.8,
+      peakAt: "2026-06-05T06:15:00.000Z",
+      validIntervalCount: 1,
+      qualityEventCount: 0,
+    },
     hourlyProfile: [{ hour: 9, usageKwh: 100, averageKw: 12, peakKw: 18, observationCount: 28 }],
     dailyTotals: { metricId: "energy.total_usage_kwh@1", grain: "day", timezone: "Asia/Singapore", scopes: [] },
     timeBehaviour: { metricId: "energy.total_usage_kwh@1", grain: "hour", unit: "kWh", timezone: "Asia/Singapore", queryId: "time_bucket_grid_v1", scopes: [], dayProfiles: [] },

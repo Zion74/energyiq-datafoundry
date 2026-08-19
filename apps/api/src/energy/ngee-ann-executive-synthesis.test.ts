@@ -271,7 +271,7 @@ const sourceSections = (): NgeeAnnExecutiveSource[] => [{
     contract: { id: "energyiq-project-section-interpretation", revision: "energyiq-project-section-interpretation-v1" },
     binding: binding(),
     sectionId: "trend-and-demand",
-    packRevision: "v1",
+    packRevision: "v2",
     capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
     summary: { text: "Peak demand was 138.8 kW.", evidenceRefs: ["evidence:trend"] },
     insights: [{
@@ -291,7 +291,7 @@ const sourceSections = (): NgeeAnnExecutiveSource[] => [{
     contract: { id: "energyiq-project-section-interpretation", revision: "energyiq-project-section-interpretation-v1" },
     binding: binding(),
     sectionId: "time-behaviour",
-    packRevision: "v1",
+    packRevision: "v2",
     capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
     summary: { text: "Usage is concentrated in daytime hours.", evidenceRefs: ["evidence:time"] },
     insights: [{

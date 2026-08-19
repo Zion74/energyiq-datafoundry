@@ -25,6 +25,7 @@ export const NGEE_ANN_SECTION_MESSAGE_MAX_CHARS = 220_000;
 const MAX_PROMPT_CHARS = NGEE_ANN_SECTION_MESSAGE_MAX_CHARS;
 const LEASE_MS = 4 * 60 * 1_000;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/gu;
+const CLOCK_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/gu;
 
 export type NgeeAnnSectionSummary = {
   text: string;
@@ -60,7 +61,7 @@ export type NgeeAnnSectionInterpretationResult = {
     modelProfileRevision: number;
   };
   sectionId: NgeeAnnSectionId;
-  packRevision: "v1";
+  packRevision: "v2";
   capability: {
     revision: "pack-only-v1";
     mode: "pack-only";
@@ -187,6 +188,7 @@ export const buildNgeeAnnSectionPrompt = (
     "You interpret one Ngee Ann energy Overview Section for facilities and energy managers.",
     "Use only the supplied Section analysis projection. Do not call tools, query SQL, or introduce factual numbers that are absent from the projection.",
     "The projection preserves every Section-level row in a compact field-order representation while omitting repeated low-level detail owned by another Section. Do not infer omitted detail.",
+    "Report dates and clock times must use reportTime and fields ending in Local. They are authoritative Project-local values; do not reconstruct or narrate UTC boundaries.",
     "Write a concise Summary of what matters in this Section, then propose only genuinely useful Insights. Do not restate every visible metric.",
     "Insights may be observed, inferred, or speculative. Inference and speculation are encouraged when they offer a relevant new angle, but label them honestly and never present a possible cause as confirmed.",
     "The epistemicStatus applies to the whole title and text. If any sentence proposes a cause, possibility or action that is not directly observed, use inferred or speculative rather than observed.",
@@ -296,7 +298,7 @@ const resultBase = <SectionId extends NgeeAnnSectionId>(
     modelProfileRevision: input.identity.modelProfileRevision,
   },
   sectionId: input.pack.sectionId,
-  packRevision: "v1",
+  packRevision: "v2",
   capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
   insights,
   publication: {
@@ -351,7 +353,7 @@ const parseSummary = (
   if (!isRecord(value)
     || !boundedString(value.text, MAX_SUMMARY_CHARS)
     || !validEvidenceRefs(value.evidenceRefs, evidenceIds)
-    || !numbersSupported(value.text, packText)) return null;
+    || !narrativeFactsSupported(value.text, packText)) return null;
   return { text: value.text, evidenceRefs: [...value.evidenceRefs] };
 };
 
@@ -374,7 +376,7 @@ const parseInsight = (
     || (value.deepDiveQuestion !== undefined
       && !boundedString(value.deepDiveQuestion, MAX_DEEP_DIVE_CHARS))) return null;
   const narrative = [value.title, value.text, value.deepDiveQuestion ?? ""].join(" ");
-  if (!numbersSupported(narrative, packText)) return null;
+  if (!narrativeFactsSupported(narrative, packText)) return null;
   return {
     id: value.id,
     title: value.title,
@@ -406,6 +408,10 @@ const validEvidenceRefs = (
 const numbersSupported = (text: string, packText: string): boolean =>
   [...text.matchAll(NUMBER_TOKEN)].every(([token]) => numericTokenSupported(token, packText));
 
+const narrativeFactsSupported = (text: string, packText: string): boolean =>
+  numbersSupported(text, packText)
+  && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => packText.includes(token));
+
 const numericTokenSupported = (token: string, packText: string): boolean => {
   const normalized = token.replaceAll(",", "");
   if (packText.includes(normalized) || packText.includes(token)) return true;
@@ -423,12 +429,14 @@ const numericTokenSupported = (token: string, packText: string): boolean => {
 };
 
 const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, unknown> => {
+  const { analysisPeriod: _analysisPeriod, ...bindingWithoutUtcPeriod } = pack.binding;
   const common = {
     contract: pack.contract,
     sectionId: pack.sectionId,
     audience: pack.audience,
     analysisGoal: pack.analysisGoal,
-    binding: pack.binding,
+    binding: bindingWithoutUtcPeriod,
+    reportTime: pack.reportTime,
     evidence: pack.evidence.map(({ id, metricId }) => ({ id, metricId })),
     dataQuality: pack.dataQuality,
     limitations: pack.limitations,
@@ -440,7 +448,7 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
     return {
       ...common,
       projection: {
-        revision: "ngee-ann-section-prompt-projection-v1",
+        revision: "ngee-ann-section-prompt-projection-v2",
         rowPolicy: "all-section-rows",
         omittedRepeatedFields: ["baselineSamples", "hourlyComparison", "detailSeries"],
         projectedRowCount: facts.dailyUsageAnomalies?.status === "available"
@@ -448,11 +456,11 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
           : 0,
       },
       facts: {
-        summary: facts.summary,
-        comparison: facts.comparison,
+        summary: projectSummary(facts.summary, pack.reportTime.timezone),
+        comparison: projectComparison(facts.comparison, pack.reportTime.timezone),
         dailyTotals: facts.dailyTotals,
         dailyUsageAnomalies: projectDailyUsageAnomalies(facts.dailyUsageAnomalies),
-        peakBreakdown: facts.peakBreakdown,
+        peakBreakdown: projectPeakBreakdown(facts.peakBreakdown, pack.reportTime.timezone),
       },
     };
   }
@@ -463,7 +471,7 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
     return {
       ...common,
       projection: {
-        revision: "ngee-ann-section-prompt-projection-v1",
+        revision: "ngee-ann-section-prompt-projection-v2",
         rowPolicy: "all-section-rows",
         projectedRowCount,
         valueSemantics: {
@@ -483,11 +491,80 @@ const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, u
   return {
     ...common,
     projection: {
-      revision: "ngee-ann-section-prompt-projection-v1",
+      revision: "ngee-ann-section-prompt-projection-v2",
       rowPolicy: "all-section-rows",
     },
-    facts: pack.facts,
+    facts: pack.sectionId === "circuit-concentration"
+      ? {
+          ...pack.facts,
+          peakBreakdown: projectPeakBreakdown(
+            (pack as NgeeAnnSectionPack<"circuit-concentration">).facts.peakBreakdown,
+            pack.reportTime.timezone,
+          ),
+        }
+      : pack.facts,
   };
+};
+
+const projectSummary = (
+  value: NgeeAnnSectionPack<"trend-and-demand">["facts"]["summary"],
+  timezone: string,
+): Record<string, unknown> => {
+  const { peakAt, ...withoutUtcPeak } = value;
+  return {
+    ...withoutUtcPeak,
+    ...(peakAt ? { peakAtLocal: localDateTime(peakAt, timezone) } : {}),
+  };
+};
+
+const projectComparison = (
+  value: NgeeAnnSectionPack<"trend-and-demand">["facts"]["comparison"],
+  timezone: string,
+): Record<string, unknown> => {
+  const { from, to, ...withoutUtcPeriod } = value;
+  return {
+    ...withoutUtcPeriod,
+    fromLocalDate: localDate(from, timezone),
+    toExclusiveLocalDate: localDate(to, timezone),
+  };
+};
+
+const projectPeakBreakdown = (
+  value: NgeeAnnSectionPack<"trend-and-demand">["facts"]["peakBreakdown"],
+  timezone: string,
+): unknown => {
+  if (!value || value.status !== "available") return value;
+  return {
+    ...value,
+    peak: {
+      ...value.peak,
+      fromLocal: localDateTime(value.peak.from, timezone),
+      toLocal: localDateTime(value.peak.to, timezone),
+      from: undefined,
+      to: undefined,
+    },
+  };
+};
+
+const localDate = (value: string, timezone: string): string => localDateTime(value, timezone).slice(0, 10);
+
+const localDateTime = (value: string, timezone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  const result = `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u.test(result)) {
+    throw new Error("ENERGYIQ_NGEE_ANN_SECTION_REPORT_TIME_INVALID");
+  }
+  return result;
 };
 
 const projectDailyUsageAnomalies = (
@@ -612,10 +689,8 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  const expectedPromptRevision = pack.sectionId === "time-behaviour"
-    ? "energyiq-project-section-discovery-v3"
-    : "energyiq-project-section-discovery-v2";
-  if (identity.identityContractRevision !== "ngee-ann-section-v6"
+  const expectedPromptRevision = "energyiq-project-section-discovery-v4";
+  if (identity.identityContractRevision !== "ngee-ann-section-v7"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId
@@ -625,7 +700,7 @@ const requirePackIdentity = (
     || identity.analysisPeriodFrom !== pack.binding.analysisPeriod.from
     || identity.analysisPeriodTo !== pack.binding.analysisPeriod.to
     || identity.investigatorPromptRevision !== expectedPromptRevision
-    || identity.analysisPackRevision !== "v1") {
+    || identity.analysisPackRevision !== "v2") {
     throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_IDENTITY_MISMATCH");
   }
 };
