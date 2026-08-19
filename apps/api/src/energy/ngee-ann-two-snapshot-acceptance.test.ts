@@ -180,6 +180,13 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         analysisWindow: "current-month-to-date",
       });
 
+      if (process.env.ENERGYIQ_ACCEPTANCE_STOP_AFTER_A === "1") {
+        if (!retainedRoot) {
+          throw new Error("ENERGYIQ_ACCEPTANCE_RETAIN_ROOT_REQUIRED_FOR_A_ONLY");
+        }
+        return;
+      }
+
       const laterSources = await registerSources(
         metadata,
         fileAssets,
