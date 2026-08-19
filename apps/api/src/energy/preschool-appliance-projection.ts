@@ -31,6 +31,7 @@ export const preschoolApplianceAliasForPublishedCircuit = (
   parentScopeId: string | undefined,
 ): string | null => {
   if (!parentScopeId) return null;
+  if (EXPECTED_APPLIANCE_BY_ALIAS.has(name)) return name;
   const prefix = `${parentScopeId}:`;
   return name.startsWith(prefix) ? name.slice(prefix.length) : null;
 };

@@ -42,6 +42,20 @@ describe("buildPreschoolApplianceProjection", () => {
     });
   });
 
+  it("uses the published Circuit display alias without requiring the parent Scope id in the display name", () => {
+    const input = fixture();
+    for (const circuit of input.analysis.circuits) {
+      circuit.name = circuit.name.slice(circuit.name.indexOf(":") + 1);
+    }
+
+    const result = buildPreschoolApplianceProjection(input);
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") throw new Error("Expected available projection");
+    expect(result.appliances).toHaveLength(9);
+    expect(result.appliances.every((row) => row.centreCount === 30)).toBe(true);
+  });
+
   it("fails closed when the published alias group is inconsistent", () => {
     const input = fixture();
     input.analysis.circuits[0]!.category = "light";
