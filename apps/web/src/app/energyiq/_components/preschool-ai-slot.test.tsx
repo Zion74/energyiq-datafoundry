@@ -438,6 +438,35 @@ describe("PreschoolAiSlot", () => {
       .filter((heading) => heading.textContent === executive.result.findings[0]!.title)).toHaveLength(1);
   });
 
+  it("suppresses a Summary that duplicates one Finding when other distinct Findings remain", async () => {
+    const result = v4ReadModelResult();
+    const executive = result.executive;
+    if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
+    executive.result.summary.text = `Possible: ${executive.result.findings[0]!.title}.`;
+    executive.result.findings[0]!.title = `Possible: ${executive.result.findings[0]!.title}`;
+    executive.result.findings.push({
+      ...executive.result.findings[0]!,
+      id: "key-finding-cross-section-2",
+      title: "A distinct second cross-section pattern",
+      text: "A separately supported relationship remains visible after the duplicate Summary is removed.",
+    });
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="page-synthesis"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]')!;
+    expect(pageSlot.querySelector('[aria-label="Key findings summary"]')).toBeNull();
+    expect(pageSlot.querySelectorAll("article")).toHaveLength(2);
+    expect(pageSlot.textContent).toContain("A distinct second cross-section pattern");
+  });
+
   it("keeps a responsive two-column grid when Key Findings contains multiple distinct cards", async () => {
     const result = v4ReadModelResult();
     const executive = result.executive;

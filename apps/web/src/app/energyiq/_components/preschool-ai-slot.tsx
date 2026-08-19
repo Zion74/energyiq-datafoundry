@@ -408,14 +408,15 @@ function KeyFindingsUnit({
   result: PreschoolExecutiveSynthesisV4AvailableResult;
   completedSectionCount: number;
 }) {
-  const summaryDuplicatesOnlyFinding = result.findings.length === 1
-    && normalizedAiHeadline(result.summary.text) === normalizedAiHeadline(result.findings[0]!.title);
+  const summaryDuplicatesFinding = result.findings.some((finding) => (
+    normalizedAiHeadline(result.summary.text) === normalizedAiHeadline(finding.title)
+  ));
   return (
     <div>
       <p className="mb-3 text-xs font-medium text-muted">
         Reviewed {completedSectionCount} of 4 Sections · Findings cite {result.sourceSectionArtifactIds.length} source {result.sourceSectionArtifactIds.length === 1 ? "Section" : "Sections"}
       </p>
-      {summaryDuplicatesOnlyFinding ? null : (
+      {summaryDuplicatesFinding ? null : (
         <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3" aria-label="Key findings summary">
           <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
           <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
