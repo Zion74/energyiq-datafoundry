@@ -921,7 +921,7 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("253.7018 kWh");
     expect(markup).toContain("Governed baseline overlay unavailable");
     expect(markup).toContain("Accepted usage remains available");
@@ -1609,6 +1609,26 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(dialog.querySelector("[data-anomaly-detail-heatmap]")).not.toBeNull();
     expect(dialog.querySelectorAll("[data-anomaly-detail-heatmap] button")).toHaveLength(72);
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+  });
+
+  it("keeps a release-pinned Public Holiday selectable in the daily trend even when anomaly comparison is suppressed", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of snapshot.analysis.componentCategoryBreakdown!.scopes) {
+      const holiday = scope.rows.find((row) => row.localDate === "2026-06-11");
+      if (!holiday) throw new Error("Expected 11 Jun in every daily component scope.");
+      holiday.dayType = "public_holiday";
+    }
+
+    await renderGolden(snapshot);
+
+    const holidayButton = filterButton("Day Type", "Holiday")!;
+    expect(holidayButton.hasAttribute("disabled")).toBe(false);
+    await act(async () => holidayButton.click());
+    const trend = container.querySelector("#ngee-ann-daily-trend")!;
+    expect(trend.querySelectorAll("[data-trend-point]")).toHaveLength(1);
+    expect(trend.textContent).toContain("11 Jun");
+    expect(trend.querySelector("[data-trend-point]")?.getAttribute("aria-label"))
+      .toContain("No rule conclusion");
   });
 
   it("opens an accessible frozen daily incident modal, switches exact server modes, closes and restores trigger focus", async () => {

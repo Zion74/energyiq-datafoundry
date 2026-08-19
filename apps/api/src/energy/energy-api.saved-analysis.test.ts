@@ -451,6 +451,22 @@ describe("saved analysis decision-quality boundary", () => {
       expect(records.find((record) => record.id === first?.id)?.ai_result_json).toBe(frozenAiResultJson);
       expect(records[0]?.ai_result_json).toBeUndefined();
 
+      const comparisonCandidatesAfterRerun = await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", project.id, "saved-analyses", "overview-comparison-candidates"],
+        context,
+      );
+      expect(comparisonCandidatesAfterRerun.status, JSON.stringify(comparisonCandidatesAfterRerun.body)).toBe(200);
+      const comparisonCandidateItems = (comparisonCandidatesAfterRerun.body as {
+        data: { items: Array<{ id: string; snapshot: { reportTimeContext?: unknown } }> };
+      }).data.items;
+      expect(comparisonCandidateItems.find((candidate) => candidate.id === first?.id)?.snapshot.reportTimeContext)
+        .toMatchObject({
+          policyId: expect.any(String),
+          policyRevision: expect.any(String),
+          windows: expect.any(Array),
+        });
+
       metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v2", title: "Saved AI v2" });
       for (const runId of ["saved-analysis-ai-section-run-v2", "saved-analysis-ai-executive-run-v2"]) {
         metadata.runs.create({

@@ -66,7 +66,7 @@ export type NgeeAnnEnergyTrendViewModel = {
       id: string;
       localDate: string;
       localHour: number | null;
-      dayType: "weekday" | "weekend" | null;
+      dayType: "weekday" | "weekend" | "public_holiday" | null;
       dateLabel: string;
       weekday: string;
       range: string;
@@ -79,7 +79,11 @@ export type NgeeAnnEnergyTrendViewModel = {
       qualityEvents: string;
       baseline: {
         outcome: "triggered" | "within_threshold" | "suppressed";
-        outcomeLabel: "Above-baseline rule triggered" | "Within rule threshold" | "No rule conclusion — Evidence incomplete";
+        outcomeLabel:
+          | "Above-baseline rule triggered"
+          | "Within rule threshold"
+          | "No rule conclusion — Evidence incomplete"
+          | "No rule conclusion — Calendar classification changed";
         baselineKwh: number | null;
         baselineUsageKwh: string | null;
         deltaUsageKwh: string | null;
@@ -3952,6 +3956,7 @@ function buildEnergyTrend(
   }
 
   const dailyBaseline = buildDailyTrendBaseline(snapshot, dailyTotals);
+  const authoritativeDayTypes = resolveAuthoritativeTrendDayTypes(snapshot, dailyTotals);
 
   return {
     status: "available",
@@ -3970,27 +3975,47 @@ function buildEnergyTrend(
           : hasPartial
             ? "At least one day is partial. Accepted usage remains visible with its coverage."
             : null,
-        points: scope.rows.map((row) => ({
-          id: `${scope.scopeId}:${row.localDate}`,
-          localDate: row.localDate,
-          localHour: null,
-          dayType: dailyBaseline.dayTypes.get(scope.scopeId)?.get(row.localDate) ?? null,
-          dateLabel: formatLocalDate(row.localDate),
-          weekday: formatLocalWeekday(row.localDate),
-          range: formatEvidenceRange(row.from, row.to, dailyTotals.timezone),
-          acceptedUsageKwh: row.usageKwh,
-          usageKwh: row.usageKwh === null ? null : formatDecimal(row.usageKwh, 4),
-          status: row.dataHealth.status,
-          statusLabel: row.dataHealth.status === "complete"
-            ? "Complete"
-            : row.dataHealth.status === "partial"
-              ? "Partial"
-              : "Unavailable",
-          coverage: `${formatDecimal(row.dataHealth.coveragePct, 1)}% coverage`,
-          intervals: `${row.dataHealth.validIntervalCount.toLocaleString("en-SG")} / ${row.dataHealth.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-          qualityEvents: `${row.dataHealth.qualityEventCount.toLocaleString("en-SG")} quality events`,
-          baseline: dailyBaseline.points.get(scope.scopeId)?.get(row.localDate) ?? null,
-        })),
+        points: scope.rows.map((row) => {
+          const anomalyDayType = dailyBaseline.dayTypes.get(scope.scopeId)?.get(row.localDate) ?? null;
+          const authoritativeDayType = authoritativeDayTypes?.get(scope.scopeId)?.get(row.localDate) ?? null;
+          const baseline = dailyBaseline.points.get(scope.scopeId)?.get(row.localDate) ?? null;
+          const classificationChanged = authoritativeDayType !== null
+            && anomalyDayType !== null
+            && authoritativeDayType !== anomalyDayType;
+          return {
+            id: `${scope.scopeId}:${row.localDate}`,
+            localDate: row.localDate,
+            localHour: null,
+            dayType: authoritativeDayType ?? anomalyDayType,
+            dateLabel: formatLocalDate(row.localDate),
+            weekday: formatLocalWeekday(row.localDate),
+            range: formatEvidenceRange(row.from, row.to, dailyTotals.timezone),
+            acceptedUsageKwh: row.usageKwh,
+            usageKwh: row.usageKwh === null ? null : formatDecimal(row.usageKwh, 4),
+            status: row.dataHealth.status,
+            statusLabel: row.dataHealth.status === "complete"
+              ? "Complete"
+              : row.dataHealth.status === "partial"
+                ? "Partial"
+                : "Unavailable",
+            coverage: `${formatDecimal(row.dataHealth.coveragePct, 1)}% coverage`,
+            intervals: `${row.dataHealth.validIntervalCount.toLocaleString("en-SG")} / ${row.dataHealth.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+            qualityEvents: `${row.dataHealth.qualityEventCount.toLocaleString("en-SG")} quality events`,
+            baseline: classificationChanged && baseline
+              ? {
+                  ...baseline,
+                  outcome: "suppressed" as const,
+                  outcomeLabel: "No rule conclusion — Calendar classification changed",
+                  baselineKwh: null,
+                  baselineUsageKwh: null,
+                  deltaUsageKwh: null,
+                  relativePctLabel: null,
+                  incidentId: null,
+                  limitation: "The release-pinned Day Type differs from the anomaly baseline classification.",
+                }
+              : baseline,
+          };
+        }),
       };
     }),
     evidence: { ...evidence, baseline: dailyBaseline.evidence },
@@ -4001,6 +4026,42 @@ type DailyTotals = NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dai
 type DailyTrendBaseline = NonNullable<
   NgeeAnnEnergyTrendViewModel["scopes"][number]["points"][number]["baseline"]
 >;
+
+function resolveAuthoritativeTrendDayTypes(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  dailyTotals: DailyTotals,
+): Map<string, Map<string, "weekday" | "weekend" | "public_holiday">> | null {
+  const source = snapshot.analysis.componentCategoryBreakdown;
+  if (!source
+    || source.metricId !== "energy.total_usage_kwh@1"
+    || source.queryId !== "daily_component_categories_v1"
+    || source.grain !== "day"
+    || source.timezone !== dailyTotals.timezone
+    || !snapshot.analysis.provenance.queryIds.includes(source.queryId)
+    || source.scopes.length !== dailyTotals.scopes.length) return null;
+
+  const result = new Map<string, Map<string, "weekday" | "weekend" | "public_holiday">>();
+  for (const [scopeIndex, scope] of dailyTotals.scopes.entries()) {
+    const classifiedScope = source.scopes[scopeIndex];
+    if (!classifiedScope
+      || classifiedScope.scopeId !== scope.scopeId
+      || classifiedScope.scopeName !== scope.scopeName
+      || classifiedScope.scopeType !== scope.scopeType
+      || classifiedScope.rows.length !== scope.rows.length) return null;
+    const dayTypes = new Map<string, "weekday" | "weekend" | "public_holiday">();
+    for (const [rowIndex, row] of scope.rows.entries()) {
+      const classifiedRow = classifiedScope.rows[rowIndex];
+      if (!classifiedRow
+        || classifiedRow.localDate !== row.localDate
+        || classifiedRow.from !== row.from
+        || classifiedRow.to !== row.to
+        || !["weekday", "weekend", "public_holiday"].includes(classifiedRow.dayType ?? "")) return null;
+      dayTypes.set(row.localDate, classifiedRow.dayType as "weekday" | "weekend" | "public_holiday");
+    }
+    result.set(scope.scopeId, dayTypes);
+  }
+  return result;
+}
 
 function buildDailyTrendBaseline(
   snapshot: EnergyProjectAnalysisSnapshotDto,

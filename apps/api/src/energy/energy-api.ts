@@ -2034,6 +2034,7 @@ const toEnergySavedOverviewComparisonCandidate = (
       projectRelease: { id: snapshot.projectRelease.id },
       recipe: snapshot.recipe,
       renderer: snapshot.renderer,
+      ...(snapshot.reportTimeContext ? { reportTimeContext: snapshot.reportTimeContext } : {}),
     },
     ...(aiArtifact ? { aiArtifact } : {}),
   };
