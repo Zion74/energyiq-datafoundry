@@ -1216,7 +1216,8 @@ const requireExecutiveSynthesisResult = (
   if (identity.identityContractRevision === "ngee-ann-executive-v1"
     || identity.identityContractRevision === "ngee-ann-executive-v2"
     || identity.identityContractRevision === "ngee-ann-executive-v3"
-    || identity.identityContractRevision === "ngee-ann-executive-v4") {
+    || identity.identityContractRevision === "ngee-ann-executive-v4"
+    || identity.identityContractRevision === "ngee-ann-executive-v5") {
     requireProjectExecutiveSynthesisResultV1(parsed, identity);
     return;
   }
@@ -1239,7 +1240,10 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-artifacts"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
-    || !((identity.identityContractRevision === "ngee-ann-executive-v4"
+    || !((identity.identityContractRevision === "ngee-ann-executive-v5"
+      && identity.validatorRevision === "energyiq-project-executive-acceptance-v4"
+      && identity.workflowRevision === "energyiq-project-executive-synthesis-v2")
+      || (identity.identityContractRevision === "ngee-ann-executive-v4"
       && identity.validatorRevision === "energyiq-project-executive-acceptance-v4")
       || (identity.identityContractRevision === "ngee-ann-executive-v3"
       && identity.validatorRevision === "energyiq-project-executive-acceptance-v3")
@@ -1247,7 +1251,8 @@ const requireProjectExecutiveSynthesisResultV1 = (
         && identity.validatorRevision === "energyiq-project-executive-acceptance-v2")
       || (identity.identityContractRevision === "ngee-ann-executive-v1"
         && identity.validatorRevision === "energyiq-project-executive-acceptance-v1"))
-    || identity.workflowRevision !== "energyiq-project-executive-synthesis-v1"
+    || (identity.identityContractRevision !== "ngee-ann-executive-v5"
+      && identity.workflowRevision !== "energyiq-project-executive-synthesis-v1")
     || identity.investigatorPromptRevision !== "energyiq-project-executive-prompt-v1"
     || identity.capabilityRevision !== "section-artifacts-v1"
     || identity.publicationRevision !== "energyiq-project-key-findings-v1"
@@ -1276,7 +1281,8 @@ const requireProjectExecutiveSynthesisResultV1 = (
   if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(
     summary,
     identity.identityContractRevision === "ngee-ann-executive-v3"
-      || identity.identityContractRevision === "ngee-ann-executive-v4" ? 720 : 600,
+      || identity.identityContractRevision === "ngee-ann-executive-v4"
+      || identity.identityContractRevision === "ngee-ann-executive-v5" ? 720 : 600,
   )) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }

@@ -23,6 +23,7 @@ import {
   normalizeOverviewAiStageRuntimeError,
   DataFoundryAgUiAgent,
   resolveOverviewAiAgentRuntimeOptions,
+  resolveOverviewAiArtifactSessionScope,
   resolveOverviewAiServerRunnerOptions,
   resolveOverviewAiStageRuntimeOptions,
   resolveOverviewAiStageStructuredOutput,
@@ -1260,6 +1261,26 @@ describe("Overview AI server stage options", () => {
       await runtime?.destroyWorkspace();
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
+  });
+
+  it("scopes an Executive Run to the server-owned Artifact project without adding Energy context", () => {
+    const identity = {
+      ...ngeeAnnAdditionalIdentity(),
+      artifactKind: "executive-synthesis" as const,
+      targetId: "sections:session-scope",
+    };
+
+    expect(resolveOverviewAiArtifactSessionScope({
+      identity,
+      workspaceId: identity.workspaceId,
+    })).toEqual({
+      workspaceId: identity.workspaceId,
+      projectId: "ngee-ann-polytechnic",
+    });
+    expect(() => resolveOverviewAiArtifactSessionScope({
+      identity,
+      workspaceId: "another-workspace",
+    })).toThrow("OVERVIEW_AI_RUNTIME_WORKSPACE_MISMATCH");
   });
 
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {

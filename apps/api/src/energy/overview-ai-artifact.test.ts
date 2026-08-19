@@ -60,11 +60,12 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(executive).toMatchObject({
       artifactKind: "executive-synthesis",
       targetId: "sections:current-v1",
-      identityContractRevision: "ngee-ann-executive-v4",
+      identityContractRevision: "ngee-ann-executive-v5",
       analysisPackId: "ngee-ann-section-artifacts",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-project-executive-synthesis-v1",
       validatorRevision: "energyiq-project-executive-acceptance-v4",
+      workflowRevision: "energyiq-project-executive-synthesis-v2",
       capabilityRevision: "section-artifacts-v1",
     });
 

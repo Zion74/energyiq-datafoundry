@@ -458,6 +458,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnExecutiveIdentity("snapshot-ngee-executive-historical"),
         identityContractRevision: "ngee-ann-executive-v1",
         validatorRevision: "energyiq-project-executive-acceptance-v1",
+        workflowRevision: "energyiq-project-executive-synthesis-v1",
       };
       expect(completeSectionV4(store, historicalIdentity, ngeeAnnExecutiveResult(historicalIdentity)))
         .toMatchObject({ status: "available" });
@@ -1046,12 +1047,12 @@ const ngeeAnnExecutiveIdentity = (
   ...sectionV3Identity(dataSnapshotId, "sections:test-v1"),
   rendererKey: "ngee-ann-overview",
   artifactKind: "executive-synthesis",
-  identityContractRevision: "ngee-ann-executive-v4",
+  identityContractRevision: "ngee-ann-executive-v5",
   analysisPackId: "ngee-ann-section-artifacts",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-executive-synthesis-v1",
   validatorRevision: "energyiq-project-executive-acceptance-v4",
-  workflowRevision: "energyiq-project-executive-synthesis-v1",
+  workflowRevision: "energyiq-project-executive-synthesis-v2",
   investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
   capabilityRevision: "section-artifacts-v1",
   publicationRevision: "energyiq-project-key-findings-v1",

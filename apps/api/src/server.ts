@@ -169,6 +169,19 @@ type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> 
   trustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
 };
 
+export const resolveOverviewAiArtifactSessionScope = (input: {
+  identity: EnergyIqOverviewAiArtifactIdentity;
+  workspaceId: string;
+}): { projectId: string; workspaceId: string } => {
+  if (input.identity.workspaceId !== input.workspaceId) {
+    throw new Error("OVERVIEW_AI_RUNTIME_WORKSPACE_MISMATCH");
+  }
+  return {
+    workspaceId: input.identity.workspaceId,
+    projectId: input.identity.projectId,
+  };
+};
+
 type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutput>>;
 
 type OverviewAiTrustedRuntimeOverride = {
@@ -585,6 +598,10 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         ...(stageInput.trustedRuntimeOverride
           ? { overviewAiTrustedRuntimeOverride: stageInput.trustedRuntimeOverride }
           : {}),
+        trustedEnergySessionScope: resolveOverviewAiArtifactSessionScope({
+          identity: stageInput.identity,
+          workspaceId: stageInput.workspaceId,
+        }),
         workspaceId: stageInput.workspaceId,
         workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces"),
       }),
@@ -1323,6 +1340,11 @@ export type DataFoundryAgUiAgentInput = {
   overviewAiTrustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
   /** Server-created durable evaluation binding; never accepted from browser props. */
   trustedModelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
+  /** Server-created Artifact project scope for stages that intentionally omit Energy query context. */
+  trustedEnergySessionScope?: {
+    projectId: string;
+    workspaceId: string;
+  };
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;
@@ -1494,13 +1516,16 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          const energySessionScope = energyQueryContext
+            ? {
+                workspaceId: energyQueryContext.workspaceId,
+                projectId: energyQueryContext.projectId,
+              }
+            : this.input.trustedEnergySessionScope;
           persistEarlyFailedUserMessage({
-            ...(energyQueryContext
+            ...(energySessionScope
               ? {
-                  energySessionScope: {
-                    workspaceId: energyQueryContext.workspaceId,
-                    projectId: energyQueryContext.projectId
-                  }
+                  energySessionScope,
                 }
               : {}),
             errorMessage: message,
@@ -1516,13 +1541,21 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
           return;
         }
         const runEventWriter = new RunEventWriter(this.input.metadataStore.runEvents);
+        const energySessionScope = energyQueryContext
+          ? {
+              workspaceId: energyQueryContext.workspaceId,
+              projectId: energyQueryContext.projectId,
+            }
+          : this.input.trustedEnergySessionScope;
+        if (energyQueryContext && this.input.trustedEnergySessionScope
+          && (energyQueryContext.workspaceId !== this.input.trustedEnergySessionScope.workspaceId
+            || energyQueryContext.projectId !== this.input.trustedEnergySessionScope.projectId)) {
+          throw new Error("OVERVIEW_AI_RUNTIME_PROJECT_SCOPE_MISMATCH");
+        }
         const identity = resolveRunIdentity({
-          ...(energyQueryContext
+          ...(energySessionScope
             ? {
-                energySessionScope: {
-                  workspaceId: energyQueryContext.workspaceId,
-                  projectId: energyQueryContext.projectId
-                }
+                energySessionScope,
               }
             : {}),
           effectiveRunConfig,
@@ -1552,12 +1585,9 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           persistEarlyFailedUserMessage({
-            ...(energyQueryContext
+            ...(energySessionScope
               ? {
-                  energySessionScope: {
-                    workspaceId: energyQueryContext.workspaceId,
-                    projectId: energyQueryContext.projectId
-                  }
+                  energySessionScope,
                 }
               : {}),
             errorMessage: message,
