@@ -232,8 +232,8 @@ describe("materializeNgeeAnnSectionResult", () => {
         summary: { text: "The current priority signal is available for review.", evidenceRefs: [evidenceRef] },
         candidates: [{
           id: "candidate:actionable",
-          title: "The current concentration warrants a focused controls review",
-          text: "Investigate the contributing circuits before changing the operating schedule.",
+          title: "Load circuits drive current consumption",
+          text: "Focus efficiency efforts on load circuits before changing the operating schedule.",
           epistemicStatus: "observed",
           evidenceRefs: [evidenceRef],
         }],

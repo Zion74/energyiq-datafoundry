@@ -462,14 +462,16 @@ const isCurrentAdditionalAiInsightMutationIdentity = (
   && identity.identityContractRevision === "additional-insights-v24"
   && identity.analysisPackId === "preschool-additional-insights-pack")
   || (identity.rendererKey === "ngee-ann-overview"
-    && identity.identityContractRevision === "ngee-ann-additional-insights-v3"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v4"
     && identity.analysisPackId === "ngee-ann-additional-insights-pack"))
   && identity.analysisPackRevision === "v1"
   && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
-  && identity.validatorRevision === "additional-insights-acceptance-v17"
+  && identity.validatorRevision === (identity.rendererKey === "ngee-ann-overview"
+    ? "additional-insights-acceptance-v18"
+    : "additional-insights-acceptance-v17")
   && identity.workflowRevision === (identity.rendererKey === "preschool-overview"
     ? "additional-insights-discover-accept-publish-v21"
-    : "additional-insights-discover-accept-publish-v20")
+    : "additional-insights-discover-accept-publish-v21")
   && identity.investigatorPromptRevision === (identity.rendererKey === "ngee-ann-overview"
     ? "additional-insights-discovery-v11"
     : "additional-insights-discovery-v12")
@@ -567,7 +569,8 @@ const requireSectionInterpretationResult = (
     || identity.identityContractRevision === "ngee-ann-section-v2"
     || identity.identityContractRevision === "ngee-ann-section-v3"
     || identity.identityContractRevision === "ngee-ann-section-v4"
-    || identity.identityContractRevision === "ngee-ann-section-v5") {
+    || identity.identityContractRevision === "ngee-ann-section-v5"
+    || identity.identityContractRevision === "ngee-ann-section-v6") {
     requireProjectSectionInterpretationResultV1(parsed, identity);
     return;
   }
@@ -598,8 +601,10 @@ const requireProjectSectionInterpretationResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-pack"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
-    || !((identity.identityContractRevision === "ngee-ann-section-v5"
-      && identity.validatorRevision === "energyiq-project-section-acceptance-v4")
+    || !((identity.identityContractRevision === "ngee-ann-section-v6"
+      && identity.validatorRevision === "energyiq-project-section-acceptance-v5")
+      || (identity.identityContractRevision === "ngee-ann-section-v5"
+        && identity.validatorRevision === "energyiq-project-section-acceptance-v4")
       || (identity.identityContractRevision === "ngee-ann-section-v4"
         && identity.validatorRevision === "energyiq-project-section-acceptance-v3")
       || (identity.identityContractRevision === "ngee-ann-section-v3"
@@ -659,7 +664,8 @@ const validProjectSectionPromptRevision = (
   }
   if (identity.identityContractRevision !== "ngee-ann-section-v3"
     && identity.identityContractRevision !== "ngee-ann-section-v4"
-    && identity.identityContractRevision !== "ngee-ann-section-v5") return false;
+    && identity.identityContractRevision !== "ngee-ann-section-v5"
+    && identity.identityContractRevision !== "ngee-ann-section-v6") return false;
   if (identity.targetId === "time-behaviour") {
     return identity.identityContractRevision === "ngee-ann-section-v3"
       ? identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2"
@@ -931,7 +937,7 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  const isCurrentNgeeAnnV3 = identity.rendererKey === "ngee-ann-overview"
+  const isHistoricalNgeeAnnV3 = identity.rendererKey === "ngee-ann-overview"
     && identity.identityContractRevision === "ngee-ann-additional-insights-v3"
     && identity.analysisPackId === "ngee-ann-additional-insights-pack"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
@@ -941,10 +947,20 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  const validAnalysisPack = isHistoricalNgeeAnnV1 || isHistoricalNgeeAnnV2 || isCurrentNgeeAnnV3
+  const isCurrentNgeeAnnV4 = identity.rendererKey === "ngee-ann-overview"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v4"
+    && identity.analysisPackId === "ngee-ann-additional-insights-pack"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v18"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v21"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v11"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2";
+  const validAnalysisPack = isHistoricalNgeeAnnV1 || isHistoricalNgeeAnnV2 || isHistoricalNgeeAnnV3 || isCurrentNgeeAnnV4
     ? identity.analysisPackId === "ngee-ann-additional-insights-pack"
     : identity.analysisPackId === "preschool-additional-insights-pack";
-  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isHistoricalV6 && !isHistoricalV7 && !isHistoricalV8 && !isHistoricalV9 && !isHistoricalV10 && !isHistoricalV11 && !isHistoricalV12 && !isHistoricalV13 && !isHistoricalV14 && !isHistoricalV15 && !isHistoricalV16 && !isHistoricalV17 && !isHistoricalV18 && !isHistoricalV19 && !isHistoricalV20 && !isHistoricalV21 && !isHistoricalV22 && !isHistoricalV23 && !isCurrentV24 && !isHistoricalNgeeAnnV1 && !isHistoricalNgeeAnnV2 && !isCurrentNgeeAnnV3)
+  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isHistoricalV6 && !isHistoricalV7 && !isHistoricalV8 && !isHistoricalV9 && !isHistoricalV10 && !isHistoricalV11 && !isHistoricalV12 && !isHistoricalV13 && !isHistoricalV14 && !isHistoricalV15 && !isHistoricalV16 && !isHistoricalV17 && !isHistoricalV18 && !isHistoricalV19 && !isHistoricalV20 && !isHistoricalV21 && !isHistoricalV22 && !isHistoricalV23 && !isCurrentV24 && !isHistoricalNgeeAnnV1 && !isHistoricalNgeeAnnV2 && !isHistoricalNgeeAnnV3 && !isCurrentNgeeAnnV4)
     || !validAnalysisPack
     || identity.analysisPackRevision !== "v1"
     || identity.capabilityRevision !== "scoped-read-only-v1"

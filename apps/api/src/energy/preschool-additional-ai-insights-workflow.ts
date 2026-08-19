@@ -604,10 +604,10 @@ const parseDiscoveryCandidates = (
   identity: ProjectAdditionalAiInsightArtifactIdentity,
 ): DiscoveryCandidate[] | null => {
   if (typeof answer !== "string" || answer.length > MAX_DISCOVERY_ANSWER_CHARS) return null;
-  const allowBoundedRepair = identity.identityContractRevision === "ngee-ann-additional-insights-v3";
+  const allowBoundedRepair = identity.identityContractRevision === "ngee-ann-additional-insights-v4";
   const parsed = parseDiscoveryEnvelope(answer, allowBoundedRepair);
   if (!isRecord(parsed) || !Array.isArray(parsed.candidates)) return null;
-  const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v3"
+  const exactKeys = identity.identityContractRevision === "ngee-ann-additional-insights-v4"
     && parsed.type === "object"
     ? ["candidates", "type"]
     : ["candidates"];
@@ -801,6 +801,8 @@ const acceptCandidate = (
     title: value.title,
     incrementalContext: value.incrementalContext,
     fallbackObservation: acceptedNarrative.observation,
+    fallbackAngle: acceptedNarrative.angle,
+    preferAngleFallback: identity.rendererKey === "ngee-ann-overview",
     narrativeIsSupported: factualNarrativeIsSupported,
   });
   if (!acceptedTitle) return null;
@@ -1677,23 +1679,42 @@ const resolveSupportedCandidateTitle = (input: {
   title: string;
   incrementalContext: unknown;
   fallbackObservation: string;
+  fallbackAngle: string;
+  preferAngleFallback: boolean;
   narrativeIsSupported(narrative: string): boolean;
 }): { text: string; repairedFromObservation: boolean } | null => {
+  const fallbackTitle = (): { text: string; repairedFromObservation: true } | null => {
+    const angleTitle = input.preferAngleFallback
+      ? conciseTitleFromAcceptedAngle(input.fallbackAngle)
+      : null;
+    if (angleTitle) return { text: angleTitle, repairedFromObservation: true };
+    return conciseSummaryTitle(input.fallbackObservation)
+      ? { text: input.fallbackObservation, repairedFromObservation: true }
+      : null;
+  };
   const title = input.title.trim();
   if (input.narrativeIsSupported(title)) return { text: title, repairedFromObservation: false };
   if (!isRecord(input.incrementalContext)
     || !conciseSummaryTitle(input.incrementalContext.novelConclusion)) {
-    return conciseSummaryTitle(input.fallbackObservation)
-      ? { text: input.fallbackObservation, repairedFromObservation: true }
-      : null;
+    return fallbackTitle();
   }
   const novelConclusion = input.incrementalContext.novelConclusion.trim();
   if (input.narrativeIsSupported(novelConclusion)) {
     return { text: novelConclusion, repairedFromObservation: false };
   }
-  return conciseSummaryTitle(input.fallbackObservation)
-    ? { text: input.fallbackObservation, repairedFromObservation: true }
-    : null;
+  return fallbackTitle();
+};
+
+const conciseTitleFromAcceptedAngle = (angle: string): string | null => {
+  const firstSentence = angle.trim().split(/(?<=[.!?])\s+/u)[0]
+    ?.replace(/[.!?]+$/u, "")
+    .trim();
+  if (!firstSentence) return null;
+  const firstClause = firstSentence.split(/\s+(?:and|but|while|whereas)\s+|,\s*(?:and|but|while|whereas)\s+/iu)[0]
+    ?.trim();
+  if (conciseSummaryTitle(firstSentence)) return firstSentence;
+  if (firstClause && firstClause.length >= 24 && conciseSummaryTitle(firstClause)) return firstClause;
+  return null;
 };
 
 const salvageSupportedNarrative = (

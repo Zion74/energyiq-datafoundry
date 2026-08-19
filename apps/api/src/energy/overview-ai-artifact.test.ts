@@ -47,11 +47,11 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(section).toMatchObject({
       artifactKind: "section-interpretation",
       targetId: "time-behaviour",
-      identityContractRevision: "ngee-ann-section-v5",
+      identityContractRevision: "ngee-ann-section-v6",
       analysisPackId: "ngee-ann-section-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-project-section-interpretation-v1",
-      validatorRevision: "energyiq-project-section-acceptance-v4",
+      validatorRevision: "energyiq-project-section-acceptance-v5",
       workflowRevision: "energyiq-project-section-discover-publish-v1",
       investigatorPromptRevision: "energyiq-project-section-discovery-v3",
       capabilityRevision: "pack-only-v1",
@@ -84,17 +84,20 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(additional).toMatchObject({
       rendererKey: "ngee-ann-overview",
       artifactKind: "autonomous-insights",
-      identityContractRevision: "ngee-ann-additional-insights-v3",
+      identityContractRevision: "ngee-ann-additional-insights-v4",
       analysisPackId: "ngee-ann-additional-insights-pack",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
+      validatorRevision: "additional-insights-acceptance-v18",
+      workflowRevision: "additional-insights-discover-accept-publish-v21",
       investigatorPromptRevision: "additional-insights-discovery-v11",
       methodSetId: "preschool-additional-insights-current",
     });
     expect(isCurrentProjectAdditionalAiInsightArtifactIdentity(additional)).toBe(true);
     expect(isCurrentProjectAdditionalAiInsightArtifactIdentity({
       ...additional,
-      identityContractRevision: "ngee-ann-additional-insights-v2",
-      investigatorPromptRevision: "additional-insights-discovery-v10",
+      identityContractRevision: "ngee-ann-additional-insights-v3",
+      validatorRevision: "additional-insights-acceptance-v17",
+      workflowRevision: "additional-insights-discover-accept-publish-v20",
     })).toBe(false);
   });
 });

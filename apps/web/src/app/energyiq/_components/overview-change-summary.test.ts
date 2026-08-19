@@ -717,13 +717,13 @@ function projectAiArtifact(
     analysisPackId: "ngee-ann-section-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-project-section-interpretation-v1",
-    validatorRevision: "energyiq-project-section-acceptance-v4",
+    validatorRevision: "energyiq-project-section-acceptance-v5",
     workflowRevision: "energyiq-project-section-discover-publish-v1",
     investigatorPromptRevision: "energyiq-project-section-discovery-v3",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
-    identityContractRevision: "ngee-ann-section-v5",
+    identityContractRevision: "ngee-ann-section-v6",
   };
   return {
     contract: "energyiq-saved-ai-result@3",
@@ -761,7 +761,7 @@ function projectAiArtifact(
             sections: { "time-behaviour": { ...unitGeneration } },
             additionalInsights: {
               ...unitGeneration,
-              identityContractRevision: "ngee-ann-additional-insights-v3",
+              identityContractRevision: "ngee-ann-additional-insights-v4",
             },
           },
         },

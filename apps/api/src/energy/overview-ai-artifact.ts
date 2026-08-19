@@ -62,7 +62,7 @@ export type PreschoolAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiIn
 };
 
 export type NgeeAnnAdditionalAiInsightArtifactIdentity = ProjectAdditionalAiInsightArtifactIdentity & {
-  identityContractRevision: "ngee-ann-additional-insights-v3";
+  identityContractRevision: "ngee-ann-additional-insights-v4";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -104,11 +104,11 @@ export const createNgeeAnnOverviewAiSectionArtifactIdentity = (input: {
     ...projectOverviewAiDerivedIdentityBase(input.baseIdentity),
     artifactKind: "section-interpretation",
     targetId: input.targetId,
-    identityContractRevision: "ngee-ann-section-v5",
+    identityContractRevision: "ngee-ann-section-v6",
     analysisPackId: "ngee-ann-section-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-project-section-interpretation-v1",
-    validatorRevision: "energyiq-project-section-acceptance-v4",
+    validatorRevision: "energyiq-project-section-acceptance-v5",
     workflowRevision: "energyiq-project-section-discover-publish-v1",
     investigatorPromptRevision: input.targetId === "time-behaviour"
       ? "energyiq-project-section-discovery-v3"
@@ -367,12 +367,12 @@ export const createNgeeAnnAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "ngee-ann-additional-insights-v3",
+    identityContractRevision: "ngee-ann-additional-insights-v4",
     analysisPackId: "ngee-ann-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v17",
-    workflowRevision: "additional-insights-discover-accept-publish-v20",
+    validatorRevision: "additional-insights-acceptance-v18",
+    workflowRevision: "additional-insights-discover-accept-publish-v21",
     investigatorPromptRevision: "additional-insights-discovery-v11",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
@@ -415,12 +415,12 @@ export const isCurrentProjectAdditionalAiInsightArtifactIdentity = (
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)
   || (identity.rendererKey === "ngee-ann-overview"
     && identity.artifactKind === "autonomous-insights"
-    && identity.identityContractRevision === "ngee-ann-additional-insights-v3"
+    && identity.identityContractRevision === "ngee-ann-additional-insights-v4"
     && identity.analysisPackId === "ngee-ann-additional-insights-pack"
     && identity.analysisPackRevision === "v1"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
-    && identity.validatorRevision === "additional-insights-acceptance-v17"
-    && identity.workflowRevision === "additional-insights-discover-accept-publish-v20"
+    && identity.validatorRevision === "additional-insights-acceptance-v18"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v21"
     && identity.investigatorPromptRevision === "additional-insights-discovery-v11"
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.methodSkillId === "energyiq-open-discovery"

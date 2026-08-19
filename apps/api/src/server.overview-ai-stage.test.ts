@@ -63,7 +63,7 @@ describe("Overview AI server stage options", () => {
   it("reserves the larger complete-projection message budget only for the exact Ngee Ann Section identity", () => {
     const identity = {
       rendererKey: "ngee-ann-overview",
-      identityContractRevision: "ngee-ann-section-v5",
+      identityContractRevision: "ngee-ann-section-v6",
     } as EnergyIqOverviewAiArtifactIdentity;
     expect(resolveOverviewAiServerRunnerOptions({
       stage: "section-interpreter",
@@ -1452,8 +1452,9 @@ const ngeeAnnAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   scopeId: "ngee-ann-polytechnic",
   rendererKey: "ngee-ann-overview",
   analysisPackId: "ngee-ann-additional-insights-pack",
-  identityContractRevision: "ngee-ann-additional-insights-v3",
-  workflowRevision: "additional-insights-discover-accept-publish-v20",
+  identityContractRevision: "ngee-ann-additional-insights-v4",
+  validatorRevision: "additional-insights-acceptance-v18",
+  workflowRevision: "additional-insights-discover-accept-publish-v21",
   investigatorPromptRevision: "additional-insights-discovery-v11",
 });
 

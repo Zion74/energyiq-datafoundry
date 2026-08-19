@@ -405,6 +405,19 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       expect(store.energyIq.overviewAiArtifacts.get(priorCalibrationIdentity))
         .toMatchObject({ id: priorCalibrationArtifact.id, status: "available" });
 
+      const priorInferenceIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-prior-inference", "decision-priorities"),
+        identityContractRevision: "ngee-ann-section-v5",
+        validatorRevision: "energyiq-project-section-acceptance-v4",
+      };
+      const priorInferenceArtifact = completeSectionV4(
+        store,
+        priorInferenceIdentity,
+        ngeeAnnSectionResult(priorInferenceIdentity, "available"),
+      );
+      expect(store.energyIq.overviewAiArtifacts.get(priorInferenceIdentity))
+        .toMatchObject({ id: priorInferenceArtifact.id, status: "available" });
+
       const readableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-readable", "time-behaviour");
       const readableBase = ngeeAnnSectionResult(readableIdentity, "available");
       const readableResult = {
@@ -994,11 +1007,11 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v5",
+  identityContractRevision: "ngee-ann-section-v6",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v4",
+  validatorRevision: "energyiq-project-section-acceptance-v5",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
   investigatorPromptRevision: targetId === "time-behaviour"
     ? "energyiq-project-section-discovery-v3"
@@ -1209,7 +1222,8 @@ const completeSectionV4 = (
 describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () => {
   it("persists only an exact shared Method-set Artifact and keeps empty as a valid terminal result", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-additional-insights-artifact-"));
-    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const databasePath = join(root, "metadata.sqlite");
+    const metadata = createMetadataStore({ database_path: databasePath });
     try {
       metadata.workspaces.upsert({
         id: "artifact-workspace",
@@ -1234,20 +1248,37 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const ngeeAnnIdentity: EnergyIqOverviewAiArtifactIdentity = {
         ...additionalIdentity("snapshot-additional-ngee-ann"),
         rendererKey: "ngee-ann-overview",
-        identityContractRevision: "ngee-ann-additional-insights-v3",
+        identityContractRevision: "ngee-ann-additional-insights-v4",
         analysisPackId: "ngee-ann-additional-insights-pack",
-        workflowRevision: "additional-insights-discover-accept-publish-v20",
+        validatorRevision: "additional-insights-acceptance-v18",
+        workflowRevision: "additional-insights-discover-accept-publish-v21",
         investigatorPromptRevision: "additional-insights-discovery-v11",
       };
       expect(metadata.energyIq.overviewAiArtifacts.queue({
         identity: ngeeAnnIdentity,
         triggeredBy: "dev-user",
       })).toMatchObject({ status: "queued" });
+      const ngeeAnnArtifact = completeAdditional(
+        metadata,
+        ngeeAnnIdentity as AdditionalIdentity,
+        additionalResult(ngeeAnnIdentity as AdditionalIdentity, "available"),
+      );
+      const historicalNgeeAnnV3 = {
+        ...ngeeAnnIdentity,
+        identityContractRevision: "ngee-ann-additional-insights-v3",
+        validatorRevision: "additional-insights-acceptance-v17",
+        workflowRevision: "additional-insights-discover-accept-publish-v20",
+      };
+      seedHistoricalTerminalArtifact({
+        databasePath,
+        source: ngeeAnnArtifact,
+        identity: historicalNgeeAnnV3,
+      });
+      expect(metadata.energyIq.overviewAiArtifacts.get(historicalNgeeAnnV3))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
       expect(() => metadata.energyIq.overviewAiArtifacts.queue({
         identity: {
-          ...ngeeAnnIdentity,
-          identityContractRevision: "ngee-ann-additional-insights-v2",
-          investigatorPromptRevision: "additional-insights-discovery-v10",
+          ...historicalNgeeAnnV3,
         },
         triggeredBy: "dev-user",
       })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");

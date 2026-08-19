@@ -1613,6 +1613,54 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("uses a concise accepted AI angle instead of an observation fragment when repairing a Ngee Ann title", async () => {
+    const harness = createHarness();
+    try {
+      const ngeeAnnBaseIdentity = {
+        ...harness.baseIdentity,
+        rendererKey: "ngee-ann-overview",
+      } as const;
+      const ngeeAnnIdentity = createNgeeAnnAdditionalAiInsightArtifactIdentity({
+        baseIdentity: ngeeAnnBaseIdentity,
+      });
+      const angle = "The front-row office lighting circuit is roughly double any other light circuit and sits among the top circuits overall. This longer explanation remains in the AI angle instead of becoming the card title.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        createArtifactIdentity: createNgeeAnnAdditionalAiInsightArtifactIdentity,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-ngee-title-repair", "fact:standby-share", {
+            title: "Standby is the unsupported 88% and therefore must be fixed",
+            observation: "the supported standby signal is materially smaller.",
+            angle,
+            epistemicStatus: "inferred",
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: ngeeAnnIdentity,
+        user: harness.user,
+        runId: "ngee-title-repair-run",
+        sessionId: "ngee-title-repair-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        findings: [{
+          id: "additional:candidate-ngee-title-repair",
+          title: "The front-row office lighting circuit is roughly double any other light circuit",
+          text: `**Evidence signal:** the supported standby signal is materially smaller.\n\n**AI angle:** ${angle}`,
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps the Preschool discovery root exact when the schema marker is present", async () => {
     const harness = createHarness();
     try {
