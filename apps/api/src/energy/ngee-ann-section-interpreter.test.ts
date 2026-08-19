@@ -141,6 +141,58 @@ describe("materializeNgeeAnnSectionResult", () => {
     expect(result.insights[0]?.text).toBe("The accepted profile remains near the supplied kWh per hourly bucket values.");
   });
 
+  it("removes a contradicted day-type ranking while preserving supported siblings", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    pack.facts.timeBehaviour = {
+      metricId: "energy.total_usage_kwh@1",
+      grain: "hour",
+      unit: "kWh",
+      timezone: "Asia/Singapore",
+      queryId: "time_bucket_grid_v1",
+      scopes: [],
+      dayProfiles: [
+        dayProfile("weekday", 17),
+        dayProfile("weekend", 5),
+        dayProfile("public_holiday", 9.4),
+      ],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Weekday usage is highest. Public holiday is lowest.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:false-ranking",
+          title: "Public holiday usage is the lowest",
+          text: "The supplied day profiles put public holiday below weekend usage.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:supported-ranking",
+          title: "Weekday usage is the highest",
+          text: "The supplied day profiles place weekday above weekend and public holiday usage.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:day-type-ranking",
+    });
+
+    expect(result.summary?.text).toBe("Weekday usage is highest.");
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:supported-ranking"]);
+    expect(result.publication.rejectedCandidateIds).toContain("candidate:false-ranking");
+  });
+
   it("keeps a clearly labelled speculative angle when its observation Evidence is current", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
@@ -655,6 +707,18 @@ const baseIdentity = () => createOverviewAiArtifactIdentity({
   rendererVersion: "1",
   modelProfileId: "workspace-default-model-profile",
   modelProfileRevision: 8,
+});
+
+const dayProfile = (
+  dayType: "weekday" | "weekend" | "public_holiday",
+  usageKwh: number,
+) => ({
+  dayType,
+  scopeId: "ngee-ann-polytechnic",
+  scopeName: "Ngee Ann Polytechnic",
+  status: "available" as const,
+  sampleDayCount: 1,
+  values: [{ localHour: 14, usageKwh }],
 });
 
 const snapshot = (): ProjectAnalysisSnapshot => ({

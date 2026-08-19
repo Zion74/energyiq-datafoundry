@@ -216,6 +216,7 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
   const proposal = parseProposal(input.answer, input.pack.sectionId);
   const evidenceIds = new Set(input.pack.evidence.map(({ id }) => id));
   const packText = JSON.stringify(projectSectionPackForPrompt(input.pack));
+  const dayTypeProfileMeans = dayTypeProfileMeansForPack(input.pack);
 
   if (proposal.status === "empty") {
     if (proposal.summary !== undefined || proposal.candidates.length !== 0) {
@@ -224,7 +225,7 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
     return resultBase(input, "empty", [], [], 0);
   }
 
-  const summary = parseSummary(proposal.summary, evidenceIds, packText);
+  const summary = parseSummary(proposal.summary, evidenceIds, packText, dayTypeProfileMeans);
   if (!summary) throw new Error("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
   const accepted: NgeeAnnSectionInsight[] = [];
   const rejectedCandidateIds: string[] = [];
@@ -239,7 +240,7 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
       continue;
     }
     seenCandidateIds.add(candidateId);
-    const insight = parseInsight(candidate, evidenceIds, packText);
+    const insight = parseInsight(candidate, evidenceIds, packText, dayTypeProfileMeans);
     if (!insight) {
       rejectedCandidateIds.push(candidateId);
       continue;
@@ -344,6 +345,7 @@ const parseSummary = (
   value: unknown,
   evidenceIds: Set<string>,
   packText: string,
+  dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): NgeeAnnSectionSummary | null => {
   const text = isRecord(value) && typeof value.text === "string"
     ? normalizeNgeeAnnHourlyEnergyUnit(value.text)
@@ -351,13 +353,14 @@ const parseSummary = (
   if (!isRecord(value)
     || !boundedString(text, MAX_SUMMARY_CHARS)
     || !validEvidenceRefs(value.evidenceRefs, evidenceIds)) return null;
-  if (narrativeFactsSupported(text, packText)) {
+  if (narrativeFactsSupported(text, packText, dayTypeProfileMeans)) {
     return { text, evidenceRefs: [...value.evidenceRefs] };
   }
   const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
     .segment(text)]
     .map(({ segment }) => segment.trim())
-    .filter((sentence) => sentence.length > 0 && narrativeFactsSupported(sentence, packText))
+    .filter((sentence) => sentence.length > 0
+      && narrativeFactsSupported(sentence, packText, dayTypeProfileMeans))
     .join(" ");
   return supportedText.length > 0
     ? { text: supportedText, evidenceRefs: [...value.evidenceRefs] }
@@ -368,6 +371,7 @@ const parseInsight = (
   value: unknown,
   evidenceIds: Set<string>,
   packText: string,
+  dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): NgeeAnnSectionInsight | null => {
   if (!isRecord(value)) return null;
   const title = typeof value.title === "string"
@@ -392,7 +396,7 @@ const parseInsight = (
     || (deepDiveQuestion !== undefined
       && !boundedString(deepDiveQuestion, MAX_DEEP_DIVE_CHARS))) return null;
   const narrative = [title, text, deepDiveQuestion ?? ""].join(" ");
-  if (!narrativeFactsSupported(narrative, packText)) return null;
+  if (!narrativeFactsSupported(narrative, packText, dayTypeProfileMeans)) return null;
   return {
     id: value.id,
     title,
@@ -427,9 +431,46 @@ const validEvidenceRefs = (
 const numbersSupported = (text: string, packText: string): boolean =>
   [...text.matchAll(NUMBER_TOKEN)].every(([token]) => numericTokenSupported(token, packText));
 
-const narrativeFactsSupported = (text: string, packText: string): boolean =>
+const narrativeFactsSupported = (
+  text: string,
+  packText: string,
+  dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
+): boolean =>
   numbersSupported(text, packText)
-  && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => packText.includes(token));
+  && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => packText.includes(token))
+  && dayTypeRankingsSupported(text, dayTypeProfileMeans);
+
+type NgeeAnnDayType = "weekday" | "weekend" | "public_holiday";
+
+const DAY_TYPE_RANKING = /\b(weekday|weekend|public\s+holiday)(?:\s+(?:usage|profile))?\s+(?:is|was|remains?)\s+(?:the\s+)?(highest|lowest)\b/giu;
+
+const dayTypeProfileMeansForPack = (
+  pack: NgeeAnnSectionPack,
+): ReadonlyMap<NgeeAnnDayType, number> => {
+  if (pack.sectionId !== "time-behaviour") return new Map();
+  const timePack = pack as NgeeAnnSectionPack<"time-behaviour">;
+  return new Map(timePack.facts.timeBehaviour?.dayProfiles.flatMap((profile) => {
+    if (profile.status !== "available"
+      || profile.scopeId !== pack.binding.scopeId
+      || profile.values.length === 0) return [];
+    return [[profile.dayType, profile.values.reduce((sum, value) => sum + value.usageKwh, 0)
+      / profile.values.length] as const];
+  }) ?? []);
+};
+
+const dayTypeRankingsSupported = (
+  text: string,
+  means: ReadonlyMap<NgeeAnnDayType, number>,
+): boolean => [...text.matchAll(DAY_TYPE_RANKING)].every((match) => {
+  const dayType = match[1]?.toLowerCase().replaceAll(" ", "_") as NgeeAnnDayType | undefined;
+  const direction = match[2]?.toLowerCase();
+  const value = dayType ? means.get(dayType) : undefined;
+  const values = [...means.values()];
+  if (value === undefined || values.length < 2) return false;
+  return direction === "highest"
+    ? value >= Math.max(...values) - Number.EPSILON
+    : value <= Math.min(...values) + Number.EPSILON;
+});
 
 const numericTokenSupported = (token: string, packText: string): boolean => {
   const normalized = token.replaceAll(",", "");
@@ -748,7 +789,7 @@ const requirePackIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedPromptRevision = "energyiq-project-section-discovery-v5";
-  if (identity.identityContractRevision !== "ngee-ann-section-v10"
+  if (identity.identityContractRevision !== "ngee-ann-section-v11"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId
