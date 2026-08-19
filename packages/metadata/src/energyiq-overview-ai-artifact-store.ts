@@ -566,7 +566,8 @@ const requireSectionInterpretationResult = (
   if (identity.identityContractRevision === "ngee-ann-section-v1"
     || identity.identityContractRevision === "ngee-ann-section-v2"
     || identity.identityContractRevision === "ngee-ann-section-v3"
-    || identity.identityContractRevision === "ngee-ann-section-v4") {
+    || identity.identityContractRevision === "ngee-ann-section-v4"
+    || identity.identityContractRevision === "ngee-ann-section-v5") {
     requireProjectSectionInterpretationResultV1(parsed, identity);
     return;
   }
@@ -597,8 +598,10 @@ const requireProjectSectionInterpretationResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-pack"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-section-interpretation-v1"
-    || !((identity.identityContractRevision === "ngee-ann-section-v4"
-      && identity.validatorRevision === "energyiq-project-section-acceptance-v3")
+    || !((identity.identityContractRevision === "ngee-ann-section-v5"
+      && identity.validatorRevision === "energyiq-project-section-acceptance-v4")
+      || (identity.identityContractRevision === "ngee-ann-section-v4"
+        && identity.validatorRevision === "energyiq-project-section-acceptance-v3")
       || (identity.identityContractRevision === "ngee-ann-section-v3"
         && identity.validatorRevision === "energyiq-project-section-acceptance-v2")
       || ((identity.identityContractRevision === "ngee-ann-section-v1"
@@ -655,7 +658,8 @@ const validProjectSectionPromptRevision = (
     return identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2";
   }
   if (identity.identityContractRevision !== "ngee-ann-section-v3"
-    && identity.identityContractRevision !== "ngee-ann-section-v4") return false;
+    && identity.identityContractRevision !== "ngee-ann-section-v4"
+    && identity.identityContractRevision !== "ngee-ann-section-v5") return false;
   if (identity.targetId === "time-behaviour") {
     return identity.identityContractRevision === "ngee-ann-section-v3"
       ? identity.investigatorPromptRevision === "energyiq-project-section-discovery-v2"

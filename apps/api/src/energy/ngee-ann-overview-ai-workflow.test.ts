@@ -61,7 +61,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v4")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v5")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(sectionProfileSnapshots).toEqual(Array.from({ length: 4 }, () => trustedSnapshot));
     expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);

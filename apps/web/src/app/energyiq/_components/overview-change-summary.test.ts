@@ -717,13 +717,13 @@ function projectAiArtifact(
     analysisPackId: "ngee-ann-section-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-project-section-interpretation-v1",
-    validatorRevision: "energyiq-project-section-acceptance-v3",
+    validatorRevision: "energyiq-project-section-acceptance-v4",
     workflowRevision: "energyiq-project-section-discover-publish-v1",
     investigatorPromptRevision: "energyiq-project-section-discovery-v3",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
-    identityContractRevision: "ngee-ann-section-v4",
+    identityContractRevision: "ngee-ann-section-v5",
   };
   return {
     contract: "energyiq-saved-ai-result@3",

@@ -187,6 +187,37 @@ describe("materializeNgeeAnnSectionResult", () => {
     })]);
   });
 
+  it("does not present a suggesting relationship as directly observed", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: "trend-and-demand",
+        status: "available",
+        summary: { text: "The current demand trend is available for review.", evidenceRefs: [evidenceRef] },
+        candidates: [{
+          id: "candidate:suggesting-relationship",
+          title: "The change is concentrated on one level",
+          text: "The difference is concentrated on Level 7, suggesting a level-specific operational change.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:suggesting-relationship",
+    });
+
+    expect(result.insights).toEqual([expect.objectContaining({
+      id: "candidate:suggesting-relationship",
+      epistemicStatus: "inferred",
+    })]);
+  });
+
   it("keeps an actionable angle but does not label the recommendation as directly observed", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
