@@ -3269,8 +3269,6 @@ function buildDayProfile(
     if (profile.status === "unavailable") {
       return Boolean(profile.reason.message)
         && (profile.reason.code === "COMPLETE_DAY_SAMPLE_UNAVAILABLE"
-          || profile.reason.code === "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
-        && (profile.dayType !== "public_holiday"
           || profile.reason.code === "DAY_TYPE_CLASSIFICATION_UNAVAILABLE");
     }
     return Number.isInteger(profile.sampleDayCount)
@@ -3621,8 +3619,6 @@ function validComponentHourlyProfiles(snapshot: EnergyProjectAnalysisSnapshotDto
         if (
           !profile.reason.message
           || (profile.reason.code !== "COMPLETE_DAY_SAMPLE_UNAVAILABLE"
-            && profile.reason.code !== "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
-          || (profile.dayType === "public_holiday"
             && profile.reason.code !== "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
         ) return invalid(`${scope.scopeName} has an invalid unavailable Day Type state.`);
         continue;

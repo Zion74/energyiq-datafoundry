@@ -106,6 +106,39 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("Weekday / Project peaked at 14:00");
   });
 
+  it("keeps weekday and weekend profiles available when Calendar classification exists but this window has no complete Holiday sample", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const profile of snapshot.analysis.timeBehaviour!.dayProfiles) {
+      if (profile.dayType !== "public_holiday") continue;
+      Object.assign(profile, {
+        status: "unavailable",
+        reason: {
+          code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+          message: `No complete public_holiday local-day sample is available for ${profile.scopeName}.`,
+        },
+      });
+    }
+    for (const scope of snapshot.analysis.componentHourlyProfiles!.scopes) {
+      const profile = scope.profiles.find((candidate) => candidate.dayType === "public_holiday");
+      if (!profile) throw new Error("Expected public-holiday component profile.");
+      Object.assign(profile, {
+        status: "unavailable",
+        reason: {
+          code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+          message: `No complete public_holiday component-Circuit sample is available for ${scope.scopeName}.`,
+        },
+      });
+    }
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    expect(markup).toContain("Weekday / Project peaked at 14:00");
+    expect(markup).toContain("Weekend / Project peaked at 14:00");
+    expect(markup).toContain("No complete public_holiday local-day sample is available");
+    expect(markup).not.toContain("The server Day Profile contract is incomplete or invalid.");
+  });
+
   it("opens with an answer-first Executive Summary built only from verified Snapshot facts", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const view = buildNgeeAnnOverviewViewModel(snapshot);

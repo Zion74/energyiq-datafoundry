@@ -145,6 +145,12 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       expect(analysisA.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(analysisA.snapshot.analysis.cost.status).toBe("available");
       expect(analysisA.snapshot.analysis.offHours.status).toBe("available");
+      expect(analysisA.snapshot.analysis.timeBehaviour?.dayProfiles.find((profile) => (
+        profile.scopeId === "project" && profile.dayType === "public_holiday"
+      ))).toMatchObject({
+        status: "available",
+        sampleDayCount: 1,
+      });
       expectEvidencePins(analysisA.snapshot.evidence, materializedA.snapshot.id);
       const releaseIdentityA = releaseIdentity(analysisA.snapshot);
 
@@ -228,6 +234,12 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         .not.toBe(analysisA.snapshot.analysis.summary.usageKwh);
       expect(analysisB.snapshot.analysis.cost.status).toBe("available");
       expect(analysisB.snapshot.analysis.offHours.status).toBe("available");
+      expect(analysisB.snapshot.analysis.timeBehaviour?.dayProfiles.find((profile) => (
+        profile.scopeId === "project" && profile.dayType === "public_holiday"
+      ))).toMatchObject({
+        status: "available",
+        sampleDayCount: 1,
+      });
       expect(analysisB.snapshot.decisionPriorities?.status).not.toBe("unavailable");
       expect(analysisB.snapshot.decisionLifecycle).toMatchObject({
         status: "available",
@@ -493,6 +505,26 @@ const configureNgeeAnnOperationalPolicy = (
         saturday: [],
         sunday: [],
       },
+      exceptions: [
+        {
+          date: "2026-05-01",
+          operating: [],
+          label: "Labour Day",
+          classification: "public_holiday",
+        },
+        {
+          date: "2026-05-27",
+          operating: [],
+          label: "Hari Raya Haji",
+          classification: "public_holiday",
+        },
+        {
+          date: "2026-06-01",
+          operating: [],
+          label: "Vesak Day (observed)",
+          classification: "public_holiday",
+        },
+      ],
     }],
   });
 };
