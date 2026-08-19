@@ -10,6 +10,240 @@ import {
 import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 
 describe("ensureEnergyIqBootstrap", () => {
+  it("does not replace a customer-edited Preschool Draft while repairing the legacy demo", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-bootstrap-preschool-routing-user-draft-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
+      metadata.workspaces.upsert({
+        id: "preschool-demo-org",
+        owner_user_id: "dev-user",
+        name: "Preschool Demo",
+        kind: "customer",
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "preschool-demo-org",
+        user_id: "dev-user",
+        role: "owner",
+      });
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "preschool-demo",
+          workspace_id: "preschool-demo-org",
+          name: "Preschool Portfolio",
+          hierarchy_revision_id: "preschool-hierarchy-v4",
+          meter_formula_revision_id: "preschool-meter-formula-v2",
+          root_scope_id: "preschool-project",
+        },
+        document: {
+          project: { name: "Preschool Portfolio", timezone: "Asia/Singapore" },
+          tier_structure_locked: true,
+          tiers: [{ id: "preschool-tier-centre", ordinal: 1, alias: "Centre" }],
+          nodes: [{
+            id: "preschool-centre-a",
+            tier_definition_id: "preschool-tier-centre",
+            name: "Centre A",
+            sort_order: 1,
+            metadata_status: "confirmed",
+          }],
+        },
+        published_by: "dev-user",
+      });
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: "preschool-demo",
+        user_id: "dev-user",
+      });
+      metadata.energyIq.projectSetup.saveDraft({
+        project_id: "preschool-demo",
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: {
+          ...draft.document,
+          project: { ...draft.document.project, name: "Customer-edited Preschool" },
+        },
+      });
+
+      ensureEnergyIqBootstrap(metadata);
+
+      expect(metadata.energyIq.getProject("preschool-demo")).toMatchObject({
+        hierarchy_revision_id: "preschool-hierarchy-v4",
+        has_unpublished_changes: true,
+      });
+      expect(metadata.energyIq.projectSetup.getDraft({
+        project_id: "preschool-demo",
+        user_id: "dev-user",
+      }).document.project.name).toBe("Customer-edited Preschool");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("resumes the exact bootstrap-owned Preschool route migration after a saved Draft", () => {
+    const referenceRoot = mkdtempSync(join(tmpdir(), "energy-bootstrap-preschool-routing-reference-"));
+    const legacyRoot = mkdtempSync(join(tmpdir(), "energy-bootstrap-preschool-routing-resume-"));
+    const reference = createMetadataStore({ database_path: join(referenceRoot, "metadata.sqlite") });
+    const metadata = createMetadataStore({ database_path: join(legacyRoot, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(reference);
+      const referenceProject = reference.energyIq.getProject("preschool-demo");
+      const referenceRevision = reference.energyIq.projectSetup
+        .listHierarchyRevisions("preschool-demo")
+        .find((revision) => revision.id === referenceProject.hierarchy_revision_id)!;
+      const migrationDocument = JSON.parse(referenceRevision.snapshot_json);
+
+      metadata.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
+      metadata.workspaces.upsert({
+        id: "preschool-demo-org",
+        owner_user_id: "dev-user",
+        name: "Preschool Demo",
+        kind: "customer",
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "preschool-demo-org",
+        user_id: "dev-user",
+        role: "owner",
+      });
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "preschool-demo",
+          workspace_id: "preschool-demo-org",
+          name: "Preschool Portfolio",
+          hierarchy_revision_id: "preschool-hierarchy-v4",
+          meter_formula_revision_id: "preschool-meter-formula-v2",
+          data_snapshot_id: "legacy-preschool-snapshot",
+          business_calendar_version: "legacy-preschool-calendar",
+          tariff_schedule_version: "legacy-preschool-tariff",
+          root_scope_id: "preschool-project",
+        },
+        document: {
+          project: { name: "Preschool Portfolio", timezone: "Asia/Singapore" },
+          tier_structure_locked: true,
+          tiers: [{ id: "preschool-tier-centre", ordinal: 1, alias: "Centre" }],
+          nodes: [{
+            id: "preschool-centre-a",
+            tier_definition_id: "preschool-tier-centre",
+            name: "Centre A",
+            sort_order: 1,
+            metadata_status: "confirmed",
+          }],
+        },
+        published_by: "dev-user",
+      });
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: "preschool-demo",
+        user_id: "dev-user",
+      });
+      metadata.energyIq.projectSetup.saveDraft({
+        project_id: "preschool-demo",
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: migrationDocument,
+      });
+
+      ensureEnergyIqBootstrap(metadata);
+
+      expect(metadata.energyIq.getProject("preschool-demo")).toMatchObject({
+        hierarchy_revision_id: "preschool-demo-hierarchy-v5",
+        has_unpublished_changes: false,
+      });
+    } finally {
+      reference.close();
+      metadata.close();
+      rmSync(referenceRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      rmSync(legacyRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("publishes explicit Meter Routes once for the exact legacy Preschool demo revision", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-bootstrap-preschool-routing-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
+      metadata.workspaces.upsert({
+        id: "preschool-demo-org",
+        owner_user_id: "dev-user",
+        name: "Preschool Demo",
+        kind: "customer",
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "preschool-demo-org",
+        user_id: "dev-user",
+        role: "owner",
+      });
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "preschool-demo",
+          workspace_id: "preschool-demo-org",
+          name: "Preschool Portfolio",
+          timezone: "Asia/Singapore",
+          hierarchy_revision_id: "preschool-hierarchy-v4",
+          meter_formula_revision_id: "preschool-meter-formula-v2",
+          data_snapshot_id: "legacy-preschool-snapshot",
+          metric_version: "energy-metrics-v1",
+          business_calendar_version: "legacy-preschool-calendar",
+          tariff_schedule_version: "legacy-preschool-tariff",
+          root_scope_id: "preschool-project",
+        },
+        document: {
+          project: { name: "Preschool Portfolio", timezone: "Asia/Singapore" },
+          tier_structure_locked: true,
+          tiers: [{ id: "preschool-tier-centre", ordinal: 1, alias: "Centre" }],
+          nodes: [{
+            id: "preschool-centre-a",
+            tier_definition_id: "preschool-tier-centre",
+            name: "Centre A",
+            sort_order: 1,
+            metadata_status: "confirmed",
+          }],
+        },
+        published_by: "dev-user",
+      });
+
+      expect(() => resolveEnergyPublishedMeterRoute({
+        metadataStore: metadata,
+        projectId: "preschool-demo",
+        hierarchyRevisionId: "preschool-hierarchy-v4",
+        scopeId: "preschool-project",
+        resource: "electricity",
+      })).toThrow("ENERGYIQ_PUBLISHED_MAPPING_ROUTE_REQUIRED:preschool-hierarchy-v4");
+
+      ensureEnergyIqBootstrap(metadata);
+
+      const migrated = metadata.energyIq.getProject("preschool-demo");
+      expect(migrated).toMatchObject({
+        hierarchy_revision_id: "preschool-demo-hierarchy-v5",
+        data_snapshot_id: "legacy-preschool-snapshot",
+        business_calendar_version: "legacy-preschool-calendar",
+        tariff_schedule_version: "legacy-preschool-tariff",
+      });
+      expect(resolveEnergyPublishedMeterRoute({
+        metadataStore: metadata,
+        projectId: "preschool-demo",
+        hierarchyRevisionId: migrated.hierarchy_revision_id,
+        scopeId: migrated.root_scope_id,
+        resource: "electricity",
+      })).toMatchObject({
+        source: "published",
+        officialMeterPointIds: expect.arrayContaining(["preschool-centre-a-aircon-1"]),
+      });
+
+      const firstRevision = metadata.energyIq.templates.getLatestProjectRevision("preschool-demo");
+      const firstHierarchyCount = metadata.energyIq.projectSetup
+        .listHierarchyRevisions("preschool-demo").length;
+      ensureEnergyIqBootstrap(metadata);
+      expect(metadata.energyIq.getProject("preschool-demo").hierarchy_revision_id)
+        .toBe("preschool-demo-hierarchy-v5");
+      expect(metadata.energyIq.projectSetup.listHierarchyRevisions("preschool-demo"))
+        .toHaveLength(firstHierarchyCount);
+      expect(metadata.energyIq.templates.getLatestProjectRevision("preschool-demo")?.revision_id)
+        .toBe(firstRevision?.revision_id);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("enables the release-pinned daily anomaly Rule for a new Ngee Ann Project only", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-bootstrap-rules-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

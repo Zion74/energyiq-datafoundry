@@ -81,6 +81,7 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     document: buildPreschoolSetup(),
     published_by: "dev-user"
   });
+  ensurePreschoolExplicitMeterRoutes(metadataStore);
   ensureBootstrapProjectWorkspace(metadataStore, PRESCHOOL_PROJECT_ID, PRESCHOOL_WORKSPACE_ID);
   metadataStore.energyIq.upsertProjectAccess({
     project_id: PRESCHOOL_PROJECT_ID,
@@ -102,6 +103,47 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     PRESCHOOL_REPORT_TIME_POLICY,
     PRESCHOOL_OVERVIEW_DEFINITION,
   );
+};
+
+const ensurePreschoolExplicitMeterRoutes = (metadataStore: MetadataStore): void => {
+  const project = metadataStore.energyIq.getProject(PRESCHOOL_PROJECT_ID);
+  if (project.hierarchy_revision_id !== "preschool-hierarchy-v4") return;
+  const currentRevision = metadataStore.energyIq.projectSetup
+    .listHierarchyRevisions(PRESCHOOL_PROJECT_ID)
+    .find((revision) => revision.id === project.hierarchy_revision_id);
+  if (!currentRevision) return;
+  const currentDocument = JSON.parse(currentRevision.snapshot_json) as EnergyIqProjectSetupDocument;
+  if (
+    currentDocument.meter_mapping?.schema_version === 2
+    && currentDocument.meter_mapping.confirmed
+    && currentDocument.meter_mapping.official_aggregation_routes
+  ) return;
+
+  const targetDocument = buildPreschoolSetup();
+  const draft = metadataStore.energyIq.projectSetup.getDraft({
+    project_id: PRESCHOOL_PROJECT_ID,
+    user_id: "dev-user",
+  });
+  if (
+    project.has_unpublished_changes
+    && (
+      draft.based_on_hierarchy_revision_id !== project.hierarchy_revision_id
+      || JSON.stringify(draft.document) !== JSON.stringify(targetDocument)
+    )
+  ) return;
+  const saved = project.has_unpublished_changes
+    ? draft
+    : metadataStore.energyIq.projectSetup.saveDraft({
+        project_id: PRESCHOOL_PROJECT_ID,
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: targetDocument,
+      });
+  metadataStore.energyIq.projectSetup.publishDraft({
+    project_id: PRESCHOOL_PROJECT_ID,
+    expected_revision: saved.revision,
+    user_id: "dev-user",
+  });
 };
 
 const ensurePilotOverviewDefinition = (
