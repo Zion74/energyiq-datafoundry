@@ -420,6 +420,143 @@ describe("compileEnergyIqOverviewDefinition", () => {
     expect(compact.definitionFingerprint).toMatch(/^[a-f0-9]{64}$/u);
     expect(explicit.definitionFingerprint).toBe(compact.definitionFingerprint);
   });
+
+  it("reports whole Section additions and removals without exposing their internal placements", () => {
+    const performance = {
+      key: "performance",
+      title: "Performance",
+      managementQuestion: "What changed?",
+      primaryWindowId: "recent-28d",
+      blocks: [{ key: "consumption", capabilityRevisionId: "overview.consumption@1" }],
+    };
+    const trust = {
+      key: "trust",
+      title: "Data trust",
+      managementQuestion: "Can the evidence be trusted?",
+      primaryWindowId: "recent-28d",
+      blocks: [{ key: "data-quality", capabilityRevisionId: "quality.data_coverage@1" }],
+    };
+    const actions = {
+      key: "actions",
+      title: "Recommended actions",
+      managementQuestion: "What should happen next?",
+      primaryWindowId: "recent-28d",
+      blocks: [{ key: "recommended-actions", capabilityRevisionId: "decision.recommended_actions@1" }],
+    };
+    const baseDefinition = {
+      contractRevision: "energyiq-overview-definition@1",
+      timePolicyRevisionId: "operations-policy@1",
+      sections: [performance, trust],
+    };
+    const result = compileEnergyIqOverviewDefinition({
+      baseDefinition,
+      definition: { ...baseDefinition, sections: [performance, actions] },
+      catalog: [consumptionCapability(), dataQualityCapability(), recommendedActionsCapability()],
+      reportTimePolicy: {
+        policyId: "operations-policy",
+        revision: "1",
+        windows: [{
+          windowId: "recent-28d",
+          role: "recent_operations",
+          label: "Recent 28 complete days",
+          strategy: { kind: "rolling_complete_days", days: 28 },
+        }],
+      },
+    });
+
+    expect(result.diff).toEqual([
+      { kind: "section_removed", sectionKey: "trust", index: 1 },
+      { kind: "section_added", sectionKey: "actions", index: 1 },
+    ]);
+  });
+
+  it("reports removal of an existing Block in the surviving Section", () => {
+    const baseDefinition = {
+      contractRevision: "energyiq-overview-definition@1",
+      timePolicyRevisionId: "operations-policy@1",
+      sections: [{
+        key: "performance",
+        title: "Performance",
+        managementQuestion: "What changed?",
+        primaryWindowId: "recent-28d",
+        blocks: [
+          { key: "consumption", capabilityRevisionId: "overview.consumption@1" },
+          { key: "data-quality", capabilityRevisionId: "quality.data_coverage@1" },
+        ],
+      }],
+    };
+    const result = compileEnergyIqOverviewDefinition({
+      baseDefinition,
+      definition: {
+        ...baseDefinition,
+        sections: [{
+          ...baseDefinition.sections[0],
+          blocks: [baseDefinition.sections[0]!.blocks[1]],
+        }],
+      },
+      catalog: [consumptionCapability(), dataQualityCapability()],
+      reportTimePolicy: {
+        policyId: "operations-policy",
+        revision: "1",
+        windows: [{
+          windowId: "recent-28d",
+          role: "recent_operations",
+          label: "Recent 28 complete days",
+          strategy: { kind: "rolling_complete_days", days: 28 },
+        }],
+      },
+    });
+
+    expect(result.diff).toEqual([{
+      kind: "block_removed",
+      sectionKey: "performance",
+      blockKey: "consumption",
+      index: 0,
+    }]);
+  });
+
+  it("reports Block order as one semantic change within its Section", () => {
+    const blocks = [
+      { key: "consumption", capabilityRevisionId: "overview.consumption@1" },
+      { key: "data-quality", capabilityRevisionId: "quality.data_coverage@1" },
+    ];
+    const baseDefinition = {
+      contractRevision: "energyiq-overview-definition@1",
+      timePolicyRevisionId: "operations-policy@1",
+      sections: [{
+        key: "performance",
+        title: "Performance",
+        managementQuestion: "What changed?",
+        primaryWindowId: "recent-28d",
+        blocks,
+      }],
+    };
+    const result = compileEnergyIqOverviewDefinition({
+      baseDefinition,
+      definition: {
+        ...baseDefinition,
+        sections: [{ ...baseDefinition.sections[0], blocks: [...blocks].reverse() }],
+      },
+      catalog: [consumptionCapability(), dataQualityCapability()],
+      reportTimePolicy: {
+        policyId: "operations-policy",
+        revision: "1",
+        windows: [{
+          windowId: "recent-28d",
+          role: "recent_operations",
+          label: "Recent 28 complete days",
+          strategy: { kind: "rolling_complete_days", days: 28 },
+        }],
+      },
+    });
+
+    expect(result.diff).toEqual([{
+      kind: "block_order_changed",
+      sectionKey: "performance",
+      before: ["consumption", "data-quality"],
+      after: ["data-quality", "consumption"],
+    }]);
+  });
 });
 
 const consumptionCapability = (): EnergyIqComponentRevisionRecord => ({
@@ -456,4 +593,24 @@ const dataQualityCapability = (): EnergyIqComponentRevisionRecord => ({
   family: "quality",
   view_key: "data_quality_summary_v1",
   metric_revision_ids: ["data.valid_interval_count@1"],
+});
+
+const recommendedActionsCapability = (): EnergyIqComponentRevisionRecord => ({
+  ...consumptionCapability(),
+  revision_id: "decision.recommended_actions@1",
+  component_id: "decision.recommended_actions",
+  display_name: "Recommended actions",
+  family: "decision",
+  view_key: "recommended_actions_v1",
+  metric_revision_ids: [],
+  rule_revision_ids: ["decision.action@1"],
+  allowed_presentation: {
+    ...consumptionCapability().allowed_presentation,
+    layout: { spans: [8, 12], heights: ["compact", "standard"] },
+    visuals: {
+      ...consumptionCapability().allowed_presentation.visuals,
+      presets: ["list"],
+      limit: { configurable: false, min: 1, max: 3, default: 3 },
+    },
+  },
 });

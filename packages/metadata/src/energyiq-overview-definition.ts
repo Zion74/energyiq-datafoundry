@@ -21,6 +21,11 @@ export type CompiledEnergyIqOverviewDefinition = {
 
 export type EnergyIqOverviewDefinitionDiffItem =
   | {
+      kind: "section_added" | "section_removed";
+      sectionKey: string;
+      index: number;
+    }
+  | {
       kind: "section_order_changed";
       before: string[];
       after: string[];
@@ -37,7 +42,13 @@ export type EnergyIqOverviewDefinitionDiffItem =
       changedFields: string[];
     }
   | {
-      kind: "block_added";
+      kind: "block_order_changed";
+      sectionKey: string;
+      before: string[];
+      after: string[];
+    }
+  | {
+      kind: "block_added" | "block_removed";
       sectionKey: string;
       blockKey: string;
       index: number;
@@ -136,9 +147,18 @@ const describeDefinitionChanges = (
     });
   }
   const baseSections = new Map(base.sections.map((section) => [section.key, section]));
-  for (const section of desired.sections) {
+  const desiredSections = new Map(desired.sections.map((section) => [section.key, section]));
+  for (const [sectionIndex, section] of base.sections.entries()) {
+    if (!desiredSections.has(section.key)) {
+      diff.push({ kind: "section_removed", sectionKey: section.key, index: sectionIndex });
+    }
+  }
+  for (const [sectionIndex, section] of desired.sections.entries()) {
     const previous = baseSections.get(section.key);
-    if (!previous) continue;
+    if (!previous) {
+      diff.push({ kind: "section_added", sectionKey: section.key, index: sectionIndex });
+      continue;
+    }
     const sectionFields = [
       ...changed("title", previous.title, section.title),
       ...changed("managementQuestion", previous.managementQuestion, section.managementQuestion),
@@ -153,6 +173,28 @@ const describeDefinitionChanges = (
       diff.push({ kind: "section_updated", sectionKey: section.key, changedFields: sectionFields });
     }
     const previousBlocks = new Map(previous.blocks.map((block) => [block.key, block]));
+    const desiredBlocks = new Map(section.blocks.map((block) => [block.key, block]));
+    const beforeBlockOrder = previous.blocks.map((block) => block.key);
+    const afterBlockOrder = section.blocks.map((block) => block.key);
+    if (sameMembers(beforeBlockOrder, afterBlockOrder)
+      && JSON.stringify(beforeBlockOrder) !== JSON.stringify(afterBlockOrder)) {
+      diff.push({
+        kind: "block_order_changed",
+        sectionKey: section.key,
+        before: beforeBlockOrder,
+        after: afterBlockOrder,
+      });
+    }
+    for (const [blockIndex, block] of previous.blocks.entries()) {
+      if (!desiredBlocks.has(block.key)) {
+        diff.push({
+          kind: "block_removed",
+          sectionKey: section.key,
+          blockKey: block.key,
+          index: blockIndex,
+        });
+      }
+    }
     for (const [blockIndex, block] of section.blocks.entries()) {
       const previousBlock = previousBlocks.get(block.key);
       if (!previousBlock) {
