@@ -7,6 +7,15 @@
 - Baseline: `c4821a227987ddbf48bcbc56fa8a5ed2eb73fb80`
 - Production Provider, shared service, deployment, publication and database operations: **not used**
 
+## Source boundary
+
+- Read: one controlled Preschool reference HTML.
+- Read: Preschool Day01 / Day07 / Day30 synthetic/acceptance workbooks.
+- Not read: either project's Renderer implementation or a compiled project definition.
+- Not read: the production database or a Provider response.
+
+These are project-specific clean-room source inputs. They establish process mechanics only; they do not establish customer Renderer parity, official production truth or cross-project reuse.
+
 ## RED
 
 Command:

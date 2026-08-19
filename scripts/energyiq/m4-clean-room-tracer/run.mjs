@@ -39,6 +39,19 @@ const allowedInputs = {
   Day30: join(repoRoot, "outputs", "t39-preschool-continuous-ab-20260810", "Preschool_June_2026_Day30.incremental-cumulative.xlsx"),
 };
 
+const sourceBoundary = {
+  reads: [
+    "controlled-preschool-reference-html",
+    "preschool-synthetic-acceptance-workbooks-day01-day07-day30",
+  ],
+  excludes: [
+    "project-renderer-implementation",
+    "compiled-project-definition",
+    "production-database",
+    "provider-response",
+  ],
+};
+
 const catalog = [{
   revision_id: "overview.consumption@1",
   component_id: "overview.consumption",
@@ -114,9 +127,10 @@ const main = async () => {
       baselineSha,
       createdAt: generatedAt,
       evidenceScope: "process-mechanics-only",
+      sourceBoundary,
       files: inputManifestEntries,
       allowlist,
-      denylist: ["project renderer", "golden", "project fixture", "existing project definition"],
+      denylist: ["project renderer implementation", "compiled project definition", "production database", "provider response"],
     };
 
     const referenceHtml = await readFile(join(tempRoot, "input", "reference.html"), "utf8");

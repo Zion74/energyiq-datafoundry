@@ -2,6 +2,15 @@ delivery_id: 2026-08-20-m4-night-tracer-c4821a2
 baseline_ref: c4821a227987ddbf48bcbc56fa8a5ed2eb73fb80
 generated_at: 2026-08-19T21:55:37.252Z
 evidence_scope: process-mechanics-only
+source_boundary:
+  reads:
+    - controlled Preschool reference HTML
+    - Preschool Day01 / Day07 / Day30 synthetic/acceptance workbooks
+  excludes:
+    - project Renderer implementation
+    - compiled project definition
+    - production database
+    - Provider response
 elapsed_automation_milliseconds: 2568
 human_minutes:
   status: unavailable

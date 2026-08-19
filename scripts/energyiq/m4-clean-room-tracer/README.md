@@ -28,7 +28,10 @@ The output directory must not already exist. The runner creates a temporary phys
 
 ## Hard boundaries
 
-- No customer Renderer or Golden input.
+- The clean-room source deliberately reads one controlled Preschool reference HTML and the
+  Preschool Day01 / Day07 / Day30 synthetic acceptance workbooks.
+- It does not read either project's Renderer implementation, a compiled project definition,
+  the production database or a Provider response.
 - No Provider, queue, shared service, publication, deployment or database.
 - Reference numbers and JavaScript are never treated as runtime truth.
 - XLSX replay is explicitly a source-level deterministic witness, not official Project aggregation.

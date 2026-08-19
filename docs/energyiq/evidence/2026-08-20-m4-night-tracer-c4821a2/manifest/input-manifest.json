@@ -4,6 +4,18 @@
   "baselineSha": "c4821a227987ddbf48bcbc56fa8a5ed2eb73fb80",
   "createdAt": "2026-08-19T21:55:37.252Z",
   "evidenceScope": "process-mechanics-only",
+  "sourceBoundary": {
+    "reads": [
+      "controlled-preschool-reference-html",
+      "preschool-synthetic-acceptance-workbooks-day01-day07-day30"
+    ],
+    "excludes": [
+      "project-renderer-implementation",
+      "compiled-project-definition",
+      "production-database",
+      "provider-response"
+    ]
+  },
   "files": [
     {
       "path": "input/day01.xlsx",
@@ -51,9 +63,9 @@
     "sanitized-kit/report-time-policy.json"
   ],
   "denylist": [
-    "project renderer",
-    "golden",
-    "project fixture",
-    "existing project definition"
+    "project renderer implementation",
+    "compiled project definition",
+    "production database",
+    "provider response"
   ]
 }

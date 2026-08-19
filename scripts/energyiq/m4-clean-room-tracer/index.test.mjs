@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -251,4 +251,38 @@ test("the exit gate returns BLOCKED when official aggregation is absent", () => 
     blockers: ["OFFICIAL_AGGREGATION_BINDING_UNAVAILABLE", "CUSTOMER_RENDERER_PARITY_UNPROVEN"],
     evidenceScope: "process-mechanics-only",
   });
+});
+
+test("the evidence admits controlled Preschool source inputs without claiming project implementation access", async () => {
+  const testDirectory = new URL(".", import.meta.url);
+  const evidenceDirectory = new URL(
+    "../../../docs/energyiq/evidence/2026-08-20-m4-night-tracer-c4821a2/",
+    import.meta.url,
+  );
+  const runner = await readFile(new URL("run.mjs", testDirectory), "utf8");
+  const readme = await readFile(new URL("README.md", testDirectory), "utf8");
+  const conclusion = await readFile(new URL("CONCLUSION.md", evidenceDirectory), "utf8");
+  const testEvidence = await readFile(new URL("TEST-EVIDENCE.md", evidenceDirectory), "utf8");
+  const ledger = await readFile(new URL("ledger/delivery-ledger.yaml", evidenceDirectory), "utf8");
+  const manifest = JSON.parse(await readFile(new URL("manifest/input-manifest.json", evidenceDirectory), "utf8"));
+
+  assert.match(runner, /docs", "template", "Preschool", "Energy_Report_May2026\.html/iu);
+  assert.match(runner, /Preschool_June_2026_Day01\.incremental-cumulative\.xlsx/iu);
+  assert.deepEqual(manifest.sourceBoundary, {
+    reads: [
+      "controlled-preschool-reference-html",
+      "preschool-synthetic-acceptance-workbooks-day01-day07-day30",
+    ],
+    excludes: [
+      "project-renderer-implementation",
+      "compiled-project-definition",
+      "production-database",
+      "provider-response",
+    ],
+  });
+  const recordedBoundary = [readme, conclusion, testEvidence, ledger].join("\n");
+  assert.match(recordedBoundary, /controlled Preschool reference HTML/iu);
+  assert.match(recordedBoundary, /synthetic(?:\/)acceptance workbooks/iu);
+  assert.doesNotMatch(recordedBoundary, /No customer Renderer or Golden input/iu);
+  assert.match(recordedBoundary, /does not read.*Renderer implementation/isu);
 });

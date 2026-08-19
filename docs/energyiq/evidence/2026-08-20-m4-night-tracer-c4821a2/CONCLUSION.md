@@ -24,6 +24,8 @@ The sanitized kit deliberately excludes project Mapping and the official aggrega
 
 This is **process-mechanics evidence only**. It is not M1 visual/content acceptance, not two live M2 data cycles, not M5 self-service, and not third-project/G5 proof.
 
+The clean-room source read one controlled Preschool reference HTML and the Preschool Day01 / Day07 / Day30 synthetic/acceptance workbooks. It used those project-specific source inputs to exercise conversion and replay mechanics. It did not read a Preschool or Ngee Ann Renderer implementation, a compiled project definition, the production database or a Provider response. Therefore this evidence cannot establish customer Renderer parity, production truth or cross-project reuse.
+
 ## Narrow next capability request
 
 Do not patch either customer Renderer. The missing public seam is a sanitized, revision-pinned `Scope Summary Input Bundle` carrying only the official Mapping/Formula/aggregation identity and deterministic result needed by `overview.consumption@1`. Once such a bundle can be created without a shared database or project implementation access, rerun this exact tracer and remove `OFFICIAL_AGGREGATION_BINDING_UNAVAILABLE` only if an independent oracle agrees.
