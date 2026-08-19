@@ -13,7 +13,7 @@ import {
   type EnergyIqVirtualMeter,
   type MetadataStore,
 } from "@datafoundry/metadata";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -41,6 +41,57 @@ describe("Energy current Overview window contract", () => {
     expect(resolveEnergyCurrentOverviewPeriodBasis("current-overview-28d")).toBe("rolling_28_days");
     expect(resolveEnergyCurrentOverviewPeriodBasis("current-month-to-date")).toBe("calendar_month_to_date");
   });
+
+  it("reads a Workspace fact store from STORAGE_ROOT_DIR when no single DuckDB path is configured", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-storage-root-"));
+    const storageRoot = join(root, "shared-storage");
+    const databasePath = join(storageRoot, "energy", NGEE_ANN_GOLDEN.workspaceId, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    const previousStorageRoot = process.env.STORAGE_ROOT_DIR;
+    const previousDuckDbPath = process.env.ENERGYIQ_DUCKDB_PATH;
+    try {
+      mkdirSync(join(storageRoot, "energy", NGEE_ANN_GOLDEN.workspaceId), { recursive: true });
+      process.env.STORAGE_ROOT_DIR = storageRoot;
+      delete process.env.ENERGYIQ_DUCKDB_PATH;
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata);
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Last 7 days",
+        },
+      });
+
+      await expect(selectEnergyCurrentOverviewPeriod({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: user.id,
+        context,
+        periodBasis: "calendar_month_to_date",
+      })).resolves.toMatchObject({
+        periodBasis: "calendar_month_to_date",
+        cutoffLocalDate: "2026-06-16",
+        period: {
+          localFrom: "2026-06-01",
+          localToExclusive: "2026-06-17",
+        },
+      });
+    } finally {
+      if (previousStorageRoot === undefined) delete process.env.STORAGE_ROOT_DIR;
+      else process.env.STORAGE_ROOT_DIR = previousStorageRoot;
+      if (previousDuckDbPath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDuckDbPath;
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
 });
 
 describe("EnergyScopeAnalysis", () => {

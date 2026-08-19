@@ -3,6 +3,7 @@ import {
   prepareEnergyScopedDataSource,
   registerPreparedEnergyScopedDataSource,
   readEnergyFactCoverage,
+  resolveEnergyFactStorePath,
   type EnergyScopedDataSource,
   type LocalDataGateway
 } from "@datafoundry/data-gateway";
@@ -17,8 +18,6 @@ import type {
   EnergyIqVirtualMeter,
   MetadataStore
 } from "@datafoundry/metadata";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   resolveEnergyPublishedMeterRoute,
@@ -1031,8 +1030,7 @@ const prepareEnergyPeriodSelection = async (
   coverageNotFoundCode: EnergyPeriodCoverageNotFoundCode,
 ) => {
   const databasePath = input.databasePath
-    ?? process.env.ENERGYIQ_DUCKDB_PATH
-    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
+    ?? resolveEnergyFactStorePath(input.context.workspaceId);
   const coverage = await readEnergyFactCoverage({
     metadataStore: input.metadataStore,
     workspaceId: input.context.workspaceId,
@@ -1110,8 +1108,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     expectedMeterMappingRevisionId: input.context.meterMappingRevisionId
   });
   const databasePath = input.databasePath
-    ?? process.env.ENERGYIQ_DUCKDB_PATH
-    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
+    ?? resolveEnergyFactStorePath(input.context.workspaceId);
   const scopedPrepared = await prepareEnergyScopedDataSource({
     metadataStore: input.metadataStore,
     userId: input.userId,
