@@ -15,9 +15,20 @@ import {
 import {
   ensureEnergyScopedDataSource,
   readEnergyFactCoverage,
+  resolveEnergyFactStorePath,
 } from "./energy-scoped-datasource.js";
 
 describe("Energy scoped datasource Snapshot guard", () => {
+  it("resolves each Workspace fact store beneath the configured shared storage root", () => {
+    const storageRoot = join(tmpdir(), "energyiq-shared-storage");
+    expect(resolveEnergyFactStorePath("workspace-a", undefined, storageRoot)).toBe(
+      join(storageRoot, "energy", "workspace-a", "energy.duckdb"),
+    );
+    expect(resolveEnergyFactStorePath("workspace-a", join(storageRoot, "explicit.duckdb"), storageRoot)).toBe(
+      join(storageRoot, "explicit.duckdb"),
+    );
+  });
+
   it("preserves the DuckDB :memory: sentinel instead of resolving it as a filesystem path", async () => {
     const adapter = new DuckDbAdapter({ path: ":memory:" });
     await expect(adapter.runSqlReadonly({

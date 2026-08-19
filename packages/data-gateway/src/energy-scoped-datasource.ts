@@ -75,12 +75,16 @@ export type EnergyFactCoverage = {
 export const resolveEnergyFactStorePath = (
   workspaceId: string,
   configuredPath = process.env.ENERGYIQ_DUCKDB_PATH,
+  storageRoot = process.env.STORAGE_ROOT_DIR,
 ): string => resolve(
   configuredPath
+    ?? storageRoot
     ?? dirname(fileURLToPath(import.meta.url)),
   ...(configuredPath
     ? []
-    : ["../../..", "storage", "energy", workspaceId, "energy.duckdb"]),
+    : storageRoot
+      ? ["energy", workspaceId, "energy.duckdb"]
+      : ["../../..", "storage", "energy", workspaceId, "energy.duckdb"]),
 );
 
 export const readEnergyFactCoverage = async (input: {
