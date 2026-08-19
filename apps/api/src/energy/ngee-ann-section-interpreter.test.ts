@@ -71,6 +71,44 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("removes one unsupported Summary sentence without discarding supported Insights", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Project use was 9736.42 kWh in the current period. Average daily use was 197.7 kWh. Peak demand reached 138.8 kW.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:kept-after-summary-repair",
+          title: "Peak demand moved differently from total use",
+          text: "This contrast may point to a short-duration operational driver rather than a broad rise in consumption.",
+          epistemicStatus: "inferred",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:summary-sentence-repair",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: {
+        text: "Project use was 9736.42 kWh in the current period. Peak demand reached 138.8 kW.",
+      },
+      insights: [{ id: "candidate:kept-after-summary-repair" }],
+    });
+  });
+
   it("keeps a clearly labelled speculative angle when its observation Evidence is current", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({

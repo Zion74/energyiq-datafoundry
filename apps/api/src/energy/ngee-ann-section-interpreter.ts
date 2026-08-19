@@ -347,9 +347,18 @@ const parseSummary = (
 ): NgeeAnnSectionSummary | null => {
   if (!isRecord(value)
     || !boundedString(value.text, MAX_SUMMARY_CHARS)
-    || !validEvidenceRefs(value.evidenceRefs, evidenceIds)
-    || !narrativeFactsSupported(value.text, packText)) return null;
-  return { text: value.text, evidenceRefs: [...value.evidenceRefs] };
+    || !validEvidenceRefs(value.evidenceRefs, evidenceIds)) return null;
+  if (narrativeFactsSupported(value.text, packText)) {
+    return { text: value.text, evidenceRefs: [...value.evidenceRefs] };
+  }
+  const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
+    .segment(value.text)]
+    .map(({ segment }) => segment.trim())
+    .filter((sentence) => sentence.length > 0 && narrativeFactsSupported(sentence, packText))
+    .join(" ");
+  return supportedText.length > 0
+    ? { text: supportedText, evidenceRefs: [...value.evidenceRefs] }
+    : null;
 };
 
 const parseInsight = (
@@ -724,7 +733,7 @@ const requirePackIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedPromptRevision = "energyiq-project-section-discovery-v5";
-  if (identity.identityContractRevision !== "ngee-ann-section-v8"
+  if (identity.identityContractRevision !== "ngee-ann-section-v9"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

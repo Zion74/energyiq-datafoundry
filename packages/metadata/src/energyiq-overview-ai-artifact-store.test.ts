@@ -459,6 +459,19 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       expect(store.energyIq.overviewAiArtifacts.get(priorTimezoneIdentity))
         .toMatchObject({ id: priorTimezoneArtifact.id, status: "available" });
 
+      const priorEnvelopeIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-prior-envelope", "trend-and-demand"),
+        identityContractRevision: "ngee-ann-section-v8",
+        validatorRevision: "energyiq-project-section-acceptance-v6",
+      };
+      const priorEnvelopeArtifact = completeSectionV4(
+        store,
+        priorEnvelopeIdentity,
+        ngeeAnnSectionResult(priorEnvelopeIdentity, "available"),
+      );
+      expect(store.energyIq.overviewAiArtifacts.get(priorEnvelopeIdentity))
+        .toMatchObject({ id: priorEnvelopeArtifact.id, status: "available" });
+
       const readableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-readable", "time-behaviour");
       const readableBase = ngeeAnnSectionResult(readableIdentity, "available");
       const readableResult = {
@@ -1048,11 +1061,11 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v8",
+  identityContractRevision: "ngee-ann-section-v9",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v6",
+  validatorRevision: "energyiq-project-section-acceptance-v7",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
   investigatorPromptRevision: "energyiq-project-section-discovery-v5",
   capabilityRevision: "pack-only-v1",
