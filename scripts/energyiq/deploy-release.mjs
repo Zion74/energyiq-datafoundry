@@ -101,6 +101,25 @@ const smoke = async (urls, checkHttp) => {
   for (const url of urls) await checkHttp(url);
 };
 
+const defaultSleep = (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs));
+
+const waitForSmoke = async (urls, checkHttp, options = {}) => {
+  const attempts = options.attempts ?? 60;
+  const delayMs = options.delayMs ?? 1_000;
+  const sleep = options.sleep ?? defaultSleep;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      await smoke(urls, checkHttp);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) await sleep(delayMs);
+    }
+  }
+  throw lastError;
+};
+
 const copyReleaseSource = async (sourceDir, stagingDir) => {
   await cp(sourceDir, stagingDir, {
     recursive: true,
@@ -129,6 +148,8 @@ const requireReleaseIdentityMarkers = async (releaseDir, releaseSha) => {
 export async function deployEnergyIqRelease(input, dependencies = {}) {
   const run = dependencies.run ?? defaultRun;
   const checkHttp = dependencies.checkHttp ?? defaultCheckHttp;
+  const smokeAttempts = dependencies.smokeAttempts ?? 60;
+  const sleep = dependencies.sleep ?? defaultSleep;
   const releaseSha = input.releaseSha?.trim();
   if (!RELEASE_SHA_PATTERN.test(releaseSha ?? "")) {
     throw new Error("releaseSha must be a lowercase 40-character Git SHA.");
@@ -200,7 +221,7 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
   let switched = true;
   try {
     await run("systemctl", ["restart", input.apiService, input.webService]);
-    await smoke(input.smokeUrls, checkHttp);
+    await waitForSmoke(input.smokeUrls, checkHttp, { attempts: smokeAttempts, sleep });
     switched = false;
   } catch (error) {
     if (switched) {
@@ -209,7 +230,7 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
       await replaceCurrentLink(currentLink, nextLink, previousLink);
       await run("systemctl", ["restart", input.apiService, input.webService]);
       try {
-        await smoke(input.smokeUrls, checkHttp);
+        await waitForSmoke(input.smokeUrls, checkHttp, { attempts: smokeAttempts, sleep });
       } catch (rollbackError) {
         throw new Error("New release failed and rollback smoke verification also failed.", {
           cause: new AggregateError([error, rollbackError]),

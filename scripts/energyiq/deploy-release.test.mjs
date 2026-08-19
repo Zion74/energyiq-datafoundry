@@ -86,6 +86,53 @@ test("stages a real release and switches current only after forced build and smo
   ]);
 });
 
+test("waits for restarted services to become ready before accepting or rolling back a release", async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-readiness-"));
+  const appRoot = path.join(root, "app");
+  const releasesRoot = path.join(appRoot, "releases");
+  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
+  const sourceDir = path.join(root, "source");
+  const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
+  const smokeUrls = ["http://api/healthz", "http://web/login", "http://web/overview"];
+
+  await mkdir(previousRelease, { recursive: true });
+  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
+  await mkdir(sourceDir, { recursive: true });
+  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
+  await mkdir(path.dirname(backupPath), { recursive: true });
+  await writeFile(backupPath, "independent-backup", "utf8");
+
+  t.after(async () => {
+    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
+  });
+
+  let apiChecks = 0;
+  const sleeps = [];
+  await deployEnergyIqRelease({
+    appRoot,
+    sourceDir,
+    releaseSha: RELEASE_SHA,
+    metadataBackupPath: backupPath,
+    apiService: "energyiq-api",
+    webService: "energyiq-web",
+    smokeUrls,
+  }, {
+    run: async (command, args) =>
+      command === "git" && args.at(-1) === "HEAD" ? { stdout: `${RELEASE_SHA}\n` } : { stdout: "" },
+    checkHttp: async (url) => {
+      if (url === smokeUrls[0] && ++apiChecks > 1 && apiChecks < 4) {
+        throw new Error("ECONNREFUSED while API starts");
+      }
+    },
+    sleep: async (delayMs) => {
+      sleeps.push(delayMs);
+    },
+  });
+
+  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(path.join(releasesRoot, RELEASE_SHA)));
+  assert.deepEqual(sleeps, [1_000, 1_000]);
+});
+
 test("refuses to switch current when a build changes the release identity markers", async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-identity-"));
   const appRoot = path.join(root, "app");
@@ -214,6 +261,7 @@ test("rolls back and rechecks the previous release when post-switch smoke fails"
         smokeChecks.push(url);
         if (smokeChecks.length === 4) throw new Error("post-switch smoke failed");
       },
+      smokeAttempts: 1,
     }),
     /post-switch smoke failed/,
   );
