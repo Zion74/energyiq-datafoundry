@@ -119,6 +119,41 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
     });
   });
 
+  it("accepts a current direct interval-usage materializer without requiring cumulative readings", () => {
+    const sourceSha = FORMAL_SOURCE_SHAS[0];
+    const cumulative = batch("batch-interval", sourceSha, NGEE_ANN_LABELS);
+    const intervalBatch: EnergyIqImportBatchRecord = {
+      ...cumulative,
+      materialization_json: JSON.stringify({
+        ...JSON.parse(cumulative.materialization_json!),
+        materializerContractVersion: "energy-excel-preschool-interval-matrix-v1",
+      }),
+    };
+    const snapshot = dataSnapshot([intervalBatch], {
+      normalizedReadingCount: 0,
+      canonicalMeterSeriesCount: 0,
+      adjacentReadingPairCount: 0,
+    });
+
+    const readiness = resolveEnergyIqProjectDataReadiness({
+      project: project(snapshot.id),
+      batches: [intervalBatch],
+      document: {
+        ...document(),
+        source_manifest: createEnergyIqSourceManifest([sourceSha], true),
+        meter_mapping: meterMapping(),
+      },
+      snapshot,
+      expectedMaterializerContractVersion: [
+        "energy-excel-cumulative-v1",
+        "energy-excel-preschool-interval-matrix-v1",
+      ],
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
+    });
+
+    expect(readiness).toMatchObject({ status: "ready", ready: true, blockingReasons: [] });
+  });
+
   it("blocks stale Mapping materialization, incomplete batches, inactive rows and legacy canonical facts", () => {
     const mapping = meterMapping();
     const batches = [

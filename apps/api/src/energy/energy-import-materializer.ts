@@ -12,7 +12,7 @@ import type {
 } from "@datafoundry/metadata";
 import { fingerprintEnergyIqMeterMapping } from "@datafoundry/metadata";
 
-import { readEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { readEnergyExcelWorkbook, type EnergyExcelWorkbook } from "./energy-excel-import.js";
 
 const zonedPartsFormatters = new Map<string, Intl.DateTimeFormat>();
 const weekdayFormatters = new Map<string, Intl.DateTimeFormat>();
@@ -26,7 +26,8 @@ export type EnergyImportMaterializationSummary = {
   mappingRevision: number;
   mappingFingerprint: string;
   timezone: string;
-  materializerContractVersion: typeof ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
+  materializerContractVersion: typeof ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION
+    | typeof ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION;
   factWriterContractVersion: typeof ENERGY_FACT_WRITER_CONTRACT_VERSION;
   sourceSheetName: string;
   sourceRowCount: number;
@@ -36,6 +37,7 @@ export type EnergyImportMaterializationSummary = {
 };
 
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
+export const ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION = "energy-excel-preschool-interval-matrix-v1" as const;
 
 export const isEnergyImportMaterializationCurrent = (input: {
   batch: EnergyIqImportBatchRecord;
@@ -55,7 +57,8 @@ export const isEnergyImportMaterializationCurrent = (input: {
   if (!isRecord(summary)) return false;
   return summary.mappingFingerprint === fingerprintEnergyIqMeterMapping(mapping)
     && summary.timezone === input.timezone
-    && summary.materializerContractVersion === ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION
+    && (summary.materializerContractVersion === ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION
+      || summary.materializerContractVersion === ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION)
     && summary.factWriterContractVersion === ENERGY_FACT_WRITER_CONTRACT_VERSION;
 };
 
@@ -74,6 +77,9 @@ export const buildEnergyExcelMaterialization = async (input: {
   const mappingByLabel = new Map(mapping.rows.map((row) => [row.source_label, row]));
   const nodesById = new Map(input.document.nodes.map((node) => [node.id, node]));
   const workbook = await readEnergyExcelWorkbook(input.content);
+  if (workbook.inspection.readingKind === "preschool_interval_usage_matrix") {
+    return buildIntervalMatrixMaterialization({ ...input, workbook });
+  }
   const qualityEvents: EnergyQualityEventWrite[] = [];
   const conflictRows = new Set<number>();
   const deduplicated = new Map<string, EnergyNormalizedReadingWrite>();
@@ -286,16 +292,153 @@ export const buildEnergyExcelMaterialization = async (input: {
   };
 };
 
+const buildIntervalMatrixMaterialization = (input: {
+  batch: EnergyIqImportBatchRecord;
+  document: EnergyIqProjectSetupDocument;
+  mappingRevision: number;
+  timezone: string;
+  workbook: EnergyExcelWorkbook;
+}): {
+  write: EnergyFactMaterializationBatchWrite;
+  summary: EnergyImportMaterializationSummary;
+} => {
+  const mapping = input.document.meter_mapping!;
+  const nodesById = new Map(input.document.nodes.map((node) => [node.id, node]));
+  const mappingByEntityMeter = new Map<string, typeof mapping.rows[number]>();
+  for (const row of mapping.rows) {
+    const scopeNode = nodesById.get(row.scope_id);
+    const parent = scopeNode?.parent_id ? nodesById.get(scopeNode.parent_id) : undefined;
+    const centreCode = parent && isRecord(parent.metadata) && typeof parent.metadata.centreCode === "string"
+      ? parent.metadata.centreCode
+      : undefined;
+    if (centreCode) mappingByEntityMeter.set(matrixKey(centreCode, row.display_name), row);
+  }
+  const rawReadings: EnergyRawReadingWrite[] = [];
+  const intervalFacts: EnergyIntervalFactWrite[] = [];
+  const qualityEvents: EnergyQualityEventWrite[] = [];
+  for (const row of input.workbook.rows) {
+    const mapped = row.entityCode
+      ? mappingByEntityMeter.get(matrixKey(row.entityCode, meterLabelFromSource(row.sourceLabel)))
+      : undefined;
+    const validationError = row.validationError ?? (!mapped ? "unmapped_source_label" : undefined);
+    const localStart = row.localDate !== undefined && row.localHour !== undefined
+      ? `${row.localDate}T${row.localHour.toString().padStart(2, "0")}:00:00`
+      : undefined;
+    const intervalStart = localStart ? localTimestampToUtc(localStart, input.timezone) : undefined;
+    rawReadings.push({
+      workspaceId: input.batch.workspace_id,
+      projectId: input.batch.project_id,
+      importBatchId: input.batch.id,
+      resource: mapped?.resource ?? "electricity",
+      sourceLabel: row.sourceLabel,
+      ...(mapped ? { meterPointId: mapped.id, scopeId: mapped.scope_id } : {}),
+      ...(intervalStart ? { eventTime: intervalStart } : {}),
+      ...(row.usageKwh === undefined ? {} : { activeEnergyKwh: row.usageKwh }),
+      sourceFile: input.batch.filename,
+      sourceSha256: input.batch.source_sha256,
+      sourceRowNumber: row.sourceRowNumber,
+      isValid: validationError === undefined,
+      ...(validationError ? { validationError } : {}),
+      isOverlapConflict: false,
+    });
+    if (validationError || !mapped || !intervalStart || row.usageKwh === undefined
+      || row.localDate === undefined || row.localHour === undefined) {
+      qualityEvents.push(qualityEvent(input.batch, {
+        ...(mapped ? { meterPointId: mapped.id } : {}),
+        sourceLabel: row.sourceLabel,
+        ...(intervalStart ? { eventTime: intervalStart } : {}),
+        code: validationError ?? "invalid_interval_usage",
+        severity: "error",
+        details: { sourceRowNumber: row.sourceRowNumber, sourceColumn: row.sourceColumn },
+      }, "interval_usage"));
+      continue;
+    }
+    const parentNodeId = nodesById.get(mapped.scope_id)?.parent_id;
+    intervalFacts.push({
+      workspaceId: input.batch.workspace_id,
+      projectId: input.batch.project_id,
+      importBatchId: input.batch.id,
+      resource: mapped.resource,
+      meterPointId: mapped.id,
+      scopeId: mapped.scope_id,
+      ...(parentNodeId ? { parentNodeId } : {}),
+      sourceLabel: mapped.display_name,
+      category: mapped.category,
+      meterRole: mapped.meter_role,
+      intervalStart,
+      intervalEnd: new Date(Date.parse(intervalStart) + 60 * 60_000).toISOString(),
+      elapsedMinutes: 60,
+      activeEnergyKwh: row.usageKwh,
+      previousActiveEnergyKwh: 0,
+      rawDeltaKwh: row.usageKwh,
+      usageKwh: row.usageKwh,
+      averageKw: row.usageKwh,
+      qualityStatus: "ok",
+      localDate: row.localDate,
+      localHour: row.localHour,
+      dayType: dayTypeForLocalDate(row.localDate),
+      sourceFile: input.batch.filename,
+      sourceSha256: input.batch.source_sha256,
+      sourceReadingKind: "interval_usage",
+    });
+  }
+  const summary: EnergyImportMaterializationSummary = {
+    rawRowCount: rawReadings.length,
+    normalizedReadingCount: 0,
+    intervalFactCount: intervalFacts.length,
+    totalUsageKwh: round(intervalFacts.reduce((sum, fact) => sum + (fact.usageKwh ?? 0), 0)),
+    qualityCounts: countQuality([
+      ...intervalFacts.map(() => "ok"),
+      ...qualityEvents.map((event) => event.code),
+    ]),
+    mappingRevision: input.mappingRevision,
+    mappingFingerprint: fingerprintEnergyIqMeterMapping(mapping),
+    timezone: input.timezone,
+    materializerContractVersion: ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION,
+    factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    sourceSheetName: input.workbook.inspection.sheetName,
+    sourceRowCount: input.workbook.inspection.rowCount,
+    sourceLabels: input.workbook.inspection.sourceLabels.map((source) => source.label),
+    ...(input.workbook.inspection.coverageFrom ? { sourceCoverageFrom: input.workbook.inspection.coverageFrom } : {}),
+    ...(input.workbook.inspection.coverageTo ? { sourceCoverageTo: input.workbook.inspection.coverageTo } : {}),
+  };
+  return {
+    write: {
+      importBatchId: input.batch.id,
+      sourceSha256: input.batch.source_sha256,
+      rawReadings,
+      normalizedReadings: [],
+      intervalFacts,
+      qualityEvents,
+    },
+    summary,
+  };
+};
+
 const qualityEvent = (
   batch: EnergyIqImportBatchRecord,
   event: Omit<EnergyQualityEventWrite, "workspaceId" | "projectId" | "importBatchId" | "sourceReadingKind">,
+  sourceReadingKind: EnergyQualityEventWrite["sourceReadingKind"] = "cumulative_energy",
 ): EnergyQualityEventWrite => ({
   workspaceId: batch.workspace_id,
   projectId: batch.project_id,
   importBatchId: batch.id,
-  sourceReadingKind: "cumulative_energy",
+  sourceReadingKind,
   ...event,
 });
+
+const matrixKey = (entityCode: string, meterLabel: string): string =>
+  `${entityCode.trim().toLocaleLowerCase()}\u0000${meterLabel.trim().replace(/\s+/g, " ").toLocaleLowerCase()}`;
+
+const meterLabelFromSource = (sourceLabel: string): string => {
+  const separator = sourceLabel.indexOf(":");
+  return separator >= 0 ? sourceLabel.slice(separator + 1) : sourceLabel;
+};
+
+const dayTypeForLocalDate = (localDate: string): string => {
+  const day = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
+  return day === 0 || day === 6 ? "weekend" : "weekday";
+};
 
 const localTimestampToUtc = (value: string, timezone: string): string => {
   const explicit = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);

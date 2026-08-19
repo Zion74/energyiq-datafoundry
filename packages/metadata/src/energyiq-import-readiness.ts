@@ -36,7 +36,7 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   batches: EnergyIqImportBatchRecord[];
   document: EnergyIqProjectSetupDocument;
   snapshot?: EnergyIqDataSnapshotRecord;
-  expectedMaterializerContractVersion: string;
+  expectedMaterializerContractVersion: string | readonly string[];
   expectedFactWriterContractVersion: string;
 }): EnergyIqProjectDataReadiness => {
   const mapping = input.document.meter_mapping;
@@ -75,6 +75,13 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     .map(([, label]) => label);
   const materializedBatches = activeBatches.filter((batch) => batch.status === "materialized");
   const allMaterializedBatches = input.batches.filter((batch) => batch.status === "materialized");
+  const materializerContractVersions = new Set(materializedBatches.map((batch) =>
+    stringValue(parseRecord(batch.materialization_json).materializerContractVersion) ?? "<missing>"));
+  const acceptedMaterializerContractVersions = new Set(
+    typeof input.expectedMaterializerContractVersion === "string"
+      ? [input.expectedMaterializerContractVersion]
+      : input.expectedMaterializerContractVersion,
+  );
   const blockingReasons = resolveEnergyIqMaterializationBlockingReasons({
     batches: activeBatches,
     document: input.document,
@@ -111,11 +118,9 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     if (timezones.size !== 1 || !timezones.has(input.document.project.timezone)) {
       blockingReasons.push("SNAPSHOT_TIMEZONE_MISMATCH");
     }
-    const contractVersions = new Set(materializedBatches.map((batch) =>
-      stringValue(parseRecord(batch.materialization_json).materializerContractVersion) ?? "<missing>"));
     if (
-      contractVersions.size !== 1
-      || !contractVersions.has(input.expectedMaterializerContractVersion)
+      materializerContractVersions.size === 0
+      || [...materializerContractVersions].some((version) => !acceptedMaterializerContractVersions.has(version))
     ) {
       blockingReasons.push("MATERIALIZER_CONTRACT_MISMATCH");
     }
@@ -134,7 +139,9 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     isNonNegativeFiniteNumber(audit[field]));
   if (snapshot && !auditValid) blockingReasons.push("SNAPSHOT_AUDIT_INVALID");
   if (audit && auditValid) {
-    if (numberValue(audit.rawRowCount) <= 0 || numberValue(audit.normalizedReadingCount) <= 0) {
+    const needsNormalizedReadings = materializerContractVersions.has("energy-excel-cumulative-v1");
+    if (numberValue(audit.rawRowCount) <= 0
+      || (needsNormalizedReadings && numberValue(audit.normalizedReadingCount) <= 0)) {
       blockingReasons.push("FACT_STORE_EMPTY");
     }
     if (numberValue(audit.intervalFactCount) <= 0) blockingReasons.push("INTERVAL_FACTS_EMPTY");

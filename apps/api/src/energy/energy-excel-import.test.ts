@@ -40,6 +40,38 @@ describe("inspectEnergyExcelWorkbook", () => {
     );
   });
 
+  it("recognises a project interval-usage matrix without pretending it is cumulative", async () => {
+    const workbook = await intervalMatrixWorkbook([
+      ["A", 1, 5, 2026, "Friday", "Aircon", "Aircon 1", ...hourlyUsage(0.1)],
+      ["B", 1, 5, 2026, "Friday", "Lighting", "Kitchen Lighting", ...hourlyUsage(0.2)],
+    ]);
+
+    const parsed = await readEnergyExcelWorkbook(workbook);
+
+    expect(parsed.inspection).toMatchObject({
+      readingKind: "preschool_interval_usage_matrix",
+      rowCount: 48,
+      validRowCount: 48,
+      invalidRowCount: 0,
+      coverageFrom: "2026-05-01T00:00:00.000Z",
+      coverageTo: "2026-05-02T00:00:00.000Z",
+      sourceLabels: [
+        { label: "preschool-centre-a:Aircon 1", rowCount: 24 },
+        { label: "preschool-centre-b:Kitchen Lighting", rowCount: 24 },
+      ],
+    });
+    expect(parsed.rows).toHaveLength(48);
+    expect(parsed.rows[0]).toMatchObject({
+      sourceRowNumber: 2,
+      sourceColumn: "0000-0100",
+      entityCode: "A",
+      sourceLabel: "preschool-centre-a:Aircon 1",
+      localDate: "2026-05-01",
+      localHour: 0,
+      usageKwh: 0.1,
+    });
+  });
+
   it("snaps Excel floating-point timestamps that are within one second of a minute", async () => {
     const workbook = await writeXlsxFile([
       [text("Device Name"), text("Time"), text("Active Energy")],
@@ -57,3 +89,16 @@ describe("inspectEnergyExcelWorkbook", () => {
 const text = (value: string) => ({ type: String, value });
 const number = (value: number) => ({ type: Number, value });
 const date = (value: string) => ({ type: Date, value: new Date(value), format: "yyyy-mm-dd hh:mm" });
+
+const hourlyUsage = (value: number) => Array.from({ length: 24 }, () => value);
+
+const intervalMatrixWorkbook = async (dataRows: Array<Array<string | number>>) => writeXlsxFile([
+  [
+    text("Preschool Number"), text("Date"), text("Month"), text("Year"),
+    text("Day of the Week"), text("Appliance"), text("Power Meter"),
+    ...Array.from({ length: 24 }, (_, hour) => text(
+      `${hour.toString().padStart(2, "0")}00-${(hour + 1).toString().padStart(2, "0")}00`,
+    )),
+  ],
+  ...dataRows.map((row) => row.map((value) => typeof value === "number" ? number(value) : text(value))),
+]).toBuffer();

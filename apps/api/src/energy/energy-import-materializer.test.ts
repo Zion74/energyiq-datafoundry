@@ -202,6 +202,66 @@ describe("buildEnergyExcelMaterialization", () => {
     expect(result.summary.qualityCounts).not.toHaveProperty("gap");
   });
 
+  it("materializes a mapped interval-usage matrix through the current fact writer contract", async () => {
+    const workbook = await intervalMatrixWorkbook([
+      ["A", 1, 5, 2026, "Friday", "Aircon", "Aircon 1", ...hourlyUsage(0.25)],
+    ]);
+    const setup = intervalMatrixDocument();
+
+    const result = await buildEnergyExcelMaterialization({
+      content: workbook,
+      batch: batch("batch-interval", "project-interval", "i".repeat(64)),
+      document: setup,
+      mappingRevision: 5,
+      timezone: "Asia/Singapore",
+    });
+
+    expect(result.write.normalizedReadings).toEqual([]);
+    expect(result.write.intervalFacts).toHaveLength(24);
+    expect(result.write.intervalFacts[0]).toMatchObject({
+      meterPointId: "preschool-centre-a-aircon-1",
+      scopeId: "preschool-centre-a-aircon-1",
+      parentNodeId: "preschool-centre-a",
+      intervalStart: "2026-04-30T16:00:00.000Z",
+      intervalEnd: "2026-04-30T17:00:00.000Z",
+      elapsedMinutes: 60,
+      rawDeltaKwh: 0.25,
+      usageKwh: 0.25,
+      averageKw: 0.25,
+      localDate: "2026-05-01",
+      localHour: 0,
+      sourceReadingKind: "interval_usage",
+      qualityStatus: "ok",
+    });
+    expect(result.summary).toMatchObject({
+      rawRowCount: 24,
+      normalizedReadingCount: 0,
+      intervalFactCount: 24,
+      totalUsageKwh: 6,
+      mappingRevision: 5,
+      materializerContractVersion: "energy-excel-preschool-interval-matrix-v1",
+      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
+      sourceLabels: ["preschool-centre-a:Aircon 1"],
+    });
+
+    const written = await writeProjectFacts([result.write], "snapshot-interval", "project-interval");
+    expect(written.projectAudit).toMatchObject({
+      normalizedReadingCount: 0,
+      intervalFactCount: 24,
+      canonicalMeterSeriesCount: 0,
+      orphanIntervalFactCount: 0,
+    });
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch("batch-interval", "project-interval", "i".repeat(64)),
+        status: "materialized",
+        materialization_json: JSON.stringify(result.summary),
+      },
+      document: setup,
+      timezone: "Asia/Singapore",
+    })).toBe(true);
+  });
+
   it("keeps interval semantics stable when source readings arrive out of order", async () => {
     const workbook = await writeXlsxFile([
       [text("Device Name"), text("Time"), text("Active Energy")],
@@ -354,6 +414,62 @@ const document = (): EnergyIqProjectSetupDocument => ({
   },
 });
 
+const intervalMatrixDocument = (): EnergyIqProjectSetupDocument => ({
+  project: { name: "Preschool", timezone: "Asia/Singapore" },
+  tier_structure_locked: true,
+  tiers: [
+    { id: "tier-circuit", ordinal: 1, alias: "Circuit" },
+    { id: "tier-centre", ordinal: 2, alias: "Centre" },
+  ],
+  nodes: [
+    {
+      id: "preschool-centre-a",
+      tier_definition_id: "tier-centre",
+      name: "Centre A",
+      sort_order: 1,
+      metadata_status: "confirmed",
+      metadata: { centreCode: "A" },
+    },
+    {
+      id: "preschool-centre-a-aircon-1",
+      tier_definition_id: "tier-circuit",
+      parent_id: "preschool-centre-a",
+      name: "Aircon 1",
+      sort_order: 1,
+      metadata_status: "confirmed",
+    },
+  ],
+  meter_mapping: {
+    schema_version: 2,
+    source_kind: "excel",
+    confirmed: true,
+    rows: [{
+      id: "preschool-centre-a-aircon-1",
+      source_label: "preschool-centre-a:Aircon 1",
+      scope_id: "preschool-centre-a-aircon-1",
+      display_name: "Aircon 1",
+      resource: "electricity",
+      category: "aircon",
+      coverage: "partial",
+      meter_role: "component",
+      aggregation_usage: "official",
+    }],
+  },
+});
+
 const text = (value: string) => ({ type: String, value });
 const number = (value: number) => ({ type: Number, value });
 const date = (value: string) => ({ type: Date, value: new Date(value), format: "yyyy-mm-dd hh:mm" });
+
+const hourlyUsage = (value: number) => Array.from({ length: 24 }, () => value);
+
+const intervalMatrixWorkbook = async (dataRows: Array<Array<string | number>>) => writeXlsxFile([
+  [
+    text("Preschool Number"), text("Date"), text("Month"), text("Year"),
+    text("Day of the Week"), text("Appliance"), text("Power Meter"),
+    ...Array.from({ length: 24 }, (_, hour) => text(
+      `${hour.toString().padStart(2, "0")}00-${(hour + 1).toString().padStart(2, "0")}00`,
+    )),
+  ],
+  ...dataRows.map((row) => row.map((value) => typeof value === "number" ? number(value) : text(value))),
+]).toBuffer();

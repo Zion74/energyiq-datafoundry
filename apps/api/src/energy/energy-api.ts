@@ -56,6 +56,7 @@ import {
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID } from "./energy-bootstrap.js";
 import {
+  ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION,
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
 } from "./energy-import-materializer.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
@@ -1941,7 +1942,10 @@ const createProjectDataReadinessAsync = async (
     batches,
     document,
     ...(snapshot ? { snapshot } : {}),
-    expectedMaterializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+    expectedMaterializerContractVersion: [
+      ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+      ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION,
+    ],
     expectedFactWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
   });
   if (!readiness.requiresFormalData || !snapshot || snapshot.id !== project.data_snapshot_id) {
