@@ -109,6 +109,15 @@ Mapping schema v2 的不可变身份，指纹覆盖 Physical Meter identity、Pu
 **Data Snapshot**  
 一次分析可见的数据批次和质量状态集合。它让运行结果可以解释和复跑。
 
+**Report Time Context**<br>
+一次 Overview 分析使用的可信时间语义，绑定 Data Snapshot、Project Release、Timezone、数据截止点和一组版本化命名窗口。它不是用户任意选择的全页日期筛选器。
+
+**Report Window Policy Revision**<br>
+平台发布的不可变时间窗口规则版本，定义 Rolling complete days、Month-to-date、完整历史月、同进度比较、Forecast horizon 或 Day-type baseline 等算法。Project 只能引用已注册 Revision，不能注入任意日期代码。
+
+**Section Time Binding**<br>
+Project Overview Profile 中 Section 到 primary/supporting named windows 的绑定。每条 Fact、Evidence 和 AI Finding 必须记录实际使用的 windowId，不能用含糊的全页 Period 冒充。
+
 **Data Freshness**<br>
 最新已接受读数相对 Project 计划同步时间的新鲜程度。每日批次只能证明数据最近收到，不能证明设备此刻实时在线。
 
@@ -178,6 +187,9 @@ Template Revision、Component Catalog、Energy Query Context、Metric/Rule 结�
 
 **Project Template**  
 项目总览使用的结构化模板。
+
+**Project Overview Profile Revision**<br>
+Project Template/Renderer、Section Time Binding 与所需平台 Capability 的不可变组合。它保留项目业务语义，但只组合平台已发布的时间策略和能力。
 
 **Tier Template**  
 某个 Tier Definition 下全部节点共用的结构化模板。首期不提供 per-node override。

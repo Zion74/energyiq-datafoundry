@@ -19,6 +19,7 @@
 11. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
 12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力、2026-08-15 Preschool Stage 1–3 v12 可用化、真实 Provider、A→B、多账户与 Ngee Ann 后续依赖计划；
 13. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
+14. [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md)：平台统一命名窗口、身份与变化治理，Project Profile 保留自己的 Sections、事实投影和 AI 方法。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
 
@@ -41,6 +42,7 @@
 | [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md) | 承认一次性 Claude HTML 的适用场景，并以两批数据连续更新、0–3 条精炼洞察、图文协同和行动后果定义下一项客户价值验收 |
 | [四界面 UI/UX 一致性与功能保护决策](2026-08-08-四界面UI-UX一致性与功能保护决策.md) | 统一 Overview、AI Analyst、Project Explorer 与 Admin 的视觉语法、可读性和操作习惯，同时保留不同侧栏职责并保护现有功能 |
 | [Project Explorer 性能、时间、指标与 Snapshot Health 决策](2026-08-08-Project-Explorer性能时间指标与Snapshot-Health决策.md) | 将 Explorer 收窄为快速的设备与数据核查界面，默认 Project 统一最新完整日，并按节点类型展示指标、自身平均线与诚实的 Snapshot Health |
+| [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md) | 以可信 Data through + 版本化命名窗口替代 Project 日期分支；定义定制能力验证后晋升平台策略的路径 |
 | [项目配置、数据接入与模板发布流程](流程-项目配置与模板发布.md) | Admin 从 Project Draft 到 Published 的操作与发布门槛 |
 | [Preschool 数据与三层目标结构](决策-Preschool-Portfolio数据集接入.md) | 区分 Centre×Circuit 现有事实与 Block→Room→Circuit 目标映射 |
 | [Ngee Ann 模板吸收方案](评估-Ngee-Ann模板吸收方案.md) | 原型可直接吸收、需参数化、延期模块与 golden baseline |
