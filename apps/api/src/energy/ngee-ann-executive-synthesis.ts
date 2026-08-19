@@ -263,22 +263,33 @@ const parseSummary = (
   value: unknown,
   evidenceIds: Set<string>,
   sourceText: string,
-): { text: string; evidenceRefs: string[] } | null => isRecord(value)
-  && boundedString(value.text, 720)
-  && validRefs(value.evidenceRefs, evidenceIds)
-  && numbersSupported(value.text, sourceText)
-  ? { text: value.text, evidenceRefs: [...value.evidenceRefs] }
-  : null;
+): { text: string; evidenceRefs: string[] } | null => {
+  const text = isRecord(value) && typeof value.text === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.text)
+    : value;
+  return isRecord(value)
+    && boundedString(text, 720)
+    && validRefs(value.evidenceRefs, evidenceIds)
+    && numbersSupported(text, sourceText)
+    ? { text, evidenceRefs: [...value.evidenceRefs] }
+    : null;
+};
 
 const parseFinding = (
   value: unknown,
   sources: NgeeAnnExecutiveSource[],
   sourceText: string,
 ): NgeeAnnExecutiveFinding | null => {
-  if (!isRecord(value)
-    || !boundedString(value.id, 160)
-    || !boundedString(value.title, 120)
-    || !boundedString(value.text, 720)
+  if (!isRecord(value)) return null;
+  const title = typeof value.title === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.title)
+    : value.title;
+  const text = typeof value.text === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.text)
+    : value.text;
+  if (!boundedString(value.id, 160)
+    || !boundedString(title, 120)
+    || !boundedString(text, 720)
     || (value.epistemicStatus !== "observed"
       && value.epistemicStatus !== "inferred"
       && value.epistemicStatus !== "speculative")
@@ -301,18 +312,21 @@ const parseFinding = (
   ]));
   if (!validRefs(evidenceRefs, evidenceIds)) return null;
   const sourceInsights = sourceInsightIds.map((id) => insightById.get(id as string)!).filter(Boolean);
-  if (!numbersSupported(`${value.title} ${value.text}`, sourceText)) return null;
+  if (!numbersSupported(`${title} ${text}`, sourceText)) return null;
   const epistemicStatus = lowerToSourceUncertainty(value.epistemicStatus, sourceInsights);
   return {
     id: value.id,
-    title: value.title,
-    text: value.text,
+    title,
+    text,
     epistemicStatus,
     sectionIds: [...sectionIds] as NgeeAnnSectionId[],
     sourceInsightIds: [...sourceInsightIds] as string[],
     evidenceRefs: [...evidenceRefs] as string[],
   };
 };
+
+const normalizeNgeeAnnHourlyEnergyUnit = (value: string): string => value
+  .replace(/\bkWh\s*\/\s*(?:h|hour)\b/giu, "kWh per hourly bucket");
 
 const lowerToSourceUncertainty = (
   proposed: NgeeAnnExecutiveFinding["epistemicStatus"],

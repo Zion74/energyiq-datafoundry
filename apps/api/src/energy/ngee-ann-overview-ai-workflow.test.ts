@@ -61,13 +61,13 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v9")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v10")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(sectionProfileSnapshots).toEqual(Array.from({ length: 4 }, () => trustedSnapshot));
     expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);
     expect(executiveCalls[0]).toMatchObject({
       artifactKind: "executive-synthesis",
-      identityContractRevision: "ngee-ann-executive-v5",
+      identityContractRevision: "ngee-ann-executive-v6",
       dataSnapshotId: "snapshot-ngee",
     });
     expect(Object.values(result.sections).every(({ status }) => status === "available")).toBe(true);

@@ -109,6 +109,38 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("normalizes hourly energy-bucket units instead of publishing kWh as a rate", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "The hourly profile is reported in kWh/h.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:hourly-unit",
+          title: "Weekend hourly buckets remain visible",
+          text: "The accepted profile remains near the supplied kWh/h values.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:hourly-unit",
+    });
+
+    expect(result.summary?.text).toBe("The hourly profile is reported in kWh per hourly bucket.");
+    expect(result.insights[0]?.text).toBe("The accepted profile remains near the supplied kWh per hourly bucket values.");
+  });
+
   it("keeps a clearly labelled speculative angle when its observation Evidence is current", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({

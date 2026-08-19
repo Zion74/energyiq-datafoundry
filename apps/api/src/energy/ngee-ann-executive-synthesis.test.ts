@@ -55,6 +55,38 @@ describe("Ngee Ann Executive Synthesis", () => {
     });
   });
 
+  it("normalizes copied hourly energy-bucket units in the Executive summary and findings", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:hourly-unit",
+    });
+    const result = materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-hourly-unit",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "The combined reading includes an hourly profile expressed in kWh/h.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:hourly-unit",
+          title: "The hourly profile remains decision-relevant",
+          text: "The accepted source describes its hourly energy buckets in kWh/h.",
+          epistemicStatus: "observed",
+          sectionIds: ["trend-and-demand", "time-behaviour"],
+          sourceInsightIds: ["insight:trend", "insight:time"],
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        }],
+      }),
+    });
+
+    expect(result.summary?.text).toBe("The combined reading includes an hourly profile expressed in kWh per hourly bucket.");
+    expect(result.findings[0]?.text).toBe("The accepted source describes its hourly energy buckets in kWh per hourly bucket.");
+  });
+
   it("keeps validated findings when an unsupported Executive summary cannot be published", () => {
     const sources = sourceSections();
     const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({

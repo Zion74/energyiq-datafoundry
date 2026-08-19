@@ -345,14 +345,17 @@ const parseSummary = (
   evidenceIds: Set<string>,
   packText: string,
 ): NgeeAnnSectionSummary | null => {
+  const text = isRecord(value) && typeof value.text === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.text)
+    : value;
   if (!isRecord(value)
-    || !boundedString(value.text, MAX_SUMMARY_CHARS)
+    || !boundedString(text, MAX_SUMMARY_CHARS)
     || !validEvidenceRefs(value.evidenceRefs, evidenceIds)) return null;
-  if (narrativeFactsSupported(value.text, packText)) {
-    return { text: value.text, evidenceRefs: [...value.evidenceRefs] };
+  if (narrativeFactsSupported(text, packText)) {
+    return { text, evidenceRefs: [...value.evidenceRefs] };
   }
   const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
-    .segment(value.text)]
+    .segment(text)]
     .map(({ segment }) => segment.trim())
     .filter((sentence) => sentence.length > 0 && narrativeFactsSupported(sentence, packText))
     .join(" ");
@@ -366,32 +369,44 @@ const parseInsight = (
   evidenceIds: Set<string>,
   packText: string,
 ): NgeeAnnSectionInsight | null => {
-  if (!isRecord(value)
-    || Object.keys(value).some((key) => ![
+  if (!isRecord(value)) return null;
+  const title = typeof value.title === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.title)
+    : value.title;
+  const text = typeof value.text === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.text)
+    : value.text;
+  const deepDiveQuestion = typeof value.deepDiveQuestion === "string"
+    ? normalizeNgeeAnnHourlyEnergyUnit(value.deepDiveQuestion)
+    : value.deepDiveQuestion;
+  if (Object.keys(value).some((key) => ![
       "id", "title", "text", "epistemicStatus", "evidenceRefs", "deepDiveQuestion",
     ].includes(key))
     || !nonEmptyString(value.id)
-    || !boundedString(value.title, MAX_TITLE_CHARS)
-    || !boundedString(value.text, MAX_TEXT_CHARS)
+    || !boundedString(title, MAX_TITLE_CHARS)
+    || !boundedString(text, MAX_TEXT_CHARS)
     || (value.epistemicStatus !== "observed"
       && value.epistemicStatus !== "inferred"
       && value.epistemicStatus !== "speculative")
     || !validEvidenceRefs(value.evidenceRefs, evidenceIds)
-    || (value.deepDiveQuestion !== undefined
-      && !boundedString(value.deepDiveQuestion, MAX_DEEP_DIVE_CHARS))) return null;
-  const narrative = [value.title, value.text, value.deepDiveQuestion ?? ""].join(" ");
+    || (deepDiveQuestion !== undefined
+      && !boundedString(deepDiveQuestion, MAX_DEEP_DIVE_CHARS))) return null;
+  const narrative = [title, text, deepDiveQuestion ?? ""].join(" ");
   if (!narrativeFactsSupported(narrative, packText)) return null;
   return {
     id: value.id,
-    title: value.title,
-    text: value.text,
-    epistemicStatus: lowerSectionEpistemicStatus(value.epistemicStatus, `${value.title} ${value.text}`),
+    title,
+    text,
+    epistemicStatus: lowerSectionEpistemicStatus(value.epistemicStatus, `${title} ${text}`),
     evidenceRefs: [...value.evidenceRefs],
-    ...(typeof value.deepDiveQuestion === "string"
-      ? { deepDiveQuestion: value.deepDiveQuestion }
+    ...(typeof deepDiveQuestion === "string"
+      ? { deepDiveQuestion }
       : {}),
   };
 };
+
+const normalizeNgeeAnnHourlyEnergyUnit = (value: string): string => value
+  .replace(/\bkWh\s*\/\s*(?:h|hour)\b/giu, "kWh per hourly bucket");
 
 const lowerSectionEpistemicStatus = (
   proposed: NgeeAnnSectionInsight["epistemicStatus"],
@@ -733,7 +748,7 @@ const requirePackIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedPromptRevision = "energyiq-project-section-discovery-v5";
-  if (identity.identityContractRevision !== "ngee-ann-section-v9"
+  if (identity.identityContractRevision !== "ngee-ann-section-v10"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

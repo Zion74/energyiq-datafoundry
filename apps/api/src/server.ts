@@ -278,7 +278,7 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
     structuredOutput: nativeAdditionalSubmission ? undefined : input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? input.identity?.rendererKey === "ngee-ann-overview"
-        && input.identity.identityContractRevision === "ngee-ann-section-v9"
+        && input.identity.identityContractRevision === "ngee-ann-section-v10"
         ? NGEE_ANN_SECTION_MESSAGE_MAX_CHARS
         : PACK_V2_SECTION_MESSAGE_MAX_CHARS
       : input.stage === "additional-insights-discovery"
