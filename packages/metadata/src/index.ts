@@ -35,6 +35,7 @@ import {
 import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
 import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 import { initializeEnergyIqTemplateChangeSchema } from "./energyiq-template-change.js";
+import { initializeEnergyIqOverviewDefinitionSchema } from "./energyiq-overview-definition-store.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
@@ -51,6 +52,7 @@ export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
 export * from "./energyiq-template-change.js";
 export * from "./energyiq-overview-definition.js";
+export * from "./energyiq-overview-definition-store.js";
 export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
@@ -4129,6 +4131,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0035_energyiq_additional_insight_comments", "Persist append-only exact Finding comments in Method governance", () => {
     initializeEnergyIqInsightMethodGovernanceSchema(db);
+  });
+  runSchemaMigration(db, "0036_energyiq_overview_definition", "Persist Agent-friendly Overview Definitions with immutable Template Revisions", () => {
+    initializeEnergyIqOverviewDefinitionSchema(db);
   });
 };
 
