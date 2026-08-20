@@ -1,9 +1,9 @@
 ---
 title: "Project 通用 Report Time Context 与 Overview 复用决策"
-summary: "平台统一时间窗口、身份与变化治理；Agent 通过单一声明式 Overview Definition 组合已注册能力，不直接操作 Renderer 或 UI Patch。"
+summary: "平台以自然月 Report Edition 组织 Managed Overview，并把每日数据/AI 重算与受治理的 Template Regeneration 分离。"
 doc_type: decision
 tags: [Overview, ReportTimeContext, OverviewDefinition, Stage5Agent, 时间语义, 平台复用]
-updated_at: "2026-08-19"
+updated_at: "2026-08-20"
 related:
   - "CONTEXT.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -36,6 +36,8 @@ EnergyIQ 当前采用“定制化服务通用化”：先在真实 Project 中�
 **选择 D：平台级 `Report Time Context` + 版本化 `Overview Definition Revision`。**
 
 Overview 顶部只有一个可信锚点：`Data through`、`Last refreshed`、Timezone 和 Data Snapshot。各 Section 可以使用不同的 named windows，但必须显示用途、精确范围和 `Complete / Partial / Forecast` 状态。
+
+Managed Overview 以自然月 `Report Edition` 为外层组织：当前月是会随 Data through 推进的 `in_progress` Edition，历史完整月是不可变的 `complete` Edition。每天可以对同一 Template Revision 做 `Overview Materialization Refresh`，也可以为新 Snapshot 做 `Insight Refresh`；这两者都不是重新生成静态 HTML 或 Template。只有 Overview Definition、公式能力引用或页面组织改变时，才发布新的 Template Revision。
 
 普通用户不在 Overview 任意切换日期。任意区间、粒度和比较属于 Explorer；基于可信数据域的深入问题属于 AI Analysis；历史精确结果属于 Saved Analysis；前后变化由 What changed 表达。
 
@@ -162,12 +164,14 @@ Catalog 缺少能力时，系统返回 `capability_required` Development Proposa
 
 ### Ngee Ann
 
-- Current month progress：自然月至 dataThrough；
+- Managed Overview：默认打开最新自然月 Report Edition；当月显示自然月至 dataThrough，历史月只显示已封存完整结果；
 - Recent operations：最近 28 个完整日；
 - Completed month trend：最近 3 个完整自然月；
 - Same-progress comparison：历史月份相同进度；
 - Forecast：下一个完整自然月；
 - Day-type reference：Workday / Weekend / Public holiday。
+
+现有 2026 年 4–6 月 Excel 批次按原文件保存并进入同一 Source Adapter。4 月 21 日才开始的数据只能作为 partial context；合并两批后 5 月可以成为首个完整历史月；6 月 1–17 日是当前月进度。重叠的 5 月 19–20 日按 Meter Point + timestamp 去重，值冲突时导入失败并进入人工核对，禁止靠后文件静默覆盖。
 
 ### Preschool
 
@@ -193,6 +197,7 @@ Business Calendar 是平台能力。任何 Project 都必须区分：
 - Stage 5 只操作稳定业务语义，不依赖当前 React/图表库实现；
 - AI/Saved/What changed 可以解释每条结论使用了哪个窗口；
 - Excel 和 API 持续进数共享同一 Snapshot → Time Context → Overview 流程；
+- 每日数据与 AI 可以重算，而不会每天重建页面或制造新 Template Revision；
 - 新定制可通过 Overview Definition 快速验证，稳定后再提升为平台 revision。
 
 ### 代价
@@ -200,6 +205,7 @@ Business Calendar 是平台能力。任何 Project 都必须区分：
 - 现有 Ngee Ann/Preschool period 逻辑需要迁移；
 - Artifact identity 必须纳入 Policy/Overview Definition revision；
 - UI 需要在 Section 级显示时间标签，不能只显示一个含糊全页日期。
+- What changed 必须区分数据/结论变化与 Template 变化；仅换措辞、Evidence ID 或生成时间不能冒充业务变化。
 
 ### 失效条件
 

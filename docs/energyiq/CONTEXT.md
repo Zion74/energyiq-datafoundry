@@ -112,6 +112,21 @@ Mapping schema v2 的不可变身份，指纹覆盖 Physical Meter identity、Pu
 **Report Time Context**<br>
 一次 Overview 分析使用的可信时间语义，绑定 Data Snapshot、Project Release、Timezone、数据截止点和一组版本化命名窗口。它不是用户任意选择的全页日期筛选器。
 
+**Managed Overview / Managed Report**<br>
+由已发布 Overview Definition 持续物化的项目管理报告。它以稳定管理问题和自然月 Report Edition 组织内容；新数据进入时重算事实、图表和 AI Artifact，但不重新生成页面代码或 Template Revision。
+
+**Report Edition**<br>
+Managed Overview 的自然月业务版本。当前月 Edition 在 Data through 推进时保持 `in_progress` 并可持续更新；月末数据满足完整性门后封存为 `complete`，历史 Edition 不再被新数据改写。
+
+**Overview Materialization Refresh**<br>
+在同一 Overview Definition Revision 和 Report Edition 下，基于新的 Data Snapshot/Data through 重新计算确定性事实、图表和状态。它可以每天发生，不等于 Template Regeneration，也不自动创建新的静态页面。
+
+**Insight Refresh**<br>
+在同一 Overview Definition Revision 下，针对新的精确 Data Snapshot 重新生成 Section Interpretation、Key Findings 或 Additional Insight Artifact。它可以随每日数据更新运行；Artifact 必须绑定 Snapshot 和生成合同，随机措辞变化不得自动视为业务结论变化。
+
+**Template Regeneration**<br>
+改变 Overview Definition、计算能力引用、Section 组织或视觉编排并发布新的 Template Revision。它属于受治理的设计变更，不属于每日数据同步或 Overview Materialization Refresh。
+
 **Report Window Policy Revision**<br>
 平台发布的不可变时间窗口规则版本，定义 Rolling complete days、Month-to-date、完整历史月、同进度比较、Forecast horizon 或 Day-type baseline 等算法。Project 只能引用已注册 Revision，不能注入任意日期代码。
 

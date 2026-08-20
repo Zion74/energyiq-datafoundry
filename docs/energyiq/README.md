@@ -20,6 +20,7 @@
 12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力、2026-08-15 Preschool Stage 1–3 v12 可用化、真实 Provider、A→B、多账户与 Ngee Ann 后续依赖计划；
 13. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 14. [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md)：平台统一命名窗口、身份与变化治理；Stage 5 通过单一声明式 Overview Definition 组合 Sections、Catalog 能力与 AI 方法。
+15. [Ngee Ann 自然月 Managed Overview 夜间执行路线与 Runlog](2026-08-20-Ngee-Ann自然月Managed-Overview夜间执行路线与Runlog.md)：Charles 自然月反馈、每日数据/AI 重算与 Template Regeneration 边界、四份 Excel A/B/C、论点驱动页面和发布验收门。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
 
@@ -43,6 +44,7 @@
 | [四界面 UI/UX 一致性与功能保护决策](2026-08-08-四界面UI-UX一致性与功能保护决策.md) | 统一 Overview、AI Analyst、Project Explorer 与 Admin 的视觉语法、可读性和操作习惯，同时保留不同侧栏职责并保护现有功能 |
 | [Project Explorer 性能、时间、指标与 Snapshot Health 决策](2026-08-08-Project-Explorer性能时间指标与Snapshot-Health决策.md) | 将 Explorer 收窄为快速的设备与数据核查界面，默认 Project 统一最新完整日，并按节点类型展示指标、自身平均线与诚实的 Snapshot Health |
 | [Project 通用 Report Time Context 与 Overview 复用决策](2026-08-19-Project通用Report-Time-Context与Overview复用决策.md) | 以可信 Data through + 版本化命名窗口替代 Project 日期分支；定义定制能力验证后晋升平台策略的路径 |
+| [Ngee Ann 自然月 Managed Overview 夜间执行路线与 Runlog](2026-08-20-Ngee-Ann自然月Managed-Overview夜间执行路线与Runlog.md) | in progress；自然月 Report Edition、每日物化/AI 重算、四份 Excel A/B/C、论点驱动 Overview、What Changed 与发布验收的唯一夜间跟踪入口 |
 | [项目配置、数据接入与模板发布流程](流程-项目配置与模板发布.md) | Admin 从 Project Draft 到 Published 的操作与发布门槛 |
 | [Preschool 数据与三层目标结构](决策-Preschool-Portfolio数据集接入.md) | 区分 Centre×Circuit 现有事实与 Block→Room→Circuit 目标映射 |
 | [Ngee Ann 模板吸收方案](评估-Ngee-Ann模板吸收方案.md) | 原型可直接吸收、需参数化、延期模块与 golden baseline |
