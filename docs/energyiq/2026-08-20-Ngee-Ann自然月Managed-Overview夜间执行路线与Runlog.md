@@ -57,7 +57,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 
 - [x] 通过 public `resolveProjectAnalysis` seam 增加完整历史月与同进度比较的 server-owned bounded projection；
 - [x] 当前月比较历史相同进度，完整月比较上一个完整月；不足数据时诚实 unavailable；
-- [ ] Calendar/Holiday、Tariff、Data through 和 Section 窗口标签使用精确 revision；
+- [x] Calendar/Holiday、Tariff、Data through 和 Section 窗口标签使用精确 revision；
 - [x] Overview Definition 语义变化时发布新的 Ngee Ann Template Revision，旧 Revision 保持不可变且重复启动幂等；
 - [x] focused tests、API build、Web production build、diff-check 全绿。
 
@@ -90,9 +90,9 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 
 ### M5 — 发布与客户门
 
-- [ ] Integration 运行高层 seams、focused suites、API/Web build；
-- [ ] 本地浏览器核对 Ngee Ann/Preschool，不把源码推断当浏览器证据；
-- [ ] 真实 Provider 只在明确 generation acceptance 中运行，记录 Run/Artifact；
+- [x] Integration 运行高层 seams、focused suites、API/Web build；
+- [x] 本地浏览器核对 Ngee Ann/Preschool，不把源码推断当浏览器证据；
+- [x] 真实 Provider 只在明确 generation acceptance 中运行，记录 Run/Artifact；
 - [ ] Charles admin 可见全部项目；Ngee-only user 只能看 Ngee Ann；
 - [ ] 使用不可变 Release Artifact 部署，核对精确 SHA、健康、登录、数据库和回滚点；
 - [ ] Charles 人工判断页面是否真正形成论点、AI 是否值得看。
@@ -222,6 +222,20 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - GREEN：`available` 必须至少保留 1 条本地审核通过的 Finding；每条 Finding 必须引用至少 2 个不同 Section，并从每个 Section 引用真实 source Insight；没有跨 Section 价值时 Provider 必须明确返回 `empty`；
 - Identity：Ngee Ann Executive 从 v6/acceptance-v5/prompt-v1 旋转到 v7/acceptance-v6/prompt-v2，避免旧 Artifact 被当作新规则产物；Store 对 v7 重复执行同一跨 Section 门，v1–v6 历史结果保持可读；
 - 自动证据：Executive、identity、workflow、Metadata Store 4 files / 35 tests，Metadata/API build、diff-check 通过。真实 Provider 是否能稳定生成有价值的跨 Section Finding 仍待明确 generation 与人工内容审核。
+
+### 2026-08-21 M3/M5 真实运行验收 — 依赖隔离、事实方向与 6/6 AI
+
+- 运行边界：原 clean Integration 的 `node_modules` 与 `apps/web/node_modules` 实为指向旧 Worker 的 Junction；源码测试加载新 v12，但生产 API 解析到了旧 Metadata 构建，导致四个已完成 Provider Run 在 Store 落库时全部被旧合同拒绝；
+- 修复方式：没有删除 Junction 或修改旧 Worker，而是从精确提交创建 `D:\Projects\energyiq-datafoundry-night-runtime` / `codex/night-runtime-20260821`，独立 `npm ci`；Workspace package links 已验证指向该 Worktree 自己的 `packages/metadata`、`packages/contracts` 与 `apps/api`；
+- 内容 RED：真实 Provider 曾把 Public Holiday 写成“与 Weekend 相似但略低”，而确定性 day-type profile 的 Project-scope 方向相反；新增 public materializer RED，按 candidate 局部拒绝写反的 ranking/direct/contrast comparison，保留同批正确 sibling；
+- Identity：Ngee Ann Section 旋转为 `ngee-ann-section-v12`、`energyiq-project-section-acceptance-v10`、`energyiq-project-section-discovery-v6`；v11 继续历史可读；Commit `835fa11 fix(energyiq): validate day-type comparisons`；
+- 自动门：相关 API/Metadata 5 files / 74 tests；root `npm ci` 所触发的 TypeScript project build；Web production build；`git diff --check` 均通过；
+- 真实 Provider：第一次明确 generation 将四个 Section 全部恢复为 available；最终 Executive 曾因 DeepSeek 10 秒 connect timeout 失败，第二次只重试 Executive 后达到 `6/6 ready`；Additional Insights 为诚实的 `no-new-insight`；
+- 内容审核：浏览器显示 `4 of 4 Sections ready`；Key Findings 引用跨 Section 的 Level 7、off-hours 与 Circuit concentration；Time behaviour 不再出现“Public Holiday lower than Weekend”的反向结论；
+- 读取副作用：生成完成后普通 `Refresh current overview` 前后 `runs` 均为 114；EnergyIQ Admin Demo 与 Ngee Ann FM Demo 均可 GET 同一 4-Section + Key Findings Artifact，Ngee Ann FM 对 Preschool 返回 403；
+- 账户缺口：账户清单中的 `Charles Demo` 与 `Ngee Ann Client 01` 在当前本地 Metadata DB 中不存在，因此不能用它们伪造登录通过；已存在且密码与清单一致的 EnergyIQ Admin Demo / Ngee Ann FM Demo 完成角色等价验收。Charles 具名账户与四个 Ngee Ann Client 账户必须在目标发布环境确认已 provision 后再验收；
+- 浏览器事实：自然月 Report Edition 为 `1–16 Jun 2026`、Data through `16 Jun`；June MTD 比 May 同进度 +14.7%；May 31/31 complete、April 10/30 partial；Tariff 为 29.72¢/kWh incl. GST；1 Jun Public Holiday 已进入图表与 Holiday insight；
+- What Changed：真实浏览器比较入口明确声明零模型调用；当前 DB 没有 compatible previous Saved Overview，页面诚实提示先保存本版，而没有伪造 retained/updated/new/removed。A→B 可视比较仍须在下一批 Snapshot 与至少一份 frozen Saved Overview 后完成。
 
 ## 9. 完成定义
 
