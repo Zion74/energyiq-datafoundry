@@ -82,10 +82,10 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 ### M4 — #83/#56 持续数据与 What Changed
 
 - [ ] 同一 Template Revision 下新 Snapshot 可重算确定性结果和 AI；
-- [ ] Artifact identity 包含 Snapshot、Release、时间窗口和生成合同，旧结果不能冒充 current；
-- [ ] 变化按事实/结论语义保守分类；随机措辞、Evidence ID 或生成时间变化不算 updated；
-- [ ] 记录数据变化与 Template 变化为两条不同 change axes；
-- [ ] 普通读取只恢复精确已存 Artifact，零 Provider；明确 refresh/generation 才触发 Provider；
+- [x] Artifact identity 包含 Snapshot、Release、时间窗口和生成合同，旧结果不能冒充 current；
+- [x] 变化按事实/结论语义保守分类；随机措辞、Evidence ID 或生成时间变化不算 updated；
+- [x] 记录数据变化与 Template 变化为两条不同 change axes；
+- [x] 普通读取只恢复精确已存 Artifact，零 Provider；明确 refresh/generation 才触发 Provider；
 - [ ] A→B→C 验证旧结论 retained/updated/removed 与新异常/new insight。
 
 ### M5 — 发布与客户门
@@ -206,6 +206,14 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - 幂等：相同 Definition 再次 bootstrap 不创建新的 Revision；每日数据物化和 Insight Refresh 不经过该发布路径，因此不会每天制造 Template Revision；
 - 本轮 Ngee Ann Definition 将首两节明确为 `Management overview` 与 `Monthly context`，Section keys、Capability revisions 和 named windows 保持稳定；
 - 自动证据：先建立带 legacy 管理标题的旧 Revision，public bootstrap 后生成新 Revision；旧 Definition 未被改写，新 Revision 命中新标题；再次 bootstrap Revision 不变。Focused 6/6、API build、diff-check 通过；生产 v6 是否旋转须在 Integration/部署时以真实数据库与 Release identity 核对，未在本切片声称完成。
+
+### 2026-08-21 M4 tracer 1 — What Changed 的两条版本轴
+
+- 新风险 RED：同一 Data Snapshot 上发布新 Template Revision 时，旧候选会因“Snapshot 与时间口径都没变”被过滤，用户无法看到这次变化来自分析/页面口径；
+- GREEN：previous candidate 与兼容门现在同时承认 Project Release 变化；同 Snapshot、同 Report Time、不同 Release 被归为 `analysis-basis`，不会冒充数据变化；
+- 原有门保持：新 Snapshot、相同 Report Time/Release 归为 `data`；Report Time 或确定性 Metric basis 不兼容时不发布误导性数值 delta；Artifact 的 Snapshot/Release/Report Time/生成合同必须 exact；Finding 的 Evidence ID 单独变化不伪装成结论更新；
+- 普通 Overview GET/readExact 的零 Provider/零 queue/零 ensure 已由既有 API 与 Ngee Ann Adapter public tests锁定，本切片没有新增读取副作用；
+- 自动证据：What Changed 3 files / 23 tests、Web production build、diff-check 通过。A→B→C 的真实 AI 内容 retained/updated/new/removed 仍须明确 generation + Provider + 人工价值审核，不能由纯函数测试代替。
 
 ## 9. 完成定义
 

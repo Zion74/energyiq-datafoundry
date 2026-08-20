@@ -80,6 +80,47 @@ describe("Overview change summary", () => {
     expect(mixed?.metrics).toEqual([]);
   });
 
+  it("compares an immutable Template regeneration on the same Data Snapshot as analysis-basis change", () => {
+    const previous = savedDetail({
+      id: "saved-template-v6",
+      sequence: 6,
+      snapshotId: "snapshot-b",
+      releaseId: "release-v6",
+      rendererKey: "ngee-ann-overview",
+    });
+    const current = snapshot({
+      snapshotId: "snapshot-b",
+      releaseId: "release-v7",
+      rendererKey: "ngee-ann-overview",
+    });
+    setReportTimeContext(previous.snapshot!, {
+      policyRevision: "v1",
+      windowId: "current-month-progress",
+      from: "2026-06-01T00:00:00.000Z",
+      toExclusive: "2026-06-17T00:00:00.000Z",
+    });
+    setReportTimeContext(current, {
+      policyRevision: "v1",
+      windowId: "current-month-progress",
+      from: "2026-06-01T00:00:00.000Z",
+      toExclusive: "2026-06-17T00:00:00.000Z",
+    });
+
+    expect(orderPreviousOverviewCandidates({ items: [previous], current }))
+      .toEqual([previous]);
+    expect(isCompatiblePreviousOverview(previous, current)).toBe(true);
+    expect(buildOverviewChangeSummary({
+      previous,
+      current,
+      currentAiArtifact: null,
+    })?.provenance).toMatchObject({
+      dataSnapshotStatus: "same",
+      reportTimeBasisStatus: "same",
+      projectReleaseStatus: "changed",
+      attribution: "analysis-basis",
+    });
+  });
+
   it("marks legacy snapshots without Report Time provenance as unversioned", () => {
     const previous = savedDetail({ id: "saved-a", sequence: 1, snapshotId: "snapshot-a" });
     const current = snapshot({ snapshotId: "snapshot-b", releaseId: "release-b" });

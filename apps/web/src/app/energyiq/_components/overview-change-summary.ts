@@ -90,7 +90,8 @@ export const orderPreviousOverviewCandidates = <T extends EnergySavedAnalysisSum
     && item.resource === input.current.context.resource
     && (item.dataSnapshotId !== input.current.dataSnapshot.id
       || (item.snapshot
-        && reportTimeBasisStatus(item.snapshot, input.current) === "changed")))
+        && (reportTimeBasisStatus(item.snapshot, input.current) === "changed"
+          || item.snapshot.projectRelease.id !== input.current.projectRelease.id))))
   .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)
     || right.sequence - left.sequence
     || right.id.localeCompare(left.id));
@@ -103,7 +104,8 @@ export const isCompatiblePreviousOverview = (
   && previous.scopeId === current.context.scopeId
   && previous.resource === current.context.resource
   && (previous.dataSnapshotId !== current.dataSnapshot.id
-    || reportTimeBasisStatus(previous.snapshot, current) === "changed")
+    || reportTimeBasisStatus(previous.snapshot, current) === "changed"
+    || previous.snapshot.projectRelease.id !== current.projectRelease.id)
   && previous.snapshot.context.projectId === current.context.projectId
   && previous.snapshot.context.scopeId === current.context.scopeId
   && previous.snapshot.context.timezone === current.context.timezone
