@@ -279,6 +279,39 @@ describe("ProjectAnalysisResolver", () => {
           toExclusive: "2026-07-31T16:00:00.000Z",
         }),
       ]));
+      expect(currentProjectResult.snapshot.reportWindowAnalyses).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          windowId: "current-month-progress",
+          period: {
+            start: "2026-05-31T16:00:00.000Z",
+            endExclusive: NGEE_ANN_GOLDEN.selection.period.to,
+          },
+          status: "ready",
+        }),
+        expect.objectContaining({
+          windowId: "recent-operations",
+          period: {
+            start: "2026-05-19T16:00:00.000Z",
+            endExclusive: NGEE_ANN_GOLDEN.selection.period.to,
+          },
+          status: "ready",
+          analysis: expect.objectContaining({
+            dailyTotals: expect.objectContaining({
+              scopes: expect.arrayContaining([
+                expect.objectContaining({
+                  scopeId: "project",
+                  rows: expect.arrayContaining([
+                    expect.objectContaining({ localDate: "2026-05-20" }),
+                    expect.objectContaining({ localDate: "2026-06-16" }),
+                  ]),
+                }),
+              ]),
+            }),
+          }),
+        }),
+      ]));
+      expect(JSON.stringify(currentProjectResult.snapshot.reportWindowAnalyses).length)
+        .toBeLessThan(200_000);
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(currentProjectResult.snapshot.projectRelease.ruleRevisionIds)
         .toContain("comparison.daily_usage_above_baseline@1");

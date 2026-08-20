@@ -124,6 +124,7 @@ export type ProjectAnalysisSnapshot = {
   };
   projectRelease: PublishedProjectRelease;
   reportTimeContext?: ReportTimeContext;
+  reportWindowAnalyses?: ProjectReportWindowAnalysis[];
   recipe: PublishedProjectRelease["recipe"];
   renderer: PublishedProjectRelease["renderer"];
   dataQuality: EnergyScopeAnalysis["dataHealth"];
@@ -153,6 +154,18 @@ export type ProjectAnalysisSnapshot = {
   };
   metadata: ProjectAnalysisMetadataProjection;
   analysis: ProjectAnalysisPayload;
+};
+
+export type ProjectReportWindowAnalysis = {
+  windowId: string;
+  period: {
+    start: string;
+    endExclusive: string;
+  };
+  status: "ready";
+  analysis: {
+    dailyTotals?: NonNullable<ProjectAnalysisPayload["dailyTotals"]>;
+  };
 };
 
 export type ProjectAnalysisResolution =
@@ -405,9 +418,9 @@ export const resolveProjectAnalysis = async (input: {
           .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
         databasePath: analysisDatabasePath,
       });
-      const preschoolRoot = projectRelease.renderer.key === "preschool-overview"
-        && releasedContext.scopeId === input.metadataStore.energyIq
-          .getProject(releasedContext.projectId).root_scope_id;
+      const projectRoot = releasedContext.scopeId === input.metadataStore.energyIq
+        .getProject(releasedContext.projectId).root_scope_id;
+      const preschoolRoot = projectRelease.renderer.key === "preschool-overview" && projectRoot;
       const preschoolLatestCompleteLocalDay = preschoolRoot
         ? await selectPreschoolLatestCompleteLocalDay({
             metadataStore: input.metadataStore,
@@ -576,12 +589,26 @@ export const resolveProjectAnalysis = async (input: {
             policy: reportTimePolicy,
           })
         : undefined;
+      const reportWindowAnalyses = reportTimeContext && projectRoot
+        ? await materializeReportWindowAnalyses({
+            metadataStore: input.metadataStore,
+            dataGateway: input.dataGateway,
+            userId: input.user.id,
+            projectRelease,
+            releasedContext,
+            primaryPeriod: snapshotContext.primaryPeriod,
+            primaryAnalysis: analysis,
+            reportTimeContext,
+            databasePath: analysisDatabasePath,
+          })
+        : undefined;
       return {
         status: "ready",
         snapshot: {
           context: snapshotContext,
           projectRelease,
           ...(reportTimeContext ? { reportTimeContext } : {}),
+          ...(reportWindowAnalyses ? { reportWindowAnalyses } : {}),
           recipe: projectRelease.recipe,
           renderer: projectRelease.renderer,
           dataQuality: analysis.dataHealth,
@@ -692,6 +719,76 @@ export const resolveProjectAnalysis = async (input: {
     },
   };
 };
+
+const materializeReportWindowAnalyses = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  projectRelease: PublishedProjectRelease;
+  releasedContext: EnergyQueryContext;
+  primaryPeriod: ProjectAnalysisSnapshot["context"]["primaryPeriod"];
+  primaryAnalysis: ProjectAnalysisPayload;
+  reportTimeContext: ReportTimeContext;
+  databasePath: string;
+}): Promise<ProjectReportWindowAnalysis[]> => Promise.all(input.reportTimeContext.windows
+  .filter((window) => (
+    window.strategy.kind === "calendar_month_to_date"
+    || window.strategy.kind === "rolling_complete_days"
+  ))
+  .map(async (window): Promise<ProjectReportWindowAnalysis> => {
+    const period = {
+      start: window.from,
+      endExclusive: window.toExclusive,
+    };
+    if (
+      period.start === input.primaryPeriod.start
+      && period.endExclusive === input.primaryPeriod.endExclusive
+    ) {
+      return {
+        windowId: window.windowId,
+        period,
+        status: "ready",
+        analysis: input.primaryAnalysis.dailyTotals
+          ? { dailyTotals: input.primaryAnalysis.dailyTotals }
+          : {},
+      };
+    }
+    const context: EnergyQueryContext = {
+      ...input.releasedContext,
+      period: "Custom",
+      from: period.start,
+      to: period.endExclusive,
+    };
+    const scopeAnalysis = await executeEnergyScopeAnalysis({
+      metadataStore: input.metadataStore,
+      dataGateway: input.dataGateway,
+      userId: input.userId,
+      context,
+      projectReleaseId: input.projectRelease.id,
+      includeTimeBehaviour: input.projectRelease.renderer.key === "ngee-ann-overview",
+      includeMeterOperationalBreakdown: input.projectRelease.renderer.key !== "preschool-overview",
+      ruleRevisions: input.metadataStore.energyIq.rules.listRevisions()
+        .filter((rule) => input.projectRelease.ruleRevisionIds.includes(rule.revision_id)),
+      databasePath: input.databasePath,
+    });
+    const analysis = projectAnalysisPayload({
+      analysis: scopeAnalysis,
+      metadata: resolveProjectAnalysisMetadata({
+        metadataStore: input.metadataStore,
+        projectId: context.projectId,
+        hierarchyRevisionId: context.hierarchyRevisionId,
+        timezone: context.timezone,
+        period,
+        analysis: scopeAnalysis,
+      }),
+    });
+    return {
+      windowId: window.windowId,
+      period,
+      status: "ready",
+      analysis: analysis.dailyTotals ? { dailyTotals: analysis.dailyTotals } : {},
+    };
+  }));
 
 const resolveSnapshotReportTimePolicy = (input: {
   metadataStore: MetadataStore;
