@@ -3,7 +3,7 @@ title: "DPL-01 Release Artifact Contract"
 summary: "定义由 clean Integration/CI 生成、可重复校验且不携带环境、数据或 secret 的 EnergyIQ 预构建 Release Artifact。"
 doc_type: implementation
 tags: [deployment, release, artifact, checksum, manifest]
-updated_at: "2026-08-20"
+updated_at: "2026-08-21"
 related:
   - "2026-08-20-EnergyIQ快速发布Pipeline方案与决策请求.md"
 status: implemented
@@ -59,11 +59,13 @@ Packager 不维护一份会随代码漂移的完整手写文件白名单，而�
 2. 从 workspace `package.json` 递归计算内部 production dependency closure；
 3. 对 API 和内部 package 校验 `main` 后收集其 runtime `dist/` 与 package manifest；测试编译物、
    declaration 和 source map 不进入 Release；
-4. 对 Web 读取 `.next/required-server-files.json`、其中声明的 config/tsconfig 和 runtime files，
+4. 收集 API 启动 bootstrap 使用的完整 `packages/skills/builtin/` 物理资源树，包括所有 builtin
+   Skill 的 `SKILL.md` 及同目录 package resources；
+5. 对 Web 读取 `.next/required-server-files.json`、其中声明的 config/tsconfig 和 runtime files，
    同时收集 production `.next` 内容与 `public/`；
-5. 排除 Next build cache、diagnostics、trace 和 generated types；
-6. 写入 `.release-sha` 与 `RELEASE_SHA`，二者必须和 Manifest `gitSha` 一致。
-7. 收入经过测试的 Artifact verifier/packager 与 deploy entry，使新的 `current` 仍能执行下一次
+6. 排除 Next build cache、diagnostics、trace 和 generated types；
+7. 写入 `.release-sha` 与 `RELEASE_SHA`，二者必须和 Manifest `gitSha` 一致。
+8. 收入经过测试的 Artifact verifier/packager 与 deploy entry，使新的 `current` 仍能执行下一次
    prebuilt release；不依赖服务器上漂移的手工脚本副本。
 
 `required-server-files.json` 中 Build Host 的绝对 `appDir`、tracing root 和 Turbopack root 会改写为
@@ -73,6 +75,10 @@ pack 直接失败。
 这解决的是“文件闭包从真实 start/build manifest 推导”，并不宣称已经选择依赖交付方式。
 Artifact v1 不含 `node_modules`。DPL-02/03 在依赖边界确定后仍须对解压成品做受控冷启动验收；
 DPL-01 不以静态清单冒充冷启动证据。
+
+API bootstrap 同时会尝试 provision DTC Growth demo datasource；其源是 `storage/fixtures/*.sqlite`，
+缺失时只告警并跳过。它属于数据/Storage 而非不可变代码资源，继续受下述数据库禁入合同约束，
+不因 builtin resource 修复而进入 Artifact。
 
 ## 4. 禁止内容与 fail-closed 行为
 

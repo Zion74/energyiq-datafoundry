@@ -27,6 +27,9 @@ const RELEASE_HOST_TOOL_FILES = [
   "scripts/energyiq/build-release-artifact.mjs",
   "scripts/energyiq/deploy-release.mjs",
 ];
+const API_BOOTSTRAP_RESOURCE_ROOTS = [
+  "packages/skills/builtin",
+];
 const FORBIDDEN_SEGMENTS = new Set([
   ".git",
   "acceptance",
@@ -285,6 +288,11 @@ const planReleaseEntries = async (sourceDir, gitSha) => {
       releaseHostTool,
       await requireRegularFile(sourceDir, releaseHostTool, "Release Host tool"),
     );
+  }
+  for (const resourceRoot of API_BOOTSTRAP_RESOURCE_ROOTS) {
+    for (const releasePath of await walkFiles(sourceDir, resourceRoot)) {
+      addEntry(entries, releasePath, path.join(sourceDir, ...releasePath.split("/")));
+    }
   }
 
   for (const workspace of closure) {

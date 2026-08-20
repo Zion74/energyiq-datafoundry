@@ -106,6 +106,12 @@ const createArtifactFixture = async (root) => {
     main: "dist/index.js",
   }, null, 2) + "\n");
   await writeFixtureFile(sourceDir, "packages/contracts/dist/index.js", "export const contract = true;\n");
+  await writeFixtureFile(sourceDir, "packages/skills/builtin/data-analysis/SKILL.md", "# Data analysis\n");
+  await writeFixtureFile(
+    sourceDir,
+    "packages/skills/builtin/energy-insight-investigation/SKILL.md",
+    "# Energy insight\n",
+  );
 
   const artifact = await createReleaseArtifact({
     sourceDir,

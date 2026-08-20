@@ -14,6 +14,10 @@ const RELEASE_SHA = "1234567890abcdef1234567890abcdef12345678";
 const BUILT_AT = "2026-08-20T00:00:00.000Z";
 const NODE_VERSION = "v22.19.0";
 const METADATA_SCHEMA_REVISION = "0038_energyiq_overview_definition_renderer";
+const BUILTIN_SKILL_RESOURCES = new Map([
+  ["packages/skills/builtin/data-analysis/SKILL.md", "# Data analysis\n"],
+  ["packages/skills/builtin/energy-insight-investigation/SKILL.md", "# Energy insight\n"],
+]);
 
 const sha256 = (body) => createHash("sha256").update(body).digest("hex");
 
@@ -98,6 +102,9 @@ const createFixture = async () => {
     main: "dist/index.js",
   }, null, 2) + "\n");
   await writeFixtureFile(root, "packages/unused/dist/index.js", "throw new Error('unused');\n");
+  for (const [resourcePath, body] of BUILTIN_SKILL_RESOURCES) {
+    await writeFixtureFile(root, resourcePath, body);
+  }
 
   return root;
 };
@@ -154,6 +161,38 @@ test("creates a deterministic prebuilt artifact and exact sidecar manifest", asy
 
   assert.equal(firstArtifact.includes(Buffer.from(sourceDir)), false, "build-host path leaked into artifact");
   await verifyReleaseArtifact({ artifactPath: first.artifactPath, manifestPath: first.manifestPath });
+});
+
+test("packages the complete builtin skill resource tree required by API bootstrap", async (t) => {
+  const sourceDir = await createFixture();
+  const outputDir = await mkdtemp(path.join(tmpdir(), "energyiq-artifact-builtin-resources-"));
+  t.after(() => Promise.all([
+    rm(sourceDir, { recursive: true, force: true }),
+    rm(outputDir, { recursive: true, force: true }),
+  ]));
+  const expectedResources = new Map([
+    ...BUILTIN_SKILL_RESOURCES,
+    ["packages/skills/builtin/data-analysis/references/runtime-policy.md", "# Runtime policy\n"],
+  ]);
+  for (const [resourcePath, body] of expectedResources) {
+    await writeFixtureFile(sourceDir, resourcePath, body);
+  }
+
+  const result = await packFixture(sourceDir, outputDir);
+  const manifest = JSON.parse(await readFile(result.manifestPath, "utf8"));
+  const verified = await verifyReleaseArtifact({
+    artifactPath: result.artifactPath,
+    manifestPath: result.manifestPath,
+    checksumPath: result.checksumPath,
+    includeEntries: true,
+  });
+  const manifestPaths = new Set(manifest.entries.map((entry) => entry.path));
+  const archivedEntries = new Map(verified.entries.map((entry) => [entry.path, entry.body.toString("utf8")]));
+
+  for (const [resourcePath, body] of expectedResources) {
+    assert.equal(manifestPaths.has(resourcePath), true, `${resourcePath} missing from manifest`);
+    assert.equal(archivedEntries.get(resourcePath), body, `${resourcePath} missing from tar`);
+  }
 });
 
 for (const forbidden of [
