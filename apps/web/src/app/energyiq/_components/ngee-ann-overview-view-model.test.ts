@@ -376,6 +376,31 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.context.periodRange).toBe("10 Jun 2026 - 16 Jun 2026");
   });
 
+  it("fails the operational trend closed when a materialized recent window has no daily totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.reportWindowAnalyses = [{
+      windowId: "recent-operations",
+      period: {
+        start: "2026-05-19T16:00:00.000Z",
+        endExclusive: "2026-06-16T16:00:00.000Z",
+      },
+      status: "ready",
+      analysis: {},
+    }];
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyTrend).toMatchObject({
+      status: "unavailable",
+      reason: "This published Snapshot does not include the authoritative daily totals contract.",
+      evidence: {
+        period: "[2026-05-19T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+      },
+      scopes: [],
+    });
+    expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
+  });
+
   it("explains the published tax-inclusive Tariff with its derived ex-tax reference rate", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     if (snapshot.analysis.cost.status !== "available") throw new Error("Expected cost Evidence.");

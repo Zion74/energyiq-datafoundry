@@ -865,14 +865,22 @@ function snapshotForReportWindow(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   windowId: string,
 ): EnergyProjectAnalysisSnapshotDto {
+  if (snapshot.reportWindowAnalyses === undefined) return snapshot;
   const window = snapshot.reportWindowAnalyses?.find((candidate) => (
     candidate.windowId === windowId && candidate.status === "ready"
   ));
-  if (!window?.analysis.dailyTotals) return snapshot;
+  const declaredWindow = snapshot.reportTimeContext?.windows.find((candidate) => (
+    candidate.windowId === windowId
+  ));
+  const period = window?.period ?? (declaredWindow ? {
+    start: declaredWindow.from,
+    endExclusive: declaredWindow.toExclusive,
+  } : snapshot.context.primaryPeriod);
 
   // Window projections currently carry only authoritative daily totals. Period-derived
   // overlays from the primary Report Edition must not be relabelled as window Evidence.
   const {
+    dailyTotals: _primaryDailyTotals,
     dailyUsageAnomalies: _primaryDailyUsageAnomalies,
     componentCategoryBreakdown: _primaryComponentCategoryBreakdown,
     ...analysis
@@ -882,13 +890,13 @@ function snapshotForReportWindow(
     context: {
       ...snapshot.context,
       period: "Custom",
-      from: window.period.start,
-      to: window.period.endExclusive,
-      primaryPeriod: window.period,
+      from: period.start,
+      to: period.endExclusive,
+      primaryPeriod: period,
     },
     analysis: {
       ...analysis,
-      dailyTotals: window.analysis.dailyTotals,
+      ...(window?.analysis.dailyTotals ? { dailyTotals: window.analysis.dailyTotals } : {}),
     },
   };
 }
