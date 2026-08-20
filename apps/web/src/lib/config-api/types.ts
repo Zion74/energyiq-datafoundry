@@ -1908,6 +1908,28 @@ export type EnergyProjectReportWindowAnalysisDto = {
   };
 };
 
+export type EnergyProjectReportWindowSegmentSummaryDto = {
+  windowId: string;
+  status: "ready";
+  segments: Array<{
+    period: {
+      start: string;
+      endExclusive: string;
+    };
+    dataStatus: "complete" | "partial" | "unavailable";
+    expectedDayCount: number;
+    completeDayCount: number;
+    summary: {
+      usageKwh: number;
+      averageDailyUsageKwh: number;
+    } | null;
+    evidence: {
+      dataSnapshotId: string;
+      queryId: "daily_totals_v1";
+    };
+  }>;
+};
+
 export type EnergyProjectAnalysisSnapshotDto = {
   context: EnergyQueryContextDto & {
     primaryPeriod: {
@@ -1926,6 +1948,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   projectRelease: EnergyPublishedProjectReleaseDto;
   reportTimeContext?: ReportTimeContext;
   reportWindowAnalyses?: EnergyProjectReportWindowAnalysisDto[];
+  reportWindowSegmentSummaries?: EnergyProjectReportWindowSegmentSummaryDto[];
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
   renderer: EnergyPublishedProjectReleaseDto["renderer"];
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];

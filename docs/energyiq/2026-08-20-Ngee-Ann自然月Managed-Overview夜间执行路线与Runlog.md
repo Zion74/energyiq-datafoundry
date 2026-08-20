@@ -146,6 +146,15 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - Docs smoke：本次新增文档没有新断链；全仓命令仍被既有 reference HTML 伪链接、历史 source-sensitive wording 与既有 evidence 绝对路径阻塞，未放宽规则或修改无关历史文件。
 - 本轮第一 RED：完整历史月与同进度比较必须由 API public seam 提供，Web 不得自行从任意日期拼算。
 
+### 2026-08-20 M1 tracer 1 — 历史月段 projection
+
+- RED：`resolveProjectAnalysis` 未返回 `completed-month-trend` 与 `same-progress-comparison` 的月段摘要，focused 1 test failed。
+- GREEN：增加受 Scope/Snapshot 约束的轻量 `executeEnergyDailyTotalsProjection`，历史窗口只跑 health + daily totals 查询；相同日映射逻辑与完整 Scope analysis 共用。
+- 输出：3 个完整月段 + 3 个历史同进度月段；每段含 exact Period、complete/partial/unavailable、完整日计数、可用时的用量摘要和 Snapshot/query provenance。
+- 安全：partial/unavailable 段不发布月总量；历史日明细不进入客户端 payload，6 段 JSON 小于 8 KB。
+- 验证：Report Time + Resolver 2 files / 15 tests；API build；Web production build；`git diff --check`。
+- 剩余：现有 compact fixture 只有 June 数据，因此历史月应 unavailable；M2 必须用四份真实 workbook 证明 May complete 和 June same-progress，不得用 synthetic 结果冒充。
+
 ## 9. 完成定义
 
 夜间任务只有在以下证据分别存在时才可称为完成：

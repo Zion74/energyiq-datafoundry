@@ -1082,6 +1082,109 @@ const prepareEnergyPeriodSelection = async (
   };
 };
 
+export type EnergyDailyTotalsProjection = {
+  dailyTotals: NonNullable<EnergyScopeAnalysis["dailyTotals"]>;
+  provenance: {
+    dataSnapshotId: string;
+    queryId: "daily_totals_v1";
+  };
+};
+
+export const executeEnergyDailyTotalsProjection = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  databasePath?: string;
+}): Promise<EnergyDailyTotalsProjection> => {
+  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    scopeId: input.context.scopeId,
+    resource: input.context.resource,
+    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId,
+  });
+  const databasePath = input.databasePath
+    ?? resolveEnergyFactStorePath(input.context.workspaceId);
+  const prepared = await prepareEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      meterAttachments: publishedMeterRoute.attachments,
+      resource: input.context.resource,
+      from: input.context.from,
+      to: input.context.to,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion,
+    },
+    databasePath,
+  });
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.hierarchyRevisionId,
+  );
+  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
+  if (!selectedNode) throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
+  const scopes: DailyTotalScope[] = [{
+    scopeId: selectedNode.id,
+    scopeName: selectedNode.name,
+    scopeType: selectedNode.node_type,
+    meterNodeIds: publishedMeterRoute.officialMeterPointIds ?? [],
+  }];
+  const dateBuckets = buildDailyDateBuckets(input.context);
+
+  return await input.dataGateway.withEnergySnapshotReadSession({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: prepared.sessionDatasourceId,
+  }, async (factScope) => {
+    const scoped = registerPreparedEnergyScopedDataSource({
+      metadataStore: input.metadataStore,
+      userId: input.userId,
+      prepared,
+      factScope,
+    });
+    const [healthResult, dailyTotalsResult] = await Promise.all([
+      input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: scopeHealthSql(scoped.viewName, scopes[0]!.meterNodeIds),
+      }),
+      input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: dailyTotalsSql(scoped.viewName, scopes),
+        limit: Math.max(1, dateBuckets.length),
+      }),
+    ]);
+    const intervalMinutes = numberAt(healthResult.rows[0] ?? [], 2) || 15;
+    return {
+      dailyTotals: buildDailyTotalsProjection({
+        context: input.context,
+        scopes,
+        dateBuckets,
+        rows: dailyTotalsResult.rows,
+        intervalMinutes,
+      }),
+      provenance: {
+        dataSnapshotId: input.context.dataSnapshotId,
+        queryId: "daily_totals_v1",
+      },
+    };
+  });
+};
+
 export const executeEnergyScopeAnalysis = async (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
@@ -1406,49 +1509,13 @@ export const executeEnergyScopeAnalysis = async (input: {
     leafMeterScope,
     row: healthRow,
   });
-  const dailyFactsByScopeAndDate = new Map(
-    dailyTotalsResult.rows.map((row) => [`${stringAt(row, 0)}:${stringAt(row, 3)}`, row]),
-  );
-  const dailyTotals: NonNullable<EnergyScopeAnalysis["dailyTotals"]> = {
-    metricId: "energy.total_usage_kwh@1",
-    grain: "day",
-    timezone: input.context.timezone,
-    scopes: dailyTotalScopes.map((scope) => ({
-      scopeId: scope.scopeId,
-      scopeName: scope.scopeName,
-      scopeType: scope.scopeType,
-      rows: dailyDateBuckets.map((bucket) => {
-        const row = dailyFactsByScopeAndDate.get(`${scope.scopeId}:${bucket.localDate}`);
-        const validIntervalCount = row ? numberAt(row, 5) : 0;
-        const qualityEventCount = row ? numberAt(row, 6) : 0;
-        const expectedMeterIntervalCount = scope.meterNodeIds.length * Math.round(
-          (Date.parse(bucket.to) - Date.parse(bucket.from)) / (intervalMinutes * 60_000),
-        );
-        const status = validIntervalCount === 0
-          ? "unavailable" as const
-          : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
-            ? "complete" as const
-            : "partial" as const;
-        return {
-          localDate: bucket.localDate,
-          from: bucket.from,
-          to: bucket.to,
-          usageKwh: row && row[4] !== null && row[4] !== undefined
-            ? round(numberAt(row, 4), 4)
-            : null,
-          dataHealth: {
-            status,
-            coveragePct: expectedMeterIntervalCount > 0
-              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
-              : 0,
-            expectedMeterIntervalCount,
-            validIntervalCount,
-            qualityEventCount,
-          },
-        };
-      }),
-    })),
-  };
+  const dailyTotals = buildDailyTotalsProjection({
+    context: input.context,
+    scopes: dailyTotalScopes,
+    dateBuckets: dailyDateBuckets,
+    rows: dailyTotalsResult.rows,
+    intervalMinutes,
+  });
   const calendarTotals = buildCalendarTotals({
     timezone: input.context.timezone,
     selectedScopeId: input.context.scopeId,
@@ -2892,6 +2959,58 @@ const buildChildScopes = (input: {
       } : {})
     };
   }).sort((left, right) => right.usageKwh - left.usageKwh);
+};
+
+const buildDailyTotalsProjection = (input: {
+  context: EnergyQueryContext;
+  scopes: DailyTotalScope[];
+  dateBuckets: DailyDateBucket[];
+  rows: unknown[][];
+  intervalMinutes: number;
+}): NonNullable<EnergyScopeAnalysis["dailyTotals"]> => {
+  const factsByScopeAndDate = new Map(
+    input.rows.map((row) => [`${stringAt(row, 0)}:${stringAt(row, 3)}`, row]),
+  );
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "day",
+    timezone: input.context.timezone,
+    scopes: input.scopes.map((scope) => ({
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      scopeType: scope.scopeType,
+      rows: input.dateBuckets.map((bucket) => {
+        const row = factsByScopeAndDate.get(`${scope.scopeId}:${bucket.localDate}`);
+        const validIntervalCount = row ? numberAt(row, 5) : 0;
+        const qualityEventCount = row ? numberAt(row, 6) : 0;
+        const expectedMeterIntervalCount = scope.meterNodeIds.length * Math.round(
+          (Date.parse(bucket.to) - Date.parse(bucket.from)) / (input.intervalMinutes * 60_000),
+        );
+        const status = validIntervalCount === 0
+          ? "unavailable" as const
+          : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+            ? "complete" as const
+            : "partial" as const;
+        return {
+          localDate: bucket.localDate,
+          from: bucket.from,
+          to: bucket.to,
+          usageKwh: row && row[4] !== null && row[4] !== undefined
+            ? round(numberAt(row, 4), 4)
+            : null,
+          dataHealth: {
+            status,
+            coveragePct: expectedMeterIntervalCount > 0
+              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              : 0,
+            expectedMeterIntervalCount,
+            validIntervalCount,
+            qualityEventCount,
+          },
+        };
+      }),
+    })),
+  };
 };
 
 const resolveDailyTotalScopes = (input: {

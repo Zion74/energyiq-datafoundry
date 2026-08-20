@@ -128,7 +128,10 @@ export const resolveReportTimeContext = (input: {
         phase: source.phase,
         from: segments.at(-1)!.from,
         toExclusive: segments[0]!.toExclusive,
-        completeDayCount: segments.reduce((total, segment) => total + periodDayCount(segment, input.timezone), 0),
+        completeDayCount: segments.reduce(
+          (total, segment) => total + reportTimePeriodDayCount(segment, input.timezone),
+          0,
+        ),
         segments,
         comparisonCompatibilityKey: compatibilityKey(input, window)
       };
@@ -236,7 +239,7 @@ const requirePositiveInteger = (value: number): void => {
   }
 };
 
-const periodDayCount = (
+export const reportTimePeriodDayCount = (
   period: { from: string; toExclusive: string },
   timezone: string
 ): number => daysBetweenLocalDates(

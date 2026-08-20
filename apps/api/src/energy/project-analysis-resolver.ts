@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
 import {
+  executeEnergyDailyTotalsProjection,
   executeEnergyScopeAnalysis,
   executeEnergyScopeAnalysisWithLatestAvailable,
   resolveEnergyCurrentOverviewPeriodBasis,
@@ -73,7 +74,10 @@ import {
   createProjectAnalysisResultCache,
   type ProjectAnalysisResultCache,
 } from "./project-analysis-result-cache.js";
-import { resolveReportTimeContext } from "./report-time-context.js";
+import {
+  reportTimePeriodDayCount,
+  resolveReportTimeContext,
+} from "./report-time-context.js";
 
 export type ProjectRendererKey = "ngee-ann-overview" | "preschool-overview";
 
@@ -125,6 +129,7 @@ export type ProjectAnalysisSnapshot = {
   projectRelease: PublishedProjectRelease;
   reportTimeContext?: ReportTimeContext;
   reportWindowAnalyses?: ProjectReportWindowAnalysis[];
+  reportWindowSegmentSummaries?: ProjectReportWindowSegmentSummary[];
   recipe: PublishedProjectRelease["recipe"];
   renderer: PublishedProjectRelease["renderer"];
   dataQuality: EnergyScopeAnalysis["dataHealth"];
@@ -180,6 +185,28 @@ export type ProjectReportWindowAnalysis = {
       | "virtualMeterTraces"
     >;
   };
+};
+
+export type ProjectReportWindowSegmentSummary = {
+  windowId: string;
+  status: "ready";
+  segments: Array<{
+    period: {
+      start: string;
+      endExclusive: string;
+    };
+    dataStatus: "complete" | "partial" | "unavailable";
+    expectedDayCount: number;
+    completeDayCount: number;
+    summary: {
+      usageKwh: number;
+      averageDailyUsageKwh: number;
+    } | null;
+    evidence: {
+      dataSnapshotId: string;
+      queryId: "daily_totals_v1";
+    };
+  }>;
 };
 
 export type ProjectAnalysisResolution =
@@ -616,6 +643,17 @@ export const resolveProjectAnalysis = async (input: {
             databasePath: analysisDatabasePath,
           })
         : undefined;
+      const reportWindowSegmentSummaries = reportTimeContext && projectRoot
+        ? await materializeReportWindowSegmentSummaries({
+            metadataStore: input.metadataStore,
+            dataGateway: input.dataGateway,
+            userId: input.user.id,
+            projectRelease,
+            releasedContext,
+            reportTimeContext,
+            databasePath: analysisDatabasePath,
+          })
+        : undefined;
       return {
         status: "ready",
         snapshot: {
@@ -623,6 +661,9 @@ export const resolveProjectAnalysis = async (input: {
           projectRelease,
           ...(reportTimeContext ? { reportTimeContext } : {}),
           ...(reportWindowAnalyses ? { reportWindowAnalyses } : {}),
+          ...(reportWindowSegmentSummaries?.length
+            ? { reportWindowSegmentSummaries }
+            : {}),
           recipe: projectRelease.recipe,
           renderer: projectRelease.renderer,
           dataQuality: analysis.dataHealth,
@@ -826,6 +867,89 @@ const reportWindowAnalysisProjection = (
     },
   } : {}),
 });
+
+const materializeReportWindowSegmentSummaries = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  projectRelease: PublishedProjectRelease;
+  releasedContext: EnergyQueryContext;
+  reportTimeContext: ReportTimeContext;
+  databasePath: string;
+}): Promise<ProjectReportWindowSegmentSummary[]> => {
+  const windows = input.reportTimeContext.windows.filter((window) => (
+    window.strategy.kind === "completed_calendar_months"
+    || window.strategy.kind === "prior_equivalent_progress"
+  ));
+  const allSegments = windows.flatMap((window) => window.segments);
+  if (allSegments.length === 0) return [];
+
+  const context: EnergyQueryContext = {
+    ...input.releasedContext,
+    period: "Custom",
+    from: allSegments.reduce(
+      (earliest, segment) => segment.from < earliest ? segment.from : earliest,
+      allSegments[0]!.from,
+    ),
+    to: allSegments.reduce(
+      (latest, segment) => segment.toExclusive > latest ? segment.toExclusive : latest,
+      allSegments[0]!.toExclusive,
+    ),
+  };
+  const projection = await executeEnergyDailyTotalsProjection({
+    metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
+    userId: input.userId,
+    context,
+    databasePath: input.databasePath,
+  });
+  const selectedScopeRows = projection.dailyTotals.scopes.find(
+    (scope) => scope.scopeId === input.releasedContext.scopeId,
+  )?.rows ?? [];
+
+  return windows.map((window) => ({
+    windowId: window.windowId,
+    status: "ready" as const,
+    segments: [...window.segments]
+      .sort((left, right) => left.from.localeCompare(right.from))
+      .map((segment) => {
+        const expectedDayCount = reportTimePeriodDayCount(
+          segment,
+          input.reportTimeContext.timezone,
+        );
+        const rows = selectedScopeRows.filter((row) => (
+          row.from >= segment.from && row.to <= segment.toExclusive
+        ));
+        const completeRows = rows.filter((row) => row.dataHealth.status === "complete");
+        const availableRows = rows.filter((row) => row.usageKwh !== null);
+        const dataStatus = completeRows.length === expectedDayCount
+          ? "complete" as const
+          : availableRows.length === 0
+            ? "unavailable" as const
+            : "partial" as const;
+        const usageKwh = completeRows.reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
+        return {
+          period: {
+            start: segment.from,
+            endExclusive: segment.toExclusive,
+          },
+          dataStatus,
+          expectedDayCount,
+          completeDayCount: completeRows.length,
+          summary: dataStatus === "complete" ? {
+            usageKwh: roundReportValue(usageKwh),
+            averageDailyUsageKwh: roundReportValue(usageKwh / expectedDayCount),
+          } : null,
+          evidence: {
+            dataSnapshotId: projection.provenance.dataSnapshotId,
+            queryId: projection.provenance.queryId,
+          },
+        };
+      }),
+  }));
+};
+
+const roundReportValue = (value: number): number => Math.round(value * 10_000) / 10_000;
 
 const resolveSnapshotReportTimePolicy = (input: {
   metadataStore: MetadataStore;

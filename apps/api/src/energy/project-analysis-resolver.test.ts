@@ -310,6 +310,86 @@ describe("ProjectAnalysisResolver", () => {
           }),
         }),
       ]));
+      expect(currentProjectResult.snapshot.reportWindowSegmentSummaries).toEqual([
+        {
+          windowId: "completed-month-trend",
+          status: "ready",
+          segments: [
+            expect.objectContaining({
+              period: {
+                start: "2026-02-28T16:00:00.000Z",
+                endExclusive: "2026-03-31T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 31,
+              completeDayCount: 0,
+              summary: null,
+            }),
+            expect.objectContaining({
+              period: {
+                start: "2026-03-31T16:00:00.000Z",
+                endExclusive: "2026-04-30T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 30,
+              completeDayCount: 0,
+              summary: null,
+            }),
+            expect.objectContaining({
+              period: {
+                start: "2026-04-30T16:00:00.000Z",
+                endExclusive: "2026-05-31T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 31,
+              completeDayCount: 0,
+              summary: null,
+            }),
+          ],
+        },
+        {
+          windowId: "same-progress-comparison",
+          status: "ready",
+          segments: [
+            expect.objectContaining({
+              period: {
+                start: "2026-02-28T16:00:00.000Z",
+                endExclusive: "2026-03-16T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 16,
+              summary: null,
+            }),
+            expect.objectContaining({
+              period: {
+                start: "2026-03-31T16:00:00.000Z",
+                endExclusive: "2026-04-16T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 16,
+              summary: null,
+            }),
+            expect.objectContaining({
+              period: {
+                start: "2026-04-30T16:00:00.000Z",
+                endExclusive: "2026-05-16T16:00:00.000Z",
+              },
+              dataStatus: "unavailable",
+              expectedDayCount: 16,
+              summary: null,
+            }),
+          ],
+        },
+      ]);
+      expect(JSON.stringify(currentProjectResult.snapshot.reportWindowSegmentSummaries).length)
+        .toBeLessThan(8_000);
+      expect(currentProjectResult.snapshot.reportWindowSegmentSummaries
+        ?.flatMap((window) => window.segments)
+        .every((segment) => (
+          segment.evidence.dataSnapshotId === currentProjectResult.snapshot.dataSnapshot.id
+          && segment.evidence.queryId === "daily_totals_v1"
+        )))
+        .toBe(true);
       const recentOperations = currentProjectResult.snapshot.reportWindowAnalyses
         ?.find((window) => window.windowId === "recent-operations");
       expect(recentOperations?.analysis.summary).toEqual(
