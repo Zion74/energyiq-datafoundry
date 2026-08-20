@@ -192,6 +192,9 @@ export const materializeNgeeAnnExecutiveResult = (input: {
     .map((candidate) => parseFinding(candidate, input.sources, sourceText))
     .filter((finding): finding is NgeeAnnExecutiveFinding => finding !== null)
     .slice(0, 3);
+  if (findings.length === 0) {
+    throw new Error("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
+  }
   const proposedSummary = parseSummary(proposal.summary, evidenceIds, sourceText);
   const summary = proposedSummary ?? (findings[0]
     ? {
@@ -210,6 +213,7 @@ export const buildNgeeAnnExecutivePrompt = (sources: NgeeAnnExecutiveSource[]): 
   const prompt = [
     "Create the Ngee Ann Overview Key Findings from the accepted Section results below.",
     "Summarise across Sections; do not merely repeat one card. Prefer the 1-3 conclusions that most change a manager's attention or line of inquiry.",
+    "status=available requires at least one Finding. Every Finding must combine source Insights from at least two distinct Sections; otherwise return status=empty.",
     "Findings may be observed, inferred, or speculative. Preserve or lower the uncertainty of source Insights; never upgrade a hypothesis to fact.",
     "Use only exact source sectionIds, source Insight IDs and Evidence refs. Do not invent measurements or causes.",
     "Return only one JSON object: {\"status\":\"available\"|\"empty\",\"summary\"?:{\"text\":string,\"evidenceRefs\":string[]},\"findings\":[{\"id\":string,\"title\":string,\"text\":string,\"epistemicStatus\":\"observed\"|\"inferred\"|\"speculative\",\"sectionIds\":string[],\"sourceInsightIds\":string[],\"evidenceRefs\":string[]}]}",
@@ -301,11 +305,15 @@ const parseFinding = (
   const sourceInsightIds = value.sourceInsightIds;
   const evidenceRefs = value.evidenceRefs;
   const sectionSet = new Set(sources.map(({ sectionId }) => sectionId));
-  if (!sectionIds.every((sectionId) => typeof sectionId === "string" && sectionSet.has(sectionId as NgeeAnnSectionId))) return null;
+  if (new Set(sectionIds).size < 2
+    || new Set(sectionIds).size !== sectionIds.length
+    || !sectionIds.every((sectionId) => typeof sectionId === "string" && sectionSet.has(sectionId as NgeeAnnSectionId))) return null;
   const referencedSources = sources.filter(({ sectionId }) => sectionIds.includes(sectionId));
   const insights = referencedSources.flatMap(({ result }) => result.insights);
   const insightById = new Map(insights.map((insight) => [insight.id, insight]));
-  if (!sourceInsightIds.every((id) => typeof id === "string" && insightById.has(id))) return null;
+  if (new Set(sourceInsightIds).size !== sourceInsightIds.length
+    || !sourceInsightIds.every((id) => typeof id === "string" && insightById.has(id))
+    || !referencedSources.every(({ result }) => result.insights.some(({ id }) => sourceInsightIds.includes(id)))) return null;
   const evidenceIds = new Set(referencedSources.flatMap(({ result }) => [
     ...(result.summary?.evidenceRefs ?? []),
     ...result.insights.flatMap(({ evidenceRefs }) => evidenceRefs),

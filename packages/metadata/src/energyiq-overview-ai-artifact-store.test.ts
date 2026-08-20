@@ -565,6 +565,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         identityContractRevision: "ngee-ann-executive-v1",
         validatorRevision: "energyiq-project-executive-acceptance-v1",
         workflowRevision: "energyiq-project-executive-synthesis-v1",
+        investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
       };
       expect(completeSectionV4(store, historicalIdentity, ngeeAnnExecutiveResult(historicalIdentity)))
         .toMatchObject({ status: "available" });
@@ -573,6 +574,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnExecutiveIdentity("snapshot-ngee-executive-prior-summary-recovery"),
         identityContractRevision: "ngee-ann-executive-v5",
         validatorRevision: "energyiq-project-executive-acceptance-v4",
+        investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
       };
       const priorSummaryRecoveryArtifact = completeSectionV4(
         store,
@@ -1164,13 +1166,13 @@ const ngeeAnnExecutiveIdentity = (
   ...sectionV3Identity(dataSnapshotId, "sections:test-v1"),
   rendererKey: "ngee-ann-overview",
   artifactKind: "executive-synthesis",
-  identityContractRevision: "ngee-ann-executive-v6",
+  identityContractRevision: "ngee-ann-executive-v7",
   analysisPackId: "ngee-ann-section-artifacts",
   analysisPackRevision: "v1",
   outputContractRevision: "energyiq-project-executive-synthesis-v1",
-  validatorRevision: "energyiq-project-executive-acceptance-v5",
+  validatorRevision: "energyiq-project-executive-acceptance-v6",
   workflowRevision: "energyiq-project-executive-synthesis-v2",
-  investigatorPromptRevision: "energyiq-project-executive-prompt-v1",
+  investigatorPromptRevision: "energyiq-project-executive-prompt-v2",
   capabilityRevision: "section-artifacts-v1",
   publicationRevision: "energyiq-project-key-findings-v1",
 });
@@ -1202,8 +1204,8 @@ const ngeeAnnExecutiveResult = (identity: SectionV4Identity) => ({
     text: "The accepted Sections point to a shared line of inquiry.",
     epistemicStatus: "inferred",
     sectionIds: ["trend-and-demand", "time-behaviour"],
-    sourceInsightIds: ["insight:trend"],
-    evidenceRefs: ["evidence:trend"],
+    sourceInsightIds: ["insight:trend", "insight:time"],
+    evidenceRefs: ["evidence:trend", "evidence:time"],
   }],
 });
 

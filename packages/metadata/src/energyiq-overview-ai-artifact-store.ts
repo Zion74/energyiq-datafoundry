@@ -1273,7 +1273,8 @@ const requireExecutiveSynthesisResult = (
     || identity.identityContractRevision === "ngee-ann-executive-v3"
     || identity.identityContractRevision === "ngee-ann-executive-v4"
     || identity.identityContractRevision === "ngee-ann-executive-v5"
-    || identity.identityContractRevision === "ngee-ann-executive-v6") {
+    || identity.identityContractRevision === "ngee-ann-executive-v6"
+    || identity.identityContractRevision === "ngee-ann-executive-v7") {
     requireProjectExecutiveSynthesisResultV1(parsed, identity);
     return;
   }
@@ -1296,7 +1297,10 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || identity.analysisPackId !== "ngee-ann-section-artifacts"
     || identity.analysisPackRevision !== "v1"
     || identity.outputContractRevision !== "energyiq-project-executive-synthesis-v1"
-    || !((identity.identityContractRevision === "ngee-ann-executive-v6"
+    || !((identity.identityContractRevision === "ngee-ann-executive-v7"
+      && identity.validatorRevision === "energyiq-project-executive-acceptance-v6"
+      && identity.workflowRevision === "energyiq-project-executive-synthesis-v2")
+      || (identity.identityContractRevision === "ngee-ann-executive-v6"
       && identity.validatorRevision === "energyiq-project-executive-acceptance-v5"
       && identity.workflowRevision === "energyiq-project-executive-synthesis-v2")
       || (identity.identityContractRevision === "ngee-ann-executive-v5"
@@ -1311,9 +1315,12 @@ const requireProjectExecutiveSynthesisResultV1 = (
       || (identity.identityContractRevision === "ngee-ann-executive-v1"
         && identity.validatorRevision === "energyiq-project-executive-acceptance-v1"))
     || ((identity.identityContractRevision !== "ngee-ann-executive-v5"
-      && identity.identityContractRevision !== "ngee-ann-executive-v6")
+      && identity.identityContractRevision !== "ngee-ann-executive-v6"
+      && identity.identityContractRevision !== "ngee-ann-executive-v7")
       && identity.workflowRevision !== "energyiq-project-executive-synthesis-v1")
-    || identity.investigatorPromptRevision !== "energyiq-project-executive-prompt-v1"
+    || identity.investigatorPromptRevision !== (identity.identityContractRevision === "ngee-ann-executive-v7"
+      ? "energyiq-project-executive-prompt-v2"
+      : "energyiq-project-executive-prompt-v1")
     || identity.capabilityRevision !== "section-artifacts-v1"
     || identity.publicationRevision !== "energyiq-project-key-findings-v1"
     || parsed.artifactKind !== "executive-synthesis"
@@ -1329,7 +1336,10 @@ const requireProjectExecutiveSynthesisResultV1 = (
     || new Set(sourceIds).size !== sourceIds.length
     || !Array.isArray(findings)
     || findings.length > 3
-    || !findings.every(validProjectExecutiveFindingV1)) {
+    || !findings.every((finding) => validProjectExecutiveFindingV1(
+      finding,
+      identity.identityContractRevision === "ngee-ann-executive-v7",
+    ))) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
   if (parsed.status === "empty") {
@@ -1338,18 +1348,21 @@ const requireProjectExecutiveSynthesisResultV1 = (
     }
     return;
   }
-  if (sourceIds.length < 2 || !validProjectExecutiveSummaryV1(
+  if (sourceIds.length < 2
+    || (identity.identityContractRevision === "ngee-ann-executive-v7" && findings.length === 0)
+    || !validProjectExecutiveSummaryV1(
     summary,
     identity.identityContractRevision === "ngee-ann-executive-v3"
       || identity.identityContractRevision === "ngee-ann-executive-v4"
       || identity.identityContractRevision === "ngee-ann-executive-v5"
-      || identity.identityContractRevision === "ngee-ann-executive-v6" ? 720 : 600,
+      || identity.identityContractRevision === "ngee-ann-executive-v6"
+      || identity.identityContractRevision === "ngee-ann-executive-v7" ? 720 : 600,
   )) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
 
-const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(value)
+const validProjectExecutiveFindingV1 = (value: unknown, requireCrossSection = false): boolean => isRecord(value)
   && nonEmptyString(value.id)
   && nonEmptyString(value.title)
   && value.title.length <= 120
@@ -1359,7 +1372,7 @@ const validProjectExecutiveFindingV1 = (value: unknown): boolean => isRecord(val
     || value.epistemicStatus === "inferred"
     || value.epistemicStatus === "speculative")
   && Array.isArray(value.sectionIds)
-  && value.sectionIds.length > 0
+  && value.sectionIds.length >= (requireCrossSection ? 2 : 1)
   && value.sectionIds.every((sectionId) => nonEmptyString(sectionId) && NGEE_ANN_SECTION_IDS.has(sectionId))
   && new Set(value.sectionIds).size === value.sectionIds.length
   && Array.isArray(value.sourceInsightIds)

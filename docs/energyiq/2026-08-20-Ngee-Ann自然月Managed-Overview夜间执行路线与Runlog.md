@@ -75,8 +75,8 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - [x] 页首只保留 1–3 个管理主题，回答“发生什么、为什么重要、先核查什么”；
 - [x] 每个主题使用 `Claim → Visual proof → Meaning → Next check → Evidence/limitation`；
 - [x] 图表和表格降为论据或 supporting diagnostics，不再平铺数据；
-- [ ] Key Findings 不复制单个 Section Interpretation；
-- [ ] 无可证实结论时显示诚实空状态，不让 AI 用套话填满卡片；
+- [x] Key Findings 不复制单个 Section Interpretation；
+- [x] 无合格跨 Section 结论时只允许明确 `empty`，不能以 Summary 或单 Section 复述伪装 `available`；
 - [ ] 1440 / 1920 / tablet 浏览器核对信息层级、折行、Evidence 和可访问性。
 
 ### M4 — #83/#56 持续数据与 What Changed
@@ -214,6 +214,14 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - 原有门保持：新 Snapshot、相同 Report Time/Release 归为 `data`；Report Time 或确定性 Metric basis 不兼容时不发布误导性数值 delta；Artifact 的 Snapshot/Release/Report Time/生成合同必须 exact；Finding 的 Evidence ID 单独变化不伪装成结论更新；
 - 普通 Overview GET/readExact 的零 Provider/零 queue/零 ensure 已由既有 API 与 Ngee Ann Adapter public tests锁定，本切片没有新增读取副作用；
 - 自动证据：What Changed 3 files / 23 tests、Web production build、diff-check 通过。A→B→C 的真实 AI 内容 retained/updated/new/removed 仍须明确 generation + Provider + 人工价值审核，不能由纯函数测试代替。
+
+### 2026-08-21 M3 tracer 2 — Key Findings 不能复制单个 Section
+
+- RED-1：`status=available + supported Summary + findings=[]` 被接受并持久化，页面看似有 Key Findings，实际没有结论；
+- RED-2：只引用 `trend-and-demand` 的 Section 原句可作为 Key Finding 发布，重现“Key Findings 与 Section Interpretation 一样”的产品缺陷；
+- GREEN：`available` 必须至少保留 1 条本地审核通过的 Finding；每条 Finding 必须引用至少 2 个不同 Section，并从每个 Section 引用真实 source Insight；没有跨 Section 价值时 Provider 必须明确返回 `empty`；
+- Identity：Ngee Ann Executive 从 v6/acceptance-v5/prompt-v1 旋转到 v7/acceptance-v6/prompt-v2，避免旧 Artifact 被当作新规则产物；Store 对 v7 重复执行同一跨 Section 门，v1–v6 历史结果保持可读；
+- 自动证据：Executive、identity、workflow、Metadata Store 4 files / 35 tests，Metadata/API build、diff-check 通过。真实 Provider 是否能稳定生成有价值的跨 Section Finding 仍待明确 generation 与人工内容审核。
 
 ## 9. 完成定义
 

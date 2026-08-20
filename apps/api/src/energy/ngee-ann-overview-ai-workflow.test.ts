@@ -67,7 +67,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);
     expect(executiveCalls[0]).toMatchObject({
       artifactKind: "executive-synthesis",
-      identityContractRevision: "ngee-ann-executive-v6",
+      identityContractRevision: "ngee-ann-executive-v7",
       dataSnapshotId: "snapshot-ngee",
     });
     expect(Object.values(result.sections).every(({ status }) => status === "available")).toBe(true);

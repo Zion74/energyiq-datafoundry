@@ -155,6 +155,58 @@ describe("Ngee Ann Executive Synthesis", () => {
     })).toThrow("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
   });
 
+  it("rejects an available Executive result that contains no publishable cross-Section Finding", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:no-cross-section-finding",
+    });
+
+    expect(() => materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-no-cross-section-finding",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "Demand and time behaviour are both available for review.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [],
+      }),
+    })).toThrow("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
+  });
+
+  it("does not promote a single-Section restatement into Key Findings", () => {
+    const sources = sourceSections();
+    const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: "sections:single-section-restatement",
+    });
+
+    expect(() => materializeNgeeAnnExecutiveResult({
+      identity,
+      runId: "run:ngee:executive-single-section-restatement",
+      sources,
+      answer: JSON.stringify({
+        status: "available",
+        summary: {
+          text: "Demand and time behaviour are both available for review.",
+          evidenceRefs: ["evidence:trend", "evidence:time"],
+        },
+        findings: [{
+          id: "finding:copied-trend",
+          title: "Peak demand was 138.8 kW",
+          text: "Peak demand was 138.8 kW.",
+          epistemicStatus: "observed",
+          sectionIds: ["trend-and-demand"],
+          sourceInsightIds: ["insight:trend"],
+          evidenceRefs: ["evidence:trend"],
+        }],
+      }),
+    })).toThrow("ENERGYIQ_NGEE_ANN_EXECUTIVE_RESULT_INVALID");
+  });
+
   it("preserves a useful Executive finding while lowering it to the source uncertainty", () => {
     const sources = sourceSections();
     const identity = createNgeeAnnOverviewAiExecutiveArtifactIdentity({
@@ -170,12 +222,12 @@ describe("Ngee Ann Executive Synthesis", () => {
         summary: { text: "Two Sections are available for a combined reading.", evidenceRefs: ["evidence:trend"] },
         findings: [{
           id: "finding:upgrade",
-          title: "The timetable caused the peak",
-          text: "The source hypothesis is now presented as confirmed.",
+          title: "The timetable caused the peak-demand pattern",
+          text: "The source hypothesis is now presented as a joint explanation for the 138.8 kW peak.",
           epistemicStatus: "observed",
-          sectionIds: ["time-behaviour"],
-          sourceInsightIds: ["insight:time"],
-          evidenceRefs: ["evidence:time"],
+          sectionIds: ["trend-and-demand", "time-behaviour"],
+          sourceInsightIds: ["insight:trend", "insight:time"],
+          evidenceRefs: ["evidence:trend", "evidence:time"],
         }],
       }),
     });
