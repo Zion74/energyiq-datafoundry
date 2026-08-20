@@ -6,6 +6,7 @@ import type {
   EnergyIqProjectSetupDocument,
   MetadataStore
 } from "@datafoundry/metadata";
+import { compileEnergyIqOverviewDefinition } from "@datafoundry/metadata";
 
 const NGEE_ANN_PROJECT_ID = "ngee-ann-polytechnic";
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
@@ -153,20 +154,48 @@ const ensurePilotOverviewDefinition = (
   policy: ReportTimePolicyRevision,
   definition: EnergyIqOverviewDefinition,
 ): void => {
+  const publishedAt = new Date().toISOString();
   const policyRecord = metadataStore.energyIq.reportTimePolicies.publish({
     project_id: projectId,
     policy,
     published_by: "dev-user",
-    published_at: new Date().toISOString(),
+    published_at: publishedAt,
   });
   const revision = metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
-  if (!revision || metadataStore.energyIq.overviewDefinitions.get(revision.revision_id)) return;
-  metadataStore.energyIq.overviewDefinitions.attachMigrationRecord({
-    project_id: projectId,
-    template_revision_id: revision.revision_id,
-    renderer_key: rendererKey,
+  if (!revision) return;
+  const existing = metadataStore.energyIq.overviewDefinitions.get(revision.revision_id);
+  if (!existing) {
+    metadataStore.energyIq.overviewDefinitions.attachMigrationRecord({
+      project_id: projectId,
+      template_revision_id: revision.revision_id,
+      renderer_key: rendererKey,
+      definition,
+      report_time_policy: policyRecord.policy,
+    });
+    return;
+  }
+  if (existing.renderer_key !== rendererKey) {
+    throw new Error("ENERGYIQ_OVERVIEW_DEFINITION_RENDERER_MISMATCH");
+  }
+  const compiled = compileEnergyIqOverviewDefinition({
     definition,
+    baseDefinition: existing.definition,
+    catalog: metadataStore.energyIq.templates.listComponentRevisions(),
+    reportTimePolicy: policyRecord.policy,
+  });
+  if (
+    existing.time_policy_revision_id === compiled.definition.timePolicyRevisionId
+    && existing.definition_fingerprint === compiled.definitionFingerprint
+  ) return;
+
+  metadataStore.energyIq.overviewDefinitions.publishFromRevisionWithinTransaction({
+    project_id: projectId,
+    expected_base_revision_id: revision.revision_id,
+    renderer_key: rendererKey,
+    definition: compiled.definition,
     report_time_policy: policyRecord.policy,
+    published_by: "dev-user",
+    published_at: publishedAt,
   });
 };
 
@@ -187,11 +216,11 @@ const NGEE_ANN_OVERVIEW_DEFINITION: EnergyIqOverviewDefinition = {
   contractRevision: "energyiq-overview-definition@1",
   timePolicyRevisionId: "ngee-ann-report-time@1",
   sections: [
-    section("executive-summary", "Executive summary", "What needs management attention this month?", "current-month-progress", [
+    section("executive-summary", "Management overview", "What changed this month, why does it matter, and what should management check first?", "current-month-progress", [
       block("ngee-executive-actions", "decision.executive_actions@1", "current-month-progress", "primary"),
       block("ngee-consumption", "overview.consumption@1", "current-month-progress", "primary"),
     ]),
-    section("cost-and-trend", "Cost and trend", "How is current-month performance changing against comparable history?", "current-month-progress", [
+    section("cost-and-trend", "Monthly context", "How is the current month progressing against comparable history without mixing partial and complete months?", "current-month-progress", [
       block("ngee-month-trend", "overview.consumption@1", "completed-month-trend"),
       block("ngee-same-progress", "comparison.child_scope_ranking@1", "same-progress-comparison"),
     ], ["completed-month-trend", "same-progress-comparison"]),

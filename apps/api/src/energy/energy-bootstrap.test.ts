@@ -335,4 +335,86 @@ describe("ensureEnergyIqBootstrap", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("publishes a new immutable Ngee Ann Template Revision when the managed Overview Definition changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-bootstrap-overview-definition-rotation-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const projectId = "ngee-ann-polytechnic";
+      const project = metadata.energyIq.getProject(projectId);
+      metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: projectId,
+        tier_definition_ids: metadata.energyIq.listTierDefinitions(projectId).map((tier) => tier.id),
+        hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({
+          metadataStore: metadata,
+          projectId,
+          hierarchyRevisionId: project.hierarchy_revision_id,
+          scopeId: project.root_scope_id,
+          resource: "electricity",
+        }).meterMappingRevisionId,
+        published_by: "dev-user",
+        published_at: "2026-08-20T22:00:00.000Z",
+      });
+      ensureEnergyIqBootstrap(metadata);
+      const current = metadata.energyIq.templates.getLatestProjectRevision(projectId)!;
+      const currentDefinition = metadata.energyIq.overviewDefinitions.get(current.revision_id)!;
+      const policy = metadata.energyIq.reportTimePolicies.get(
+        projectId,
+        currentDefinition.time_policy_revision_id,
+      )!;
+      const legacyRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: projectId,
+        tier_definition_ids: metadata.energyIq.listTierDefinitions(projectId).map((tier) => tier.id),
+        hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({
+          metadataStore: metadata,
+          projectId,
+          hierarchyRevisionId: project.hierarchy_revision_id,
+          scopeId: project.root_scope_id,
+          resource: "electricity",
+        }).meterMappingRevisionId,
+        published_by: "dev-user",
+        published_at: "2026-08-20T23:00:00.000Z",
+      });
+      metadata.energyIq.overviewDefinitions.attachMigrationRecord({
+        project_id: projectId,
+        template_revision_id: legacyRevision.revision_id,
+        renderer_key: "ngee-ann-overview",
+        definition: {
+          ...currentDefinition.definition,
+          sections: currentDefinition.definition.sections.map((section) => (
+            section.key === "executive-summary"
+              ? { ...section, title: "Legacy executive summary" }
+              : section
+          )),
+        },
+        report_time_policy: policy.policy,
+      });
+
+      ensureEnergyIqBootstrap(metadata);
+
+      const migrated = metadata.energyIq.templates.getLatestProjectRevision(projectId)!;
+      expect(migrated.revision_id).not.toBe(legacyRevision.revision_id);
+      expect(metadata.energyIq.overviewDefinitions.get(legacyRevision.revision_id)?.definition.sections[0]?.title)
+        .toBe("Legacy executive summary");
+      expect(metadata.energyIq.overviewDefinitions.get(migrated.revision_id)).toMatchObject({
+        renderer_key: "ngee-ann-overview",
+        definition: {
+          sections: expect.arrayContaining([
+            expect.objectContaining({ key: "executive-summary", title: "Management overview" }),
+            expect.objectContaining({ key: "cost-and-trend", title: "Monthly context" }),
+          ]),
+        },
+      });
+
+      ensureEnergyIqBootstrap(metadata);
+      expect(metadata.energyIq.templates.getLatestProjectRevision(projectId)?.revision_id)
+        .toBe(migrated.revision_id);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });

@@ -3,7 +3,7 @@ title: "Ngee Ann 自然月 Managed Overview 夜间执行路线与 Runlog"
 summary: "把 Charles 的自然月、持续更新、What Changed 和论点驱动反馈落实为可测试、可复跑、可发布的交付路径。"
 doc_type: playbook
 tags: [NgeeAnn, ManagedOverview, ReportEdition, AtoB, WhatChanged, NightRun]
-updated_at: "2026-08-20"
+updated_at: "2026-08-21"
 related:
   - "2026-08-19-Project通用Report-Time-Context与Overview复用决策.md"
   - "2026-08-06-Charles系统价值复核与连续数据演示决策.md"
@@ -58,7 +58,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - [x] 通过 public `resolveProjectAnalysis` seam 增加完整历史月与同进度比较的 server-owned bounded projection；
 - [x] 当前月比较历史相同进度，完整月比较上一个完整月；不足数据时诚实 unavailable；
 - [ ] Calendar/Holiday、Tariff、Data through 和 Section 窗口标签使用精确 revision；
-- [ ] 发布新的 Ngee Ann Template Revision，不能改写现有 immutable v6；
+- [x] Overview Definition 语义变化时发布新的 Ngee Ann Template Revision，旧 Revision 保持不可变且重复启动幂等；
 - [x] focused tests、API build、Web production build、diff-check 全绿。
 
 ### M2 — 多批次 Excel 与 A/B/C 数据基线
@@ -198,6 +198,14 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - GREEN-2：只接受 exact `current-month-progress` projection，或 primary Period 与该 window 完全相等；其他情况 fail closed 为 unavailable，不借用数字；
 - UI：`Monthly context` 在 Executive 后、AI Key Findings 前；左侧回答同进度差异，右侧只发布完整自然月，每行保留 complete-day count 与 Snapshot/query Evidence；
 - 自动证据：ViewModel 新增 2 个边界用例、Renderer 新增用户可见用例均 GREEN；Renderer 75/75；ViewModel 165 pass + 1 个累计运行时 5s timeout，该用例单跑 1/1；Web production build 通过；浏览器证据待后续总门。
+
+### 2026-08-21 M1 tracer 3 — Overview Definition 不可变发布
+
+- RED：Pilot bootstrap 只要最新 Template Revision 已附着 Overview Definition 就直接返回；即使管理问题、Section 标题和页面论点已经改变，Template identity 仍不旋转，旧 Artifact 可继续被误认作 current；
+- GREEN：bootstrap 先用 Component Catalog 与 Report Time Policy 编译 canonical Definition 并比较 fingerprint；只有语义变化才从最新 Revision 发布新 immutable Revision，旧 Definition 继续可读；Renderer 不匹配 fail closed；
+- 幂等：相同 Definition 再次 bootstrap 不创建新的 Revision；每日数据物化和 Insight Refresh 不经过该发布路径，因此不会每天制造 Template Revision；
+- 本轮 Ngee Ann Definition 将首两节明确为 `Management overview` 与 `Monthly context`，Section keys、Capability revisions 和 named windows 保持稳定；
+- 自动证据：先建立带 legacy 管理标题的旧 Revision，public bootstrap 后生成新 Revision；旧 Definition 未被改写，新 Revision 命中新标题；再次 bootstrap Revision 不变。Focused 6/6、API build、diff-check 通过；生产 v6 是否旋转须在 Integration/部署时以真实数据库与 Release identity 核对，未在本切片声称完成。
 
 ## 9. 完成定义
 
