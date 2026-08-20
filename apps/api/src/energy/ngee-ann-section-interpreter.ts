@@ -194,6 +194,7 @@ export const buildNgeeAnnSectionPrompt = (
     "The epistemicStatus applies to the whole title and text. If any sentence proposes a cause, possibility or action that is not directly observed, use inferred or speculative rather than observed.",
     "Evidence refs anchor the observation beneath an Insight; they do not claim that a hypothesis has been proven.",
     "A speculative Insight may suggest a relationship, counterexample, question, or low-risk line of inquiry without inventing measurements.",
+    "When comparing day types, follow the direction of the supplied Project-scope profiles. Do not call one day type higher or lower than another unless the profile values support that direction.",
     "Each candidate must cite one or more exact Evidence IDs from the Pack. Aim for Summary under 480 characters, titles under 96, text under 480, and deep-dive questions under 220; preserve a useful explanation when it needs a little more room.",
     "Return status=empty only when the Pack supports no useful Summary or angle. One malformed candidate must not prevent other candidates from being useful.",
     `Required sectionId: ${JSON.stringify(pack.sectionId)}.`,
@@ -438,11 +439,13 @@ const narrativeFactsSupported = (
 ): boolean =>
   numbersSupported(text, packText)
   && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => packText.includes(token))
-  && dayTypeRankingsSupported(text, dayTypeProfileMeans);
+  && dayTypeRelationsSupported(text, dayTypeProfileMeans);
 
 type NgeeAnnDayType = "weekday" | "weekend" | "public_holiday";
 
 const DAY_TYPE_RANKING = /\b(weekday|weekend|public\s+holiday)(?:\s+(?:usage|profile))?\s+(?:is|was|remains?)\s+(?:the\s+)?(highest|lowest)\b/giu;
+const DAY_TYPE_DIRECT_COMPARISON = /\b(weekday|weekend|public\s+holiday)(?:\s+(?:usage|profile|demand|load))?\s+(?:(?:is|was|remains?|sits?|runs?|appears?|stays?)\s+)?(?:(?:materially|slightly|clearly|well)\s+)?(above|below|higher\s+than|lower\s+than)\s+(?:the\s+)?(weekday|weekend|public\s+holiday)\b/giu;
+const DAY_TYPE_CONTRAST_COMPARISON = /\b(weekday|weekend|public\s+holiday)\b(?:(?![.!?]).){0,160}\b(?:and|while|whereas|with)\s+(?:the\s+)?(weekday|weekend|public\s+holiday)(?:\s+(?:usage|profile|demand|load))?\s+(?:(?:shows?|has|is|was|remains?)\s+)?(?:a\s+)?similar\s+but\s+(?:(?:materially|slightly|clearly)\s+)?(higher|lower)\b/giu;
 
 const dayTypeProfileMeansForPack = (
   pack: NgeeAnnSectionPack,
@@ -458,7 +461,7 @@ const dayTypeProfileMeansForPack = (
   }) ?? []);
 };
 
-const dayTypeRankingsSupported = (
+const dayTypeRelationsSupported = (
   text: string,
   means: ReadonlyMap<NgeeAnnDayType, number>,
 ): boolean => [...text.matchAll(DAY_TYPE_RANKING)].every((match) => {
@@ -470,7 +473,37 @@ const dayTypeRankingsSupported = (
   return direction === "highest"
     ? value >= Math.max(...values) - Number.EPSILON
     : value <= Math.min(...values) + Number.EPSILON;
-});
+}) && [...text.matchAll(DAY_TYPE_DIRECT_COMPARISON)].every((match) =>
+  dayTypeComparisonSupported(means, match[1], match[3], match[2]))
+  && [...text.matchAll(DAY_TYPE_CONTRAST_COMPARISON)].every((match) =>
+    dayTypeComparisonSupported(means, match[2], match[1], match[3]));
+
+const dayTypeComparisonSupported = (
+  means: ReadonlyMap<NgeeAnnDayType, number>,
+  leftLabel: string | undefined,
+  rightLabel: string | undefined,
+  directionLabel: string | undefined,
+): boolean => {
+  const leftDayType = normalizeDayType(leftLabel);
+  const rightDayType = normalizeDayType(rightLabel);
+  if (!leftDayType || !rightDayType || leftDayType === rightDayType) return false;
+  const left = means.get(leftDayType);
+  const right = means.get(rightDayType);
+  if (left === undefined || right === undefined) return false;
+  const direction = directionLabel?.toLowerCase();
+  return direction?.startsWith("above") === true || direction?.startsWith("higher") === true
+    ? left > right + Number.EPSILON
+    : direction?.startsWith("below") === true || direction?.startsWith("lower") === true
+      ? left < right - Number.EPSILON
+      : false;
+};
+
+const normalizeDayType = (value: string | undefined): NgeeAnnDayType | undefined => {
+  const normalized = value?.toLowerCase().replaceAll(" ", "_");
+  return normalized === "weekday" || normalized === "weekend" || normalized === "public_holiday"
+    ? normalized
+    : undefined;
+};
 
 const numericTokenSupported = (token: string, packText: string): boolean => {
   const normalized = token.replaceAll(",", "");
@@ -788,8 +821,8 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  const expectedPromptRevision = "energyiq-project-section-discovery-v5";
-  if (identity.identityContractRevision !== "ngee-ann-section-v11"
+  const expectedPromptRevision = "energyiq-project-section-discovery-v6";
+  if (identity.identityContractRevision !== "ngee-ann-section-v12"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

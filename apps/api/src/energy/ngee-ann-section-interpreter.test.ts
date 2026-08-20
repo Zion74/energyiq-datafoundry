@@ -193,6 +193,57 @@ describe("materializeNgeeAnnSectionResult", () => {
     expect(result.publication.rejectedCandidateIds).toContain("candidate:false-ranking");
   });
 
+  it("rejects a reversed day-type comparison without discarding a supported sibling", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    pack.facts.timeBehaviour = {
+      metricId: "energy.total_usage_kwh@1",
+      grain: "hour",
+      unit: "kWh",
+      timezone: "Asia/Singapore",
+      queryId: "time_bucket_grid_v1",
+      scopes: [],
+      dayProfiles: [
+        dayProfile("weekday", 17),
+        dayProfile("weekend", 5),
+        dayProfile("public_holiday", 9.4),
+      ],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Weekday usage is highest and the day-type profiles are available for review.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:reversed-comparison",
+          title: "Weekend and holiday profiles remain distinct",
+          text: "Weekend usage sits around 5.3 kWh, with public holiday demand similar but slightly lower.",
+          epistemicStatus: "inferred",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:supported-comparison",
+          title: "Public holiday usage remains above weekend usage",
+          text: "The supplied day profiles place public holiday usage above weekend usage.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:day-type-comparison",
+    });
+
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:supported-comparison"]);
+    expect(result.publication.rejectedCandidateIds).toContain("candidate:reversed-comparison");
+  });
+
   it("keeps a clearly labelled speculative angle when its observation Evidence is current", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
@@ -433,6 +484,7 @@ describe("buildNgeeAnnSectionPrompt", () => {
     expect(prompt).toContain('"timezone":"Asia/Singapore"');
     expect(prompt).toContain('"displayLabel":"20 May 2026–16 Jun 2026"');
     expect(prompt).toContain('"peakAtLocal":"2026-06-05 14:15"');
+    expect(prompt).toContain("Do not call one day type higher or lower than another unless the profile values support that direction.");
     expect(prompt).toContain('"fromLocalDate":"2026-04-22"');
     expect(prompt).toContain('"toExclusiveLocalDate":"2026-05-20"');
     expect(prompt).not.toContain("2026-06-05T06:15:00.000Z");

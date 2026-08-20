@@ -463,6 +463,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnSectionIdentity("snapshot-ngee-prior-envelope", "trend-and-demand"),
         identityContractRevision: "ngee-ann-section-v8",
         validatorRevision: "energyiq-project-section-acceptance-v6",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v5",
       };
       const priorEnvelopeArtifact = completeSectionV4(
         store,
@@ -476,6 +477,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnSectionIdentity("snapshot-ngee-prior-summary-recovery", "circuit-concentration"),
         identityContractRevision: "ngee-ann-section-v9",
         validatorRevision: "energyiq-project-section-acceptance-v7",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v5",
       };
       const priorSummaryRecoveryArtifact = completeSectionV4(
         store,
@@ -489,6 +491,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...ngeeAnnSectionIdentity("snapshot-ngee-prior-unit-semantics", "time-behaviour"),
         identityContractRevision: "ngee-ann-section-v10",
         validatorRevision: "energyiq-project-section-acceptance-v8",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v5",
       };
       const priorUnitSemanticsArtifact = completeSectionV4(
         store,
@@ -497,6 +500,20 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       );
       expect(store.energyIq.overviewAiArtifacts.get(priorUnitSemanticsIdentity))
         .toMatchObject({ id: priorUnitSemanticsArtifact.id, status: "available" });
+
+      const priorDayTypeGuardIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-prior-day-type-guard", "time-behaviour"),
+        identityContractRevision: "ngee-ann-section-v11",
+        validatorRevision: "energyiq-project-section-acceptance-v9",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v5",
+      };
+      const priorDayTypeGuardArtifact = completeSectionV4(
+        store,
+        priorDayTypeGuardIdentity,
+        ngeeAnnSectionResult(priorDayTypeGuardIdentity, "available"),
+      );
+      expect(store.energyIq.overviewAiArtifacts.get(priorDayTypeGuardIdentity))
+        .toMatchObject({ id: priorDayTypeGuardArtifact.id, status: "available" });
 
       const readableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-readable", "time-behaviour");
       const readableBase = ngeeAnnSectionResult(readableIdentity, "available");
@@ -1102,13 +1119,13 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v11",
+  identityContractRevision: "ngee-ann-section-v12",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v9",
+  validatorRevision: "energyiq-project-section-acceptance-v10",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
-  investigatorPromptRevision: "energyiq-project-section-discovery-v5",
+  investigatorPromptRevision: "energyiq-project-section-discovery-v6",
   capabilityRevision: "pack-only-v1",
   publicationRevision: "energyiq-project-section-publication-v1",
 });
