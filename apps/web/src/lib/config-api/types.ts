@@ -1890,7 +1890,11 @@ export type EnergyProjectReportWindowAnalysisDto = {
   };
   status: "ready";
   analysis: {
+    summary?: EnergyProjectAnalysisPayloadDto["summary"];
+    offHours?: EnergyProjectAnalysisPayloadDto["offHours"];
     dailyTotals?: NonNullable<EnergyProjectAnalysisPayloadDto["dailyTotals"]>;
+    timeBehaviour?: NonNullable<EnergyProjectAnalysisPayloadDto["timeBehaviour"]>;
+    componentHourlyProfiles?: NonNullable<EnergyProjectAnalysisPayloadDto["componentHourlyProfiles"]>;
   };
 };
 

@@ -881,6 +881,8 @@ function snapshotForReportWindow(
   // overlays from the primary Report Edition must not be relabelled as window Evidence.
   const {
     dailyTotals: _primaryDailyTotals,
+    timeBehaviour: _primaryTimeBehaviour,
+    componentHourlyProfiles: _primaryComponentHourlyProfiles,
     dailyUsageAnomalies: _primaryDailyUsageAnomalies,
     componentCategoryBreakdown: _primaryComponentCategoryBreakdown,
     ...analysis
@@ -896,7 +898,19 @@ function snapshotForReportWindow(
     },
     analysis: {
       ...analysis,
+      summary: window?.analysis.summary ?? snapshot.analysis.summary,
+      offHours: window?.analysis.offHours ?? {
+        status: "unavailable",
+        reason: {
+          code: "OPERATING_FACTS_UNAVAILABLE",
+          message: "The selected report window does not include operating-policy facts.",
+        },
+      },
       ...(window?.analysis.dailyTotals ? { dailyTotals: window.analysis.dailyTotals } : {}),
+      ...(window?.analysis.timeBehaviour ? { timeBehaviour: window.analysis.timeBehaviour } : {}),
+      ...(window?.analysis.componentHourlyProfiles
+        ? { componentHourlyProfiles: window.analysis.componentHourlyProfiles }
+        : {}),
     },
   };
 }
@@ -1018,8 +1032,8 @@ export function buildNgeeAnnOverviewViewModel(
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(recentOperationsSnapshot, unavailable, hint.trendGrain),
     dailyAnomalies,
-    dayProfile: buildDayProfile(snapshot, unavailable),
-    usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
+    dayProfile: buildDayProfile(recentOperationsSnapshot, unavailable),
+    usageHeatmap: buildUsageHeatmap(recentOperationsSnapshot, unavailable),
     levelComparison,
     componentCategoryBreakdown,
     energyComposition,

@@ -348,6 +348,22 @@ describe("Ngee Ann Overview ViewModel", () => {
     for (const scope of recentDailyTotals.scopes) {
       scope.rows = scope.rows.slice(-3);
     }
+    const recentTimeBehaviour = structuredClone(snapshot.analysis.timeBehaviour!);
+    for (const scope of recentTimeBehaviour.scopes) {
+      scope.cells = scope.cells.slice(-72);
+    }
+    const recentProjectWeekday = recentTimeBehaviour.dayProfiles.find((profile) => (
+      profile.scopeId === snapshot.context.scopeId
+      && profile.dayType === "weekday"
+      && profile.status === "available"
+    ));
+    if (!recentProjectWeekday || recentProjectWeekday.status !== "available") {
+      throw new Error("Expected the recent Project weekday profile.");
+    }
+    recentProjectWeekday.values[0]!.usageKwh = 99;
+    const recentUsageKwh = recentDailyTotals.scopes[0]!.rows
+      .reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
+    const recentStandbyKwh = 80;
     snapshot.reportWindowAnalyses = [{
       windowId: "recent-operations",
       period: {
@@ -355,7 +371,20 @@ describe("Ngee Ann Overview ViewModel", () => {
         endExclusive: "2026-06-16T16:00:00.000Z",
       },
       status: "ready",
-      analysis: { dailyTotals: recentDailyTotals },
+      analysis: Object.assign({ dailyTotals: recentDailyTotals }, {
+        summary: { ...snapshot.analysis.summary, usageKwh: recentUsageKwh },
+        offHours: {
+          status: "available" as const,
+          operatingKwh: recentUsageKwh - recentStandbyKwh,
+          standbyKwh: recentStandbyKwh,
+          usageKwh: recentStandbyKwh,
+          sharePct: recentStandbyKwh / recentUsageKwh * 100,
+          timezone: snapshot.context.timezone,
+          businessCalendarVersion: snapshot.context.businessCalendarVersion,
+        },
+        timeBehaviour: recentTimeBehaviour,
+        componentHourlyProfiles: structuredClone(snapshot.analysis.componentHourlyProfiles!),
+      }),
     }];
 
     const view = buildNgeeAnnOverviewViewModel(snapshot);
@@ -372,6 +401,27 @@ describe("Ngee Ann Overview ViewModel", () => {
       status: "unavailable",
       reason: expect.stringMatching(/does not include the authoritative daily anomaly contract/i),
     });
+    expect(view.dayProfile).toMatchObject({
+      status: "available",
+      evidence: {
+        period: "[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+      },
+    });
+    expect(view.dayProfile.profiles.find((profile) => (
+      profile.scopeId === snapshot.context.scopeId && profile.dayType === "weekday"
+    ))?.values[0]).toMatchObject({ acceptedUsageKwh: 99 });
+    expect(view.usageHeatmap).toMatchObject({
+      status: "available",
+      dates: [
+        { id: "2026-06-14" },
+        { id: "2026-06-15" },
+        { id: "2026-06-16" },
+      ],
+      evidence: {
+        period: "[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+      },
+    });
+    expect(view.usageHeatmap.scopes[0]?.cells).toHaveLength(72);
     expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
     expect(view.context.periodRange).toBe("10 Jun 2026 - 16 Jun 2026");
   });

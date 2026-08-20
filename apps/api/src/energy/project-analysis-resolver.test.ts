@@ -310,8 +310,31 @@ describe("ProjectAnalysisResolver", () => {
           }),
         }),
       ]));
+      const recentOperations = currentProjectResult.snapshot.reportWindowAnalyses
+        ?.find((window) => window.windowId === "recent-operations");
+      expect(recentOperations?.analysis.summary).toEqual(
+        expect.objectContaining({ usageKwh: expect.any(Number) }),
+      );
+      expect(recentOperations?.analysis.offHours).toEqual(
+        expect.objectContaining({ status: "available" }),
+      );
+      expect(recentOperations?.analysis.timeBehaviour).toEqual(expect.objectContaining({
+        queryId: "time_bucket_grid_v1",
+        scopes: expect.arrayContaining([
+          expect.objectContaining({
+            scopeId: "project",
+            cells: expect.arrayContaining([
+              expect.objectContaining({ localDate: "2026-05-20", localHour: 0 }),
+              expect.objectContaining({ localDate: "2026-06-16", localHour: 23 }),
+            ]),
+          }),
+        ]),
+        dayProfiles: expect.arrayContaining([
+          expect.objectContaining({ scopeId: "project", dayType: "weekday" }),
+        ]),
+      }));
       expect(JSON.stringify(currentProjectResult.snapshot.reportWindowAnalyses).length)
-        .toBeLessThan(200_000);
+        .toBeLessThan(600_000);
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(currentProjectResult.snapshot.projectRelease.ruleRevisionIds)
         .toContain("comparison.daily_usage_above_baseline@1");

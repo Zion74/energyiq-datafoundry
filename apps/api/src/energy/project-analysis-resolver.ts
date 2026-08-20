@@ -164,7 +164,11 @@ export type ProjectReportWindowAnalysis = {
   };
   status: "ready";
   analysis: {
+    summary: ProjectAnalysisPayload["summary"];
+    offHours: ProjectAnalysisPayload["offHours"];
     dailyTotals?: NonNullable<ProjectAnalysisPayload["dailyTotals"]>;
+    timeBehaviour?: NonNullable<ProjectAnalysisPayload["timeBehaviour"]>;
+    componentHourlyProfiles?: NonNullable<ProjectAnalysisPayload["componentHourlyProfiles"]>;
   };
 };
 
@@ -748,9 +752,7 @@ const materializeReportWindowAnalyses = async (input: {
         windowId: window.windowId,
         period,
         status: "ready",
-        analysis: input.primaryAnalysis.dailyTotals
-          ? { dailyTotals: input.primaryAnalysis.dailyTotals }
-          : {},
+        analysis: reportWindowAnalysisProjection(input.primaryAnalysis, false),
       };
     }
     const context: EnergyQueryContext = {
@@ -786,9 +788,22 @@ const materializeReportWindowAnalyses = async (input: {
       windowId: window.windowId,
       period,
       status: "ready",
-      analysis: analysis.dailyTotals ? { dailyTotals: analysis.dailyTotals } : {},
+      analysis: reportWindowAnalysisProjection(analysis, true),
     };
   }));
+
+const reportWindowAnalysisProjection = (
+  analysis: ProjectAnalysisPayload,
+  includeHourly: boolean,
+): ProjectReportWindowAnalysis["analysis"] => ({
+  summary: analysis.summary,
+  offHours: analysis.offHours,
+  ...(analysis.dailyTotals ? { dailyTotals: analysis.dailyTotals } : {}),
+  ...(includeHourly && analysis.timeBehaviour ? { timeBehaviour: analysis.timeBehaviour } : {}),
+  ...(includeHourly && analysis.componentHourlyProfiles
+    ? { componentHourlyProfiles: analysis.componentHourlyProfiles }
+    : {}),
+});
 
 const resolveSnapshotReportTimePolicy = (input: {
   metadataStore: MetadataStore;
