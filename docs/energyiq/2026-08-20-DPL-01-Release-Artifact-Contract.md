@@ -63,6 +63,8 @@ Packager 不维护一份会随代码漂移的完整手写文件白名单，而�
    同时收集 production `.next` 内容与 `public/`；
 5. 排除 Next build cache、diagnostics、trace 和 generated types；
 6. 写入 `.release-sha` 与 `RELEASE_SHA`，二者必须和 Manifest `gitSha` 一致。
+7. 收入经过测试的 Artifact verifier/packager 与 deploy entry，使新的 `current` 仍能执行下一次
+   prebuilt release；不依赖服务器上漂移的手工脚本副本。
 
 `required-server-files.json` 中 Build Host 的绝对 `appDir`、tracing root 和 Turbopack root 会改写为
 Release 相对路径；其他成品一旦仍包含 Build Host checkout 或 Build Host user profile 的绝对路径，

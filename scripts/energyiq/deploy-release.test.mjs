@@ -1,262 +1,357 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, stat, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  lstat,
+  mkdtemp,
+  mkdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
+import {
+  createReleaseArtifact,
+  extractVerifiedReleaseArtifact,
+  verifyReleaseArtifact,
+} from "./build-release-artifact.mjs";
 import { deployEnergyIqRelease } from "./deploy-release.mjs";
 
 const RELEASE_SHA = "1234567890abcdef1234567890abcdef12345678";
+const OTHER_SHA = "fedcba0987654321fedcba0987654321fedcba09";
 const PREVIOUS_SHA = "abcdef1234567890abcdef1234567890abcdef12";
+const NODE_VERSION = "v22.19.0";
+const BUILT_AT = "2026-08-20T00:00:00.000Z";
+const METADATA_SCHEMA_REVISION = "0038_energyiq_overview_definition_renderer";
 
-test("stages a real release and switches current only after forced build and smoke gates", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-"));
+const sha256 = (body) => createHash("sha256").update(body).digest("hex");
+
+const writeFixtureFile = async (root, relativePath, body) => {
+  const target = path.join(root, ...relativePath.split("/"));
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, body);
+};
+
+const createArtifactFixture = async (root) => {
+  const sourceDir = path.join(root, "source");
+  const outputDir = path.join(root, "incoming");
+  const requiredServerFiles = {
+    version: 1,
+    config: {
+      outputFileTracingRoot: sourceDir,
+      configFileName: "next.config.ts",
+    },
+    appDir: path.join(sourceDir, "apps", "web"),
+    relativeAppDir: path.join("apps", "web"),
+    files: [
+      ".next/routes-manifest.json",
+      ".next/server/pages-manifest.json",
+      ".next/BUILD_ID",
+      ".next/required-server-files.json",
+    ],
+  };
+  const packageLockBody = "{\n  \"lockfileVersion\": 3\n}\n";
+
+  await writeFixtureFile(sourceDir, "package.json", JSON.stringify({
+    name: "datafoundry",
+    private: true,
+    type: "module",
+    workspaces: ["apps/*", "packages/*"],
+    scripts: {
+      "start:api": "npm --prefix apps/api run start",
+      "start:web": "npm --prefix apps/web run start",
+    },
+  }, null, 2) + "\n");
+  await writeFixtureFile(sourceDir, "package-lock.json", packageLockBody);
+  await writeFixtureFile(sourceDir, "scripts/energyiq/build-release-artifact.mjs", "export const buildTool = true;\n");
+  await writeFixtureFile(sourceDir, "scripts/energyiq/deploy-release.mjs", "export const deployTool = true;\n");
+  await writeFixtureFile(sourceDir, "apps/api/package.json", JSON.stringify({
+    name: "@datafoundry/api",
+    private: true,
+    type: "module",
+    main: "dist/index.js",
+    scripts: { start: "node dist/index.js" },
+    dependencies: { "@datafoundry/contracts": "0.2.0" },
+  }, null, 2) + "\n");
+  await writeFixtureFile(sourceDir, "apps/api/dist/index.js", "console.log('api fixture');\n");
+  await writeFixtureFile(sourceDir, "apps/web/package.json", JSON.stringify({
+    name: "@datafoundry/web",
+    private: true,
+    scripts: { start: "next start" },
+    dependencies: { "@datafoundry/contracts": "0.2.0", next: "15.5.19" },
+  }, null, 2) + "\n");
+  await writeFixtureFile(sourceDir, "apps/web/next.config.ts", "export default { compress: false };\n");
+  await writeFixtureFile(sourceDir, "apps/web/.next/BUILD_ID", `${RELEASE_SHA}\n`);
+  await writeFixtureFile(
+    sourceDir,
+    "apps/web/.next/required-server-files.json",
+    JSON.stringify(requiredServerFiles, null, 2) + "\n",
+  );
+  await writeFixtureFile(sourceDir, "apps/web/.next/routes-manifest.json", "{}\n");
+  await writeFixtureFile(sourceDir, "apps/web/.next/server/pages-manifest.json", "{}\n");
+  await writeFixtureFile(sourceDir, "apps/web/.next/static/chunks/app.js", "console.log('web fixture');\n");
+  await writeFixtureFile(sourceDir, "apps/web/public/logo.svg", "<svg/>\n");
+  await writeFixtureFile(sourceDir, "packages/contracts/package.json", JSON.stringify({
+    name: "@datafoundry/contracts",
+    private: true,
+    type: "module",
+    main: "dist/index.js",
+  }, null, 2) + "\n");
+  await writeFixtureFile(sourceDir, "packages/contracts/dist/index.js", "export const contract = true;\n");
+
+  return createReleaseArtifact({
+    sourceDir,
+    outputDir,
+    gitSha: RELEASE_SHA,
+    builtAt: BUILT_AT,
+    nodeVersion: NODE_VERSION,
+    metadataSchemaRevision: METADATA_SCHEMA_REVISION,
+  });
+};
+
+const createDeployFixture = async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), "energyiq-prebuilt-deploy-"));
   const appRoot = path.join(root, "app");
   const releasesRoot = path.join(appRoot, "releases");
   const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
   const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
-
   await mkdir(previousRelease, { recursive: true });
   await writeFile(path.join(previousRelease, "previous.txt"), "previous-release", "utf8");
   await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await writeFile(path.join(sourceDir, "new.txt"), "new-release", "utf8");
   await mkdir(path.dirname(backupPath), { recursive: true });
   await writeFile(backupPath, "independent-backup", "utf8");
+  const artifact = await createArtifactFixture(root);
+  t.after(() => rm(root, { recursive: true, force: true }));
 
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
-  });
+  return {
+    root,
+    appRoot,
+    releasesRoot,
+    previousRelease,
+    backupPath,
+    artifact,
+    input: {
+      appRoot,
+      artifactPath: artifact.artifactPath,
+      manifestPath: artifact.manifestPath,
+      checksumPath: artifact.checksumPath,
+      releaseSha: RELEASE_SHA,
+      metadataBackupPath: backupPath,
+      dependencyInstall: "transitional-npm-ci",
+      apiService: "energyiq-api",
+      webService: "energyiq-web",
+      smokeUrls: ["http://api/healthz", "http://web/login", "http://web/overview"],
+    },
+  };
+};
 
+const commandRecorder = (commands, onRun) => async (command, args, options = {}) => {
+  commands.push({ command, args, cwd: options.cwd });
+  await onRun?.(command, args, options);
+  return { stdout: "", stderr: "" };
+};
+
+const updateArtifactSidecars = async (artifact, archive) => {
+  const manifest = JSON.parse(await readFile(artifact.manifestPath, "utf8"));
+  manifest.artifactSha256 = sha256(archive);
+  await writeFile(artifact.artifactPath, archive);
+  await writeFile(artifact.manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+  await writeFile(
+    artifact.checksumPath,
+    `${manifest.artifactSha256}  ${path.basename(artifact.artifactPath)}\n`,
+  );
+};
+
+const assertCurrentIs = async (fixture, expected) => {
+  assert.equal(await realpath(path.join(fixture.appRoot, "current")), await realpath(expected));
+};
+
+test("verifies and extracts a prebuilt release, installs dependencies explicitly, and never builds", async (t) => {
+  const fixture = await createDeployFixture(t);
   const commands = [];
   const smokeChecks = [];
-  await deployEnergyIqRelease({
-    appRoot,
-    sourceDir,
-    releaseSha: RELEASE_SHA,
-    metadataBackupPath: backupPath,
-    apiService: "energyiq-api",
-    webService: "energyiq-web",
-    smokeUrls: [
-      "http://127.0.0.1:8787/healthz",
-      "http://127.0.0.1:3000/login",
-      "http://127.0.0.1:3000/energyiq/overview?projectId=preschool-demo",
-    ],
-  }, {
-    run: async (command, args, options = {}) => {
-      commands.push({ command, args, cwd: options.cwd });
-      if (command === "git" && args.at(-1) === "HEAD") return { stdout: `${RELEASE_SHA}\n` };
-      return { stdout: "" };
+  const events = [];
+
+  const result = await deployEnergyIqRelease(fixture.input, {
+    nodeVersion: NODE_VERSION,
+    verifyArtifact: async (input) => {
+      events.push("verify");
+      return verifyReleaseArtifact(input);
     },
+    extractArtifact: async (verified, outputDir) => {
+      events.push("extract");
+      return extractVerifiedReleaseArtifact(verified, outputDir);
+    },
+    run: commandRecorder(commands),
     checkHttp: async (url) => {
+      events.push("smoke");
       smokeChecks.push(url);
     },
   });
 
-  const finalRelease = path.join(releasesRoot, RELEASE_SHA);
+  const finalRelease = path.join(fixture.releasesRoot, RELEASE_SHA);
   assert.equal((await stat(finalRelease)).isDirectory(), true);
   assert.equal((await stat(finalRelease)).isSymbolicLink(), false);
-  assert.equal(await readFile(path.join(finalRelease, "new.txt"), "utf8"), "new-release");
-  assert.equal(await readFile(path.join(previousRelease, "previous.txt"), "utf8"), "previous-release");
   assert.equal(await readFile(path.join(finalRelease, ".release-sha"), "utf8"), `${RELEASE_SHA}\n`);
   assert.equal(await readFile(path.join(finalRelease, "RELEASE_SHA"), "utf8"), `${RELEASE_SHA}\n`);
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(finalRelease));
+  assert.equal((await stat(path.join(finalRelease, "scripts", "energyiq", "deploy-release.mjs"))).isFile(), true);
+  assert.equal(JSON.parse(await readFile(path.join(finalRelease, "release-manifest.json"), "utf8")).gitSha, RELEASE_SHA);
+  assert.equal(await readFile(path.join(fixture.previousRelease, "previous.txt"), "utf8"), "previous-release");
+  await assertCurrentIs(fixture, finalRelease);
+  assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
 
-  assert.deepEqual(
-    commands.filter(({ command }) => command === "npm").map(({ args }) => args),
-    [
-      ["ci"],
-      ["run", "build", "--", "--force"],
-      ["run", "build:web"],
-    ],
-  );
-  assert.deepEqual(
-    commands.filter(({ command }) => command === "systemctl").map(({ args }) => args),
-    [["restart", "energyiq-api", "energyiq-web"]],
-  );
-  assert.deepEqual(smokeChecks, [
-    "http://127.0.0.1:8787/healthz",
-    "http://127.0.0.1:3000/login",
-    "http://127.0.0.1:3000/energyiq/overview?projectId=preschool-demo",
-    "http://127.0.0.1:8787/healthz",
-    "http://127.0.0.1:3000/login",
-    "http://127.0.0.1:3000/energyiq/overview?projectId=preschool-demo",
+  assert.deepEqual(commands, [
+    {
+      command: "npm",
+      args: ["ci", "--omit=dev", "--ignore-scripts"],
+      cwd: path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`),
+    },
+    {
+      command: "systemctl",
+      args: ["restart", "energyiq-api", "energyiq-web"],
+      cwd: undefined,
+    },
   ]);
+  assert.equal(commands.some(({ args }) => args.includes("build") || args.includes("build:web")), false);
+  assert.deepEqual(events.slice(0, 5), ["verify", "smoke", "smoke", "smoke", "extract"]);
+  assert.deepEqual(smokeChecks, [...fixture.input.smokeUrls, ...fixture.input.smokeUrls]);
+  assert.equal(result.dependencyInstall, "transitional-npm-ci");
+  assert.equal(result.releaseHostNodeVersion, NODE_VERSION);
 });
 
-test("waits for restarted services to become ready before accepting or rolling back a release", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-readiness-"));
-  const appRoot = path.join(root, "app");
-  const releasesRoot = path.join(appRoot, "releases");
-  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
-  const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
-  const smokeUrls = ["http://api/healthz", "http://web/login", "http://web/overview"];
+for (const failure of [
+  {
+    name: "checksum mismatch",
+    expected: /checksum/i,
+    mutate: async (fixture) => writeFile(fixture.artifact.checksumPath, `${"0".repeat(64)}  bad.tar\n`),
+  },
+  {
+    name: "malformed manifest",
+    expected: /manifest.*json/i,
+    mutate: async (fixture) => writeFile(fixture.artifact.manifestPath, "{not-json\n"),
+  },
+  {
+    name: "Release Host Node mismatch",
+    expected: /nodeVersion mismatch/i,
+    nodeVersion: "v22.20.0",
+  },
+  {
+    name: "expected Git SHA mismatch",
+    expected: /gitSha mismatch/i,
+    releaseSha: OTHER_SHA,
+  },
+]) {
+  test(`${failure.name} does not extract, switch current, restart, or install`, async (t) => {
+    const fixture = await createDeployFixture(t);
+    await failure.mutate?.(fixture);
+    const commands = [];
+    const smokeChecks = [];
+    const input = { ...fixture.input, releaseSha: failure.releaseSha ?? RELEASE_SHA };
 
-  await mkdir(previousRelease, { recursive: true });
-  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, "independent-backup", "utf8");
+    await assert.rejects(
+      deployEnergyIqRelease(input, {
+        nodeVersion: failure.nodeVersion ?? NODE_VERSION,
+        run: commandRecorder(commands),
+        checkHttp: async (url) => { smokeChecks.push(url); },
+      }),
+      failure.expected,
+    );
 
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
+    await assertCurrentIs(fixture, fixture.previousRelease);
+    assert.equal(await lstat(path.join(fixture.releasesRoot, `.staging-${input.releaseSha}`)).then(() => true, () => false), false);
+    assert.equal(await lstat(path.join(fixture.releasesRoot, input.releaseSha)).then(() => true, () => false), false);
+    assert.equal(commands.length, 0);
+    assert.equal(smokeChecks.length, 0);
+    assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
   });
+}
 
-  let apiChecks = 0;
-  const sleeps = [];
-  await deployEnergyIqRelease({
-    appRoot,
-    sourceDir,
-    releaseSha: RELEASE_SHA,
-    metadataBackupPath: backupPath,
-    apiService: "energyiq-api",
-    webService: "energyiq-web",
-    smokeUrls,
-  }, {
-    run: async (command, args) =>
-      command === "git" && args.at(-1) === "HEAD" ? { stdout: `${RELEASE_SHA}\n` } : { stdout: "" },
-    checkHttp: async (url) => {
-      if (url === smokeUrls[0] && ++apiChecks > 1 && apiChecks < 4) {
-        throw new Error("ECONNREFUSED while API starts");
-      }
+for (const corruption of [
+  {
+    name: "malformed truncated tar",
+    expected: /terminator|truncated/i,
+    mutate: async (artifact) => {
+      const archive = await readFile(artifact.artifactPath);
+      await updateArtifactSidecars(artifact, archive.subarray(0, archive.length - 700));
     },
-    sleep: async (delayMs) => {
-      sleeps.push(delayMs);
+  },
+  {
+    name: "hidden trailing tar payload",
+    expected: /trailing|terminator/i,
+    mutate: async (artifact) => {
+      const archive = Buffer.concat([await readFile(artifact.artifactPath), Buffer.from("hidden payload")]);
+      await updateArtifactSidecars(artifact, archive);
     },
+  },
+  {
+    name: "symlink tar entry",
+    expected: /regular file|entry type/i,
+    mutate: async (artifact) => {
+      const archive = await readFile(artifact.artifactPath);
+      archive[156] = "2".charCodeAt(0);
+      archive.fill(0x20, 148, 156);
+      const headerChecksum = archive.subarray(0, 512).reduce((sum, value) => sum + value, 0);
+      Buffer.from(headerChecksum.toString(8).padStart(6, "0") + "\0 ").copy(archive, 148);
+      await updateArtifactSidecars(artifact, archive);
+    },
+  },
+]) {
+  test(`rejects ${corruption.name} before extraction or current switch`, async (t) => {
+    const fixture = await createDeployFixture(t);
+    await corruption.mutate(fixture.artifact);
+    const commands = [];
+
+    await assert.rejects(
+      deployEnergyIqRelease(fixture.input, {
+        nodeVersion: NODE_VERSION,
+        run: commandRecorder(commands),
+        checkHttp: async () => {},
+      }),
+      corruption.expected,
+    );
+
+    await assertCurrentIs(fixture, fixture.previousRelease);
+    assert.equal(await lstat(path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`)).then(() => true, () => false), false);
+    assert.equal(commands.length, 0);
   });
+}
 
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(path.join(releasesRoot, RELEASE_SHA)));
-  assert.deepEqual(sleeps, [1_000, 1_000]);
-});
-
-test("refuses to switch current when a build changes the release identity markers", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-identity-"));
-  const appRoot = path.join(root, "app");
-  const releasesRoot = path.join(appRoot, "releases");
-  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
-  const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
-
-  await mkdir(previousRelease, { recursive: true });
-  await writeFile(path.join(previousRelease, "previous.txt"), "previous-release", "utf8");
-  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, "independent-backup", "utf8");
-
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
-  });
-
+test("pre-switch smoke failure leaves current and release directories untouched", async (t) => {
+  const fixture = await createDeployFixture(t);
+  const commands = [];
   await assert.rejects(
-    deployEnergyIqRelease({
-      appRoot,
-      sourceDir,
-      releaseSha: RELEASE_SHA,
-      metadataBackupPath: backupPath,
-      apiService: "energyiq-api",
-      webService: "energyiq-web",
-      smokeUrls: ["http://api/healthz", "http://web/login", "http://web/overview"],
-    }, {
-      run: async (command, args, options = {}) => {
-        if (command === "git" && args.at(-1) === "HEAD") return { stdout: `${RELEASE_SHA}\n` };
-        if (command === "npm" && args[1] === "build:web") {
-          await writeFile(path.join(options.cwd, "RELEASE_SHA"), `${PREVIOUS_SHA}\n`, "utf8");
-        }
-        return { stdout: "" };
-      },
-      checkHttp: async () => {},
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      run: commandRecorder(commands),
+      checkHttp: async () => { throw new Error("pre-switch smoke failed"); },
+      smokeAttempts: 1,
     }),
-    /release identity/i,
+    /pre-switch smoke failed/,
   );
 
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(previousRelease));
-  assert.equal(await readFile(path.join(previousRelease, "previous.txt"), "utf8"), "previous-release");
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  assert.equal(await lstat(path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`)).then(() => true, () => false), false);
+  assert.equal(await lstat(path.join(fixture.releasesRoot, RELEASE_SHA)).then(() => true, () => false), false);
+  assert.equal(commands.length, 0);
 });
 
-test("rejects a metadata backup symlink that resolves inside the application root", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-backup-"));
-  const appRoot = path.join(root, "app");
-  const releasesRoot = path.join(appRoot, "releases");
-  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
-  const hiddenBackup = path.join(appRoot, "shared", "metadata-backup");
-  const externalBackup = path.join(root, "backups", "metadata-backup");
-
-  await mkdir(previousRelease, { recursive: true });
-  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await mkdir(hiddenBackup, { recursive: true });
-  await writeFile(path.join(hiddenBackup, "workbench.sqlite"), "not-independent", "utf8");
-  await mkdir(path.dirname(externalBackup), { recursive: true });
-  await symlink(hiddenBackup, externalBackup, process.platform === "win32" ? "junction" : "dir");
-
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
-  });
-
-  await assert.rejects(
-    deployEnergyIqRelease({
-      appRoot,
-      sourceDir,
-      releaseSha: RELEASE_SHA,
-      metadataBackupPath: externalBackup,
-      apiService: "energyiq-api",
-      webService: "energyiq-web",
-      smokeUrls: ["http://api/healthz", "http://web/login", "http://web/overview"],
-    }, {
-      run: async (command) => command === "git" ? { stdout: `${RELEASE_SHA}\n` } : { stdout: "" },
-      checkHttp: async () => {},
-    }),
-    /backup.*outside/i,
-  );
-
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(previousRelease));
-});
-
-test("rolls back and rechecks the previous release when post-switch smoke fails", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-rollback-"));
-  const appRoot = path.join(root, "app");
-  const releasesRoot = path.join(appRoot, "releases");
-  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
-  const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
-  const smokeUrls = ["http://api/healthz", "http://web/login", "http://web/overview"];
-
-  await mkdir(previousRelease, { recursive: true });
-  await writeFile(path.join(previousRelease, "previous.txt"), "previous-release", "utf8");
-  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, "independent-backup", "utf8");
-
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
-  });
-
+test("post-switch smoke failure rolls back to the previous physical release", async (t) => {
+  const fixture = await createDeployFixture(t);
+  const sharedStorage = path.join(fixture.appRoot, "shared", "storage", "customer.txt");
+  await mkdir(path.dirname(sharedStorage), { recursive: true });
+  await writeFile(sharedStorage, "shared-remains-unchanged", "utf8");
   const commands = [];
   const smokeChecks = [];
+
   await assert.rejects(
-    deployEnergyIqRelease({
-      appRoot,
-      sourceDir,
-      releaseSha: RELEASE_SHA,
-      metadataBackupPath: backupPath,
-      apiService: "energyiq-api",
-      webService: "energyiq-web",
-      smokeUrls,
-    }, {
-      run: async (command, args) => {
-        commands.push({ command, args });
-        return command === "git" && args.at(-1) === "HEAD" ? { stdout: `${RELEASE_SHA}\n` } : { stdout: "" };
-      },
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      run: commandRecorder(commands),
       checkHttp: async (url) => {
         smokeChecks.push(url);
         if (smokeChecks.length === 4) throw new Error("post-switch smoke failed");
@@ -266,7 +361,9 @@ test("rolls back and rechecks the previous release when post-switch smoke fails"
     /post-switch smoke failed/,
   );
 
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(previousRelease));
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  assert.equal((await stat(path.join(fixture.releasesRoot, RELEASE_SHA))).isDirectory(), true);
+  assert.equal(await readFile(sharedStorage, "utf8"), "shared-remains-unchanged");
   assert.deepEqual(
     commands.filter(({ command }) => command === "systemctl").map(({ args }) => args),
     [
@@ -274,51 +371,75 @@ test("rolls back and rechecks the previous release when post-switch smoke fails"
       ["restart", "energyiq-api", "energyiq-web"],
     ],
   );
-  assert.deepEqual(smokeChecks, [
-    ...smokeUrls,
-    smokeUrls[0],
-    ...smokeUrls,
-  ]);
+  assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
 });
 
-test("rejects a dirty source checkout even when HEAD matches the requested SHA", async (t) => {
-  const root = await mkdtemp(path.join(tmpdir(), "energyiq-release-dirty-"));
-  const appRoot = path.join(root, "app");
-  const releasesRoot = path.join(appRoot, "releases");
-  const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
-  const sourceDir = path.join(root, "source");
-  const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
-
-  await mkdir(previousRelease, { recursive: true });
-  await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
-  await mkdir(sourceDir, { recursive: true });
-  await writeFile(path.join(sourceDir, "package.json"), "{}\n", "utf8");
-  await mkdir(path.dirname(backupPath), { recursive: true });
-  await writeFile(backupPath, "independent-backup", "utf8");
-
-  t.after(async () => {
-    await import("node:fs/promises").then(({ rm }) => rm(root, { recursive: true, force: true }));
-  });
+test("rollback verification failure retains the deploy lock for manual intervention", async (t) => {
+  const fixture = await createDeployFixture(t);
+  let smokeChecks = 0;
 
   await assert.rejects(
-    deployEnergyIqRelease({
-      appRoot,
-      sourceDir,
-      releaseSha: RELEASE_SHA,
-      metadataBackupPath: backupPath,
-      apiService: "energyiq-api",
-      webService: "energyiq-web",
-      smokeUrls: ["http://api/healthz", "http://web/login", "http://web/overview"],
-    }, {
-      run: async (command, args) => {
-        if (command === "git" && args.at(-1) === "HEAD") return { stdout: `${RELEASE_SHA}\n` };
-        if (command === "git" && args.at(-1) === "--porcelain") return { stdout: " M apps/api/src/server.ts\n" };
-        return { stdout: "" };
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      run: async () => ({ stdout: "", stderr: "" }),
+      checkHttp: async () => {
+        smokeChecks += 1;
+        if (smokeChecks >= 4) throw new Error("new and rollback smoke failed");
       },
-      checkHttp: async () => {},
+      smokeAttempts: 1,
     }),
-    /source checkout.*clean/i,
+    /rollback verification also failed.*lock retained/i,
   );
 
-  assert.equal(await realpath(path.join(appRoot, "current")), await realpath(previousRelease));
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  const lockBody = JSON.parse(await readFile(path.join(fixture.appRoot, ".deploy.lock"), "utf8"));
+  assert.equal(lockBody.releaseSha, RELEASE_SHA);
+});
+
+test("an existing deploy lock fails closed before verification", async (t) => {
+  const fixture = await createDeployFixture(t);
+  const lockPath = path.join(fixture.appRoot, ".deploy.lock");
+  await writeFile(lockPath, "active deployment\n", "utf8");
+  let verifyCalls = 0;
+
+  await assert.rejects(
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      verifyArtifact: async () => { verifyCalls += 1; },
+      run: async () => { throw new Error("must not run"); },
+      checkHttp: async () => { throw new Error("must not smoke"); },
+    }),
+    /deploy lock already exists/i,
+  );
+
+  assert.equal(verifyCalls, 0);
+  assert.equal(await readFile(lockPath, "utf8"), "active deployment\n");
+  await assertCurrentIs(fixture, fixture.previousRelease);
+});
+
+test("dependency install must be explicit and cannot change package-lock", async (t) => {
+  const fixture = await createDeployFixture(t);
+  await assert.rejects(
+    deployEnergyIqRelease({ ...fixture.input, dependencyInstall: undefined }, {
+      nodeVersion: NODE_VERSION,
+      run: async () => { throw new Error("must not run"); },
+      checkHttp: async () => {},
+    }),
+    /explicitly.*transitional-npm-ci/i,
+  );
+
+  const commands = [];
+  await assert.rejects(
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      run: commandRecorder(commands, async (command, _args, options) => {
+        if (command === "npm") await writeFile(path.join(options.cwd, "package-lock.json"), "modified\n");
+      }),
+      checkHttp: async () => {},
+    }),
+    /dependency install modified.*package-lock/i,
+  );
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  assert.equal(commands.some(({ command }) => command === "systemctl"), false);
+  assert.equal((await stat(path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`))).isDirectory(), true);
 });

@@ -53,6 +53,8 @@ const createFixture = async () => {
     },
   }, null, 2) + "\n");
   await writeFixtureFile(root, "package-lock.json", "{\n  \"lockfileVersion\": 3\n}\n");
+  await writeFixtureFile(root, "scripts/energyiq/build-release-artifact.mjs", "export const buildTool = true;\n");
+  await writeFixtureFile(root, "scripts/energyiq/deploy-release.mjs", "export const deployTool = true;\n");
   await writeFixtureFile(root, "apps/api/package.json", JSON.stringify({
     name: "@datafoundry/api",
     private: true,
@@ -146,6 +148,8 @@ test("creates a deterministic prebuilt artifact and exact sidecar manifest", asy
   assert.ok(entryPaths.includes("apps/web/next.config.ts"));
   assert.ok(entryPaths.includes("apps/web/public/logo.svg"));
   assert.ok(entryPaths.includes("packages/contracts/dist/index.js"));
+  assert.ok(entryPaths.includes("scripts/energyiq/build-release-artifact.mjs"));
+  assert.ok(entryPaths.includes("scripts/energyiq/deploy-release.mjs"));
   assert.equal(entryPaths.some((entryPath) => entryPath.includes("packages/unused")), false);
 
   assert.equal(firstArtifact.includes(Buffer.from(sourceDir)), false, "build-host path leaked into artifact");

@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
-  cp,
   lstat,
   mkdir,
+  open,
   readFile,
   realpath,
   rename,
@@ -16,8 +17,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import {
+  extractVerifiedReleaseArtifact,
+  verifyReleaseArtifact,
+} from "./build-release-artifact.mjs";
+
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
-const BUILD_EXCLUDES = new Set([".git", ".next", "dist", "node_modules"]);
+const NODE_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:[-+].+)?$/;
+const TRANSITIONAL_DEPENDENCY_INSTALL = "transitional-npm-ci";
+const TRANSITIONAL_NPM_ARGS = ["ci", "--omit=dev", "--ignore-scripts"];
 
 const pathExists = async (value) => {
   try {
@@ -55,15 +63,29 @@ const defaultCheckHttp = async (url) => {
 };
 
 const requireAbsoluteDirectory = async (label, value) => {
-  if (!path.isAbsolute(value)) throw new Error(`${label} must be an absolute path.`);
+  if (typeof value !== "string" || !path.isAbsolute(value)) {
+    throw new Error(`${label} must be an absolute path.`);
+  }
   const details = await lstat(value);
   if (!details.isDirectory() && !details.isSymbolicLink()) {
     throw new Error(`${label} must be a directory.`);
   }
 };
 
+const requireAbsolutePhysicalFile = async (label, value) => {
+  if (typeof value !== "string" || !path.isAbsolute(value)) {
+    throw new Error(`${label} must be an absolute path.`);
+  }
+  const details = await lstat(value);
+  if (!details.isFile() || details.isSymbolicLink()) {
+    throw new Error(`${label} must be a physical file.`);
+  }
+};
+
 const requireIndependentBackup = async (appRoot, backupPath) => {
-  if (!path.isAbsolute(backupPath)) throw new Error("metadataBackupPath must be an absolute path.");
+  if (typeof backupPath !== "string" || !path.isAbsolute(backupPath)) {
+    throw new Error("metadataBackupPath must be an absolute path.");
+  }
   await lstat(backupPath);
   const [resolvedAppRoot, resolvedBackupPath] = await Promise.all([
     realpath(appRoot),
@@ -75,12 +97,42 @@ const requireIndependentBackup = async (appRoot, backupPath) => {
   }
 };
 
+const acquireDeployLock = async (appRoot, releaseSha) => {
+  const lockPath = path.join(appRoot, ".deploy.lock");
+  let handle;
+  try {
+    handle = await open(lockPath, "wx", 0o600);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      throw new Error(`Deploy lock already exists; inspect the active or interrupted release: ${lockPath}`);
+    }
+    throw error;
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify({
+      releaseSha,
+      pid: process.pid,
+      acquiredAt: new Date().toISOString(),
+    })}\n`, "utf8");
+    await handle.sync();
+  } catch (error) {
+    await handle.close();
+    await unlink(lockPath).catch(() => {});
+    throw error;
+  }
+  return { handle, lockPath };
+};
+
+const releaseDeployLock = async (lock, retain) => {
+  await lock.handle.close();
+  if (!retain) await unlink(lock.lockPath);
+};
+
 const replaceCurrentLink = async (currentLink, nextLink, previousLink) => {
   if (process.platform !== "win32") {
     await rename(nextLink, currentLink);
     return;
   }
-
   // Windows cannot atomically replace an existing directory junction. This
   // branch exists for local rehearsal only; production Linux uses rename(2).
   await rename(currentLink, previousLink);
@@ -120,20 +172,6 @@ const waitForSmoke = async (urls, checkHttp, options = {}) => {
   throw lastError;
 };
 
-const copyReleaseSource = async (sourceDir, stagingDir) => {
-  await cp(sourceDir, stagingDir, {
-    recursive: true,
-    dereference: true,
-    filter: (source) => {
-      const relative = path.relative(sourceDir, source);
-      if (!relative) return true;
-      const segments = relative.split(path.sep);
-      if (segments.some((segment) => BUILD_EXCLUDES.has(segment))) return false;
-      return !relative.endsWith(".tsbuildinfo");
-    },
-  });
-};
-
 const requireReleaseIdentityMarkers = async (releaseDir, releaseSha) => {
   const expected = `${releaseSha}\n`;
   const [dotMarker, envMarker] = await Promise.all([
@@ -145,18 +183,56 @@ const requireReleaseIdentityMarkers = async (releaseDir, releaseSha) => {
   }
 };
 
+const requireUnchangedPackageLock = async (releaseDir, expectedHash) => {
+  const body = await readFile(path.join(releaseDir, "package-lock.json"));
+  const actualHash = createHash("sha256").update(body).digest("hex");
+  if (actualHash !== expectedHash) {
+    throw new Error("Transitional dependency install modified or replaced package-lock.json.");
+  }
+};
+
+const requirePhysicalCurrentRelease = async (appRoot, releasesRoot) => {
+  const currentLink = path.join(appRoot, "current");
+  const currentDetails = await lstat(currentLink);
+  if (!currentDetails.isSymbolicLink()) throw new Error("current must be a symlink to a physical release directory.");
+  const previousRelease = await realpath(currentLink);
+  const previousRelative = path.relative(releasesRoot, previousRelease);
+  if (previousRelative.startsWith("..") || path.isAbsolute(previousRelative)) {
+    throw new Error("current resolves outside the releases directory.");
+  }
+  const previousDetails = await lstat(previousRelease);
+  if (!previousDetails.isDirectory() || previousDetails.isSymbolicLink()) {
+    throw new Error("current must resolve to a physical release directory, not another symlink.");
+  }
+  return { currentLink, previousRelease };
+};
+
 export async function deployEnergyIqRelease(input, dependencies = {}) {
   const run = dependencies.run ?? defaultRun;
   const checkHttp = dependencies.checkHttp ?? defaultCheckHttp;
+  const verifyArtifact = dependencies.verifyArtifact ?? verifyReleaseArtifact;
+  const extractArtifact = dependencies.extractArtifact ?? extractVerifiedReleaseArtifact;
   const smokeAttempts = dependencies.smokeAttempts ?? 60;
   const sleep = dependencies.sleep ?? defaultSleep;
+  const releaseHostNodeVersion = dependencies.nodeVersion ?? process.version;
   const releaseSha = input.releaseSha?.trim();
+
   if (!RELEASE_SHA_PATTERN.test(releaseSha ?? "")) {
     throw new Error("releaseSha must be a lowercase 40-character Git SHA.");
   }
-  await requireAbsoluteDirectory("appRoot", input.appRoot);
-  await requireAbsoluteDirectory("sourceDir", input.sourceDir);
-  await requireIndependentBackup(input.appRoot, input.metadataBackupPath);
+  if (!NODE_VERSION_PATTERN.test(releaseHostNodeVersion)) {
+    throw new Error("Release Host Node version is invalid.");
+  }
+  if (input.dependencyInstall !== TRANSITIONAL_DEPENDENCY_INSTALL) {
+    throw new Error(`dependencyInstall must explicitly be ${TRANSITIONAL_DEPENDENCY_INSTALL} until DPL-03 is implemented.`);
+  }
+  await Promise.all([
+    requireAbsoluteDirectory("appRoot", input.appRoot),
+    requireAbsolutePhysicalFile("artifactPath", input.artifactPath),
+    requireAbsolutePhysicalFile("manifestPath", input.manifestPath),
+    requireAbsolutePhysicalFile("checksumPath", input.checksumPath),
+    requireIndependentBackup(input.appRoot, input.metadataBackupPath),
+  ]);
   if (!Array.isArray(input.smokeUrls) || input.smokeUrls.length < 3) {
     throw new Error("At least API health, Web login and exact Overview smoke URLs are required.");
   }
@@ -165,91 +241,107 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
   }
 
   const appRoot = await realpath(input.appRoot);
-  const sourceDir = await realpath(input.sourceDir);
   const releasesRoot = path.join(appRoot, "releases");
-  const currentLink = path.join(appRoot, "current");
   const nextLink = path.join(appRoot, ".current-next");
   const previousLink = path.join(appRoot, ".current-previous");
   const stagingDir = path.join(releasesRoot, `.staging-${releaseSha}`);
   const finalRelease = path.join(releasesRoot, releaseSha);
-
   await mkdir(releasesRoot, { recursive: true });
-  if (await pathExists(stagingDir)) throw new Error(`Staging path already exists: ${stagingDir}`);
-  if (await pathExists(finalRelease)) throw new Error(`Release path already exists: ${finalRelease}`);
-  if (await pathExists(nextLink) || await pathExists(previousLink)) {
-    throw new Error("A previous release-link operation is incomplete; inspect it before retrying.");
-  }
 
-  const currentDetails = await lstat(currentLink);
-  if (!currentDetails.isSymbolicLink()) throw new Error("current must be a symlink to a physical release directory.");
-  const previousRelease = await realpath(currentLink);
-  const previousRelative = path.relative(releasesRoot, previousRelease);
-  if (previousRelative.startsWith("..") || path.isAbsolute(previousRelative)) {
-    throw new Error("current resolves outside the releases directory.");
-  }
-  if ((await lstat(previousRelease)).isSymbolicLink()) {
-    throw new Error("current must resolve to a physical release directory, not another symlink.");
-  }
-
-  const sourceIdentity = await run("git", ["-C", sourceDir, "rev-parse", "HEAD"]);
-  if (sourceIdentity.stdout.trim() !== releaseSha) {
-    throw new Error(`Source HEAD does not match releaseSha: ${sourceIdentity.stdout.trim()}`);
-  }
-  const sourceStatus = await run("git", ["-C", sourceDir, "status", "--porcelain"]);
-  if (sourceStatus.stdout.trim()) {
-    throw new Error("Source checkout must be clean before a release can be staged.");
-  }
-
-  await smoke(input.smokeUrls, checkHttp);
-  await mkdir(stagingDir);
-  await copyReleaseSource(sourceDir, stagingDir);
-  await writeFile(path.join(stagingDir, ".release-sha"), `${releaseSha}\n`, "utf8");
-  await writeFile(path.join(stagingDir, "RELEASE_SHA"), `${releaseSha}\n`, "utf8");
-  await run("npm", ["ci"], { cwd: stagingDir });
-  await run("npm", ["run", "build", "--", "--force"], { cwd: stagingDir });
-  await run("npm", ["run", "build:web"], { cwd: stagingDir });
-  await requireReleaseIdentityMarkers(stagingDir, releaseSha);
-  await rename(stagingDir, finalRelease);
-
-  const finalDetails = await lstat(finalRelease);
-  if (!finalDetails.isDirectory() || finalDetails.isSymbolicLink()) {
-    throw new Error("Final release must be a physical directory.");
-  }
-
-  await createReleaseLink(finalRelease, nextLink);
-  await replaceCurrentLink(currentLink, nextLink, previousLink);
-  let switched = true;
+  const lock = await acquireDeployLock(appRoot, releaseSha);
+  let retainLock = false;
   try {
-    await run("systemctl", ["restart", input.apiService, input.webService]);
-    await waitForSmoke(input.smokeUrls, checkHttp, { attempts: smokeAttempts, sleep });
-    switched = false;
-  } catch (error) {
-    if (switched) {
-      if (await pathExists(nextLink)) throw new Error("Rollback refused because the next link still exists.", { cause: error });
-      await createReleaseLink(previousRelease, nextLink);
-      await replaceCurrentLink(currentLink, nextLink, previousLink);
+    if (await pathExists(stagingDir)) throw new Error(`Staging path already exists: ${stagingDir}`);
+    if (await pathExists(finalRelease)) throw new Error(`Release path already exists: ${finalRelease}`);
+    if (await pathExists(nextLink) || await pathExists(previousLink)) {
+      throw new Error("A previous release-link operation is incomplete; inspect it before retrying.");
+    }
+    const { currentLink, previousRelease } = await requirePhysicalCurrentRelease(appRoot, releasesRoot);
+
+    // No extraction, dependency install, current switch or restart is allowed
+    // before the exact Artifact/Manifest/checksum/Node/SHA contract passes.
+    const verifiedArtifact = await verifyArtifact({
+      artifactPath: input.artifactPath,
+      manifestPath: input.manifestPath,
+      checksumPath: input.checksumPath,
+      expectedGitSha: releaseSha,
+      expectedNodeVersion: releaseHostNodeVersion,
+      includeEntries: true,
+    });
+    if (verifiedArtifact?.manifest?.gitSha !== releaseSha) {
+      throw new Error("Verified Artifact gitSha does not match releaseSha.");
+    }
+    if (verifiedArtifact?.manifest?.nodeVersion !== releaseHostNodeVersion) {
+      throw new Error("Verified Artifact Node version does not match the Release Host.");
+    }
+
+    await smoke(input.smokeUrls, checkHttp);
+    await mkdir(stagingDir);
+    await extractArtifact(verifiedArtifact, stagingDir);
+    await writeFile(
+      path.join(stagingDir, "release-manifest.json"),
+      `${JSON.stringify(verifiedArtifact.manifest, null, 2)}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o644 },
+    );
+
+    // DPL-03 has not selected a dependency artifact/layer. This explicit seam
+    // installs into this staging release only, never reuses or mutates another
+    // release's node_modules, and deliberately runs no lifecycle/build scripts.
+    await run("npm", TRANSITIONAL_NPM_ARGS, { cwd: stagingDir });
+    await requireUnchangedPackageLock(stagingDir, verifiedArtifact.manifest.packageLockHash);
+    await requireReleaseIdentityMarkers(stagingDir, releaseSha);
+    await rename(stagingDir, finalRelease);
+
+    const finalDetails = await lstat(finalRelease);
+    if (!finalDetails.isDirectory() || finalDetails.isSymbolicLink()) {
+      throw new Error("Final release must be a physical directory.");
+    }
+
+    await createReleaseLink(finalRelease, nextLink);
+    await replaceCurrentLink(currentLink, nextLink, previousLink);
+    try {
       await run("systemctl", ["restart", input.apiService, input.webService]);
+      await waitForSmoke(input.smokeUrls, checkHttp, { attempts: smokeAttempts, sleep });
+    } catch (deployError) {
       try {
+        if (await pathExists(nextLink)) {
+          throw new Error("Rollback refused because the next link still exists.");
+        }
+        await createReleaseLink(previousRelease, nextLink);
+        await replaceCurrentLink(currentLink, nextLink, previousLink);
+        await run("systemctl", ["restart", input.apiService, input.webService]);
         await waitForSmoke(input.smokeUrls, checkHttp, { attempts: smokeAttempts, sleep });
       } catch (rollbackError) {
-        throw new Error("New release failed and rollback smoke verification also failed.", {
-          cause: new AggregateError([error, rollbackError]),
+        retainLock = true;
+        throw new Error("New release failed and rollback verification also failed; deploy lock retained.", {
+          cause: new AggregateError([deployError, rollbackError]),
         });
       }
+      throw deployError;
     }
-    throw error;
-  }
 
-  return { releaseSha, previousRelease, finalRelease };
+    return {
+      releaseSha,
+      previousRelease,
+      finalRelease,
+      dependencyInstall: TRANSITIONAL_DEPENDENCY_INSTALL,
+      releaseHostNodeVersion,
+    };
+  } finally {
+    await releaseDeployLock(lock, retainLock);
+  }
 }
 
 const parseCli = () => {
   const { values } = parseArgs({
     options: {
       "app-root": { type: "string" },
-      "source-dir": { type: "string" },
+      artifact: { type: "string" },
+      manifest: { type: "string" },
+      checksum: { type: "string" },
       "release-sha": { type: "string" },
       "metadata-backup": { type: "string" },
+      "dependency-install": { type: "string" },
       "api-service": { type: "string" },
       "web-service": { type: "string" },
       "smoke-url": { type: "string", multiple: true },
@@ -257,9 +349,12 @@ const parseCli = () => {
   });
   return {
     appRoot: values["app-root"],
-    sourceDir: values["source-dir"],
+    artifactPath: values.artifact,
+    manifestPath: values.manifest,
+    checksumPath: values.checksum,
     releaseSha: values["release-sha"],
     metadataBackupPath: values["metadata-backup"],
+    dependencyInstall: values["dependency-install"],
     apiService: values["api-service"],
     webService: values["web-service"],
     smokeUrls: values["smoke-url"] ?? [],
@@ -268,7 +363,9 @@ const parseCli = () => {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   deployEnergyIqRelease(parseCli())
-    .then(({ releaseSha }) => process.stdout.write(`Released ${releaseSha}\n`))
+    .then(({ releaseSha, dependencyInstall }) => {
+      process.stdout.write(`Released ${releaseSha} with explicit ${dependencyInstall} dependency seam\n`);
+    })
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
       process.exitCode = 1;

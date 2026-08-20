@@ -20,8 +20,13 @@ import { parseArgs } from "node:util";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const ARTIFACT_FORMAT = "ustar";
+const VERIFIED_ARTIFACT = Symbol("verified-release-artifact");
 const WEB_BUILD_ROOT = "apps/web/.next";
 const WEB_BUILD_EXCLUDES = new Set(["cache", "diagnostics", "trace", "types"]);
+const RELEASE_HOST_TOOL_FILES = [
+  "scripts/energyiq/build-release-artifact.mjs",
+  "scripts/energyiq/deploy-release.mjs",
+];
 const FORBIDDEN_SEGMENTS = new Set([
   ".git",
   "acceptance",
@@ -274,6 +279,13 @@ const planReleaseEntries = async (sourceDir, gitSha) => {
 
   addEntry(entries, "package.json", path.join(sourceDir, "package.json"));
   addEntry(entries, "package-lock.json", path.join(sourceDir, "package-lock.json"));
+  for (const releaseHostTool of RELEASE_HOST_TOOL_FILES) {
+    addEntry(
+      entries,
+      releaseHostTool,
+      await requireRegularFile(sourceDir, releaseHostTool, "Release Host tool"),
+    );
+  }
 
   for (const workspace of closure) {
     const manifestPath = `${workspace.path}/package.json`;
@@ -520,6 +532,7 @@ export async function verifyReleaseArtifact({
   checksumPath,
   expectedGitSha,
   expectedNodeVersion,
+  includeEntries = false,
 }) {
   const [archive, manifest] = await Promise.all([
     readFile(artifactPath),
@@ -571,7 +584,34 @@ export async function verifyReleaseArtifact({
       throw new Error(`Release identity marker ${marker} does not match manifest gitSha.`);
     }
   }
+  if (includeEntries) {
+    return {
+      manifest,
+      entries: archiveEntries,
+      [VERIFIED_ARTIFACT]: true,
+    };
+  }
   return manifest;
+}
+
+export async function extractVerifiedReleaseArtifact(verifiedArtifact, outputDir) {
+  if (!verifiedArtifact?.[VERIFIED_ARTIFACT] || !Array.isArray(verifiedArtifact.entries)) {
+    throw new Error("Release extraction requires the direct result of verifyReleaseArtifact(includeEntries=true).");
+  }
+  await requireDirectory("outputDir", outputDir);
+  if ((await readdir(outputDir)).length > 0) {
+    throw new Error("Release extraction outputDir must be empty.");
+  }
+  for (const entry of verifiedArtifact.entries) {
+    const relativePath = requireSafeRelativePath(entry.path, "Verified artifact entry");
+    const targetPath = path.join(outputDir, ...relativePath.split("/"));
+    const relativeTarget = path.relative(outputDir, targetPath);
+    if (relativeTarget.startsWith("..") || path.isAbsolute(relativeTarget)) {
+      throw new Error(`Verified artifact entry escapes outputDir: ${relativePath}`);
+    }
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, entry.body, { flag: "wx", mode: 0o644 });
+  }
 }
 
 const assertManifestEntries = (expected, actual) => {
