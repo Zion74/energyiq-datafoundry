@@ -55,19 +55,19 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 
 ### M1 — #81 Report Time Context 收口
 
-- [ ] 通过 public `resolveProjectAnalysis` seam 增加完整历史月与同进度比较的 server-owned bounded projection；
-- [ ] 当前月比较历史相同进度，完整月比较上一个完整月；不足数据时诚实 unavailable；
+- [x] 通过 public `resolveProjectAnalysis` seam 增加完整历史月与同进度比较的 server-owned bounded projection；
+- [x] 当前月比较历史相同进度，完整月比较上一个完整月；不足数据时诚实 unavailable；
 - [ ] Calendar/Holiday、Tariff、Data through 和 Section 窗口标签使用精确 revision；
 - [ ] 发布新的 Ngee Ann Template Revision，不能改写现有 immutable v6；
 - [ ] focused tests、API build、Web production build、diff-check 全绿。
 
 ### M2 — 多批次 Excel 与 A/B/C 数据基线
 
-- [ ] 原始四份 workbook 保持不可变，各自创建 Import Batch 与 SHA；
-- [ ] 以 Meter Point + timestamp 去重 5 月 19–20 日重叠；相同值合并，冲突值 fail closed；
-- [ ] Level 6/7 Mapping 与 Source label 必须保持 exact，不按文件名猜测；
-- [ ] A = data through 20 May，B = data through 31 May，C = data through 17 Jun；
-- [ ] A 证明 4 月 partial + 5 月 MTD，B 证明 5 月封存 complete，C 证明 6 月 MTD + 5 月历史对比；
+- [x] 原始四份 workbook 保持不可变，并已记录文件 SHA、行数、设备数和覆盖范围；生产导入仍须各自创建 Import Batch；
+- [x] 审计 5 月 19–20 日重叠：同值合并；异值保留 Raw Evidence，由覆盖更长的批次成为 canonical 并产生 warning；同覆盖范围的异值必须 fail closed；
+- [x] Level 6/7 Mapping 与 Source label 通过发布 Mapping 解析；四批 materialization 为 0 unmapped、18 canonical meter series，不按文件名生成 Meter identity；
+- [x] A = data through 19 May，B = data through 31 May，C = data through 16 Jun；
+- [x] A 证明 4 月 partial + 5 月 MTD；C 证明 6 月 MTD，并从同一 Snapshot 封存 B = May complete 与 May same-progress comparison；
 - [ ] 若生成合并 workbook，它只用于人工核对，不成为生产事实源。
 
 ### M3 — #9 论点驱动 Overview
@@ -103,7 +103,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 | --- | --- | --- |
 | 当月与完整月误比 | 17 天 June 对完整 May，制造假下降 | MTD 只与历史同进度比较 |
 | 月初样本太少 | 1–2 天被放大成月结论 | 标记 in_progress + 最小完整日门 |
-| Excel 重叠静默覆盖 | 19–20 May 重复或冲突 | Import Batch 溯源 + exact dedupe + conflict fail closed |
+| Excel 重叠静默覆盖 | 19–20 May 重复或冲突 | Raw 两边保留；later-coverage canonical + warning；same-coverage conflict fail closed |
 | 4 月被误称完整月 | 数据从 21 Apr 才开始 | partial 状态，不进入完整月趋势 |
 | AI 每天随机改写 | What Changed 每天都是“更新” | 语义/lineage 保守 diff，文本变化不单独升级 |
 | AI 旧结果复用 | B 页面显示 A 的结论 | exact Snapshot/Release/Window/Contract identity |
@@ -121,7 +121,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 1. API：`resolveProjectAnalysis` —— 时间窗口、月度 projection、Snapshot/Policy provenance；
 2. Web：`buildNgeeAnnOverviewViewModel` —— Claim-first 组织、窗口标签和 unavailable 语义；
 3. Renderer：公开 Ngee Ann Overview Renderer —— 真实用户看见的主题、图表、Evidence、What Changed；
-4. Data ingest：现有公开 Excel import / source-to-fact seam —— Import Batch、SHA、重叠去重、冲突拒绝；
+4. Data ingest：现有公开 Excel import / source-to-fact seam —— Import Batch、SHA、重叠去重、Raw conflict、canonical winner 与 same-coverage 拒绝；
 5. AI：公开 Artifact read/generate seam —— exact identity、普通 GET 零 Provider、A/B/C 不复用旧结果。
 
 ## 7. Stop conditions
@@ -147,6 +147,32 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - 本轮第一 RED：完整历史月与同进度比较必须由 API public seam 提供，Web 不得自行从任意日期拼算。
 
 ### 2026-08-20 M1 tracer 1 — 历史月段 projection
+
+- RED：`resolveProjectAnalysis` 没有 `reportWindowSegmentSummaries`，public seam 精确失败；
+- GREEN：输出最近 3 个完整月与最近 3 个历史同进度段；每段绑定 Snapshot、Query、Period、expected/complete day count 与 complete/partial/unavailable；
+- 生产边界：历史明细只在服务端计算，浏览器只收 bounded summary，六段 JSON 小于 8 KB；
+- 验证：Report Time Context + Project Analysis Resolver 15/15，API build、Web production build、diff-check 全绿；
+- Commit：`ce7f885 feat(energyiq): project historical report segments`。
+
+### 2026-08-20 M2 preflight — 四份真实 Excel
+
+- 四份 source workbook 均只有 `Sheet1`，字段为 `Device Name / Time / Active Energy`；Level 6/7 各 9 个设备；
+- 第一批覆盖 21 Apr–20 May，第二批覆盖 19 May–17 Jun；文件内无重复和内部缺口；Level 6 的 `Office Light-Right: Internal` 各少最后一个 15-minute point；
+- Level 6 overlap 1,727 条，其中 1,720 同值、7 条异值；Level 7 overlap 1,728 条，其中 1,719 同值、9 条异值；
+- 16 条异值全部位于 20 May 23:45，并且第二批继续覆盖到 17 Jun，因此现有 later-coverage canonical 规则适用；Raw 两边仍必须保留并报告 warning；
+- 日期校准：第一批单独只能确认到 19 May 完整日；合并两批后可封存完整 May；当前 June 可确认到 16 Jun；
+- 后续 RED：真实 source-to-fact/import seam 必须证明 A/B/C、16 条 warning、Level mapping exact，以及同覆盖范围的冲突不会靠 lexical tie-break 静默裁决。
+
+### 2026-08-20 M2 GREEN — Import、Report Edition 与歧义冲突门
+
+- Canonical risk RED：两个冲突来源若具有相同 coverage end，旧实现按 `source_file/import_batch_id` 字典序选 winner，public writer 测试精确失败；
+- GREEN：Canonical 发布前检查 Normalized Reading 与 Interval Fact；同 coverage end 且事实不同会抛 `ENERGYIQ_OVERLAP_CONFLICT_AMBIGUOUS`，later-coverage 规则和同值 dedupe 保持不变；
+- 真实四文件 public seam：第一批 materialization 产生 Snapshot A，`dataThrough=19 May`；四批 materialization 产生 Snapshot C，`dataThrough=16 Jun`；
+- A/C 之间没有第三次真实数据摄取，所以 B 不伪装成第三个 Snapshot：B 是 C 中 `1–31 May` 的 sealed complete Report Edition；
+- C 的 completed-month May 为 31/31 complete，same-progress May 1–16 为 16/16 complete；两者 Evidence 均精确绑定 Snapshot C 与 `daily_totals_v1`；
+- 3,455 个 overlap keys 中 3,439 个同值；16 个异值 pair 对应 32 个 Raw conflict rows，Readiness warning 使用 Raw row count；
+- Saved A 在 C 发布、读取和 rerun 后仍保留 A 的 Snapshot、analysis/query/snapshot JSON 与 Release identity；
+- 验证：Data Gateway writer 16/16；真实 Ngee Ann two-Snapshot acceptance 1/1（约 4.9 分钟）；未调用 Provider、未启动浏览器、未修改生产数据库。
 
 - RED：`resolveProjectAnalysis` 未返回 `completed-month-trend` 与 `same-progress-comparison` 的月段摘要，focused 1 test failed。
 - GREEN：增加受 Scope/Snapshot 约束的轻量 `executeEnergyDailyTotalsProjection`，历史窗口只跑 health + daily totals 查询；相同日映射逻辑与完整 Scope analysis 共用。

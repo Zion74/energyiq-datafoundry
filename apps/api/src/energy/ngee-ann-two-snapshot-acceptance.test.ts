@@ -248,6 +248,38 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         sampleDayCount: 1,
       });
       expect(analysisB.snapshot.decisionPriorities?.status).not.toBe("unavailable");
+      const completedMonthSegments = analysisB.snapshot.reportWindowSegmentSummaries
+        ?.find((window) => window.windowId === "completed-month-trend")?.segments;
+      expect(completedMonthSegments?.at(-1)).toMatchObject({
+        period: {
+          start: "2026-04-30T16:00:00.000Z",
+          endExclusive: "2026-05-31T16:00:00.000Z",
+        },
+        dataStatus: "complete",
+        expectedDayCount: 31,
+        completeDayCount: 31,
+        evidence: {
+          dataSnapshotId: materializedB.snapshot.id,
+          queryId: "daily_totals_v1",
+        },
+      });
+      expect(completedMonthSegments?.at(-1)?.summary?.usageKwh).toBeGreaterThan(0);
+      const sameProgressSegments = analysisB.snapshot.reportWindowSegmentSummaries
+        ?.find((window) => window.windowId === "same-progress-comparison")?.segments;
+      expect(sameProgressSegments?.at(-1)).toMatchObject({
+        period: {
+          start: "2026-04-30T16:00:00.000Z",
+          endExclusive: "2026-05-16T16:00:00.000Z",
+        },
+        dataStatus: "complete",
+        expectedDayCount: 16,
+        completeDayCount: 16,
+        evidence: {
+          dataSnapshotId: materializedB.snapshot.id,
+          queryId: "daily_totals_v1",
+        },
+      });
+      expect(sameProgressSegments?.at(-1)?.summary?.usageKwh).toBeGreaterThan(0);
       expect(analysisB.snapshot.decisionLifecycle).toMatchObject({
         status: "available",
         currentDataSnapshotId: materializedB.snapshot.id,

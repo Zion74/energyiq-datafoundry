@@ -955,6 +955,45 @@ describe("writeEnergyFactProjectMaterialization", () => {
       .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "earlier" }))
       .resolves.toMatchObject({ normalizedRows: 0, intervalFacts: 0 });
+
+    const ambiguousProjectId = "project-overlap-ambiguous";
+    const ambiguousLeft = {
+      ...base,
+      projectId: ambiguousProjectId,
+      importBatchId: "ambiguous-left",
+      sourceSha256: "sha-ambiguous-left",
+      rawReadings: [
+        raw("ambiguous-left", "sha-ambiguous-left", "2026-05-01T00:15:00.000Z", 100.9, ambiguousProjectId),
+      ],
+      normalizedReadings: [
+        normalized("ambiguous-left", "sha-ambiguous-left", "2026-05-01T00:15:00.000Z", 100.9, ambiguousProjectId),
+      ],
+      intervalFacts: [
+        fact("ambiguous-left", "sha-ambiguous-left", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 0.9, ambiguousProjectId),
+      ],
+    };
+    const ambiguousRight = {
+      ...base,
+      projectId: ambiguousProjectId,
+      importBatchId: "ambiguous-right",
+      sourceSha256: "sha-ambiguous-right",
+      rawReadings: [
+        raw("ambiguous-right", "sha-ambiguous-right", "2026-05-01T00:15:00.000Z", 101, ambiguousProjectId),
+      ],
+      normalizedReadings: [
+        normalized("ambiguous-right", "sha-ambiguous-right", "2026-05-01T00:15:00.000Z", 101, ambiguousProjectId),
+      ],
+      intervalFacts: [
+        fact("ambiguous-right", "sha-ambiguous-right", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 1, ambiguousProjectId),
+      ],
+    };
+    await expect(writeProjectSnapshot(
+      ambiguousRight,
+      [ambiguousLeft, ambiguousRight],
+      "snapshot-overlap-ambiguous",
+      ["sha-ambiguous-left", "sha-ambiguous-right"],
+      "unavailable",
+    )).rejects.toThrow("ENERGYIQ_OVERLAP_CONFLICT_AMBIGUOUS");
   });
 });
 

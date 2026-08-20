@@ -171,7 +171,9 @@ Catalog 缺少能力时，系统返回 `capability_required` Development Proposa
 - Forecast：下一个完整自然月；
 - Day-type reference：Workday / Weekend / Public holiday。
 
-现有 2026 年 4–6 月 Excel 批次按原文件保存并进入同一 Source Adapter。4 月 21 日才开始的数据只能作为 partial context；合并两批后 5 月可以成为首个完整历史月；6 月 1–17 日是当前月进度。重叠的 5 月 19–20 日按 Meter Point + timestamp 去重，值冲突时导入失败并进入人工核对，禁止靠后文件静默覆盖。
+现有 2026 年 4–6 月 Excel 批次按原文件保存并进入同一 Source Adapter。4 月 21 日才开始的数据只能作为 partial context；第一批单独使用时，最后一个可确认的完整日是 5 月 19 日；合并第二批后 5 月可以成为首个完整历史月；当前 6 月最后一个可确认的完整日是 6 月 16 日。
+
+重叠数据按 Meter Point + timestamp 处理：同值记录合并；异值记录必须保留两边 Raw Reading 与 overlap-conflict 标记。只有当一批数据覆盖到更晚的时间时，才允许由覆盖更长的批次成为 canonical，并在 Readiness 中显示 warning；若冲突批次的覆盖范围相同，则必须 fail closed 并进入人工核对，不能使用文件名或批次 ID 的字典序决定业务真相。
 
 ### Preschool
 

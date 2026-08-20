@@ -727,6 +727,7 @@ const publishCanonicalProjectFacts = async (
   await rebuildCanonicalSourceIntervals(connection, projectId, snapshotFactScope.sourceSha256);
   await rebuildCanonicalSourceQualityEvents(connection, projectId, snapshotFactScope.sourceSha256);
   await markRawOverlapConflicts(connection, projectId, snapshotFactScope.sourceSha256);
+  await assertNoAmbiguousOverlapConflicts(connection, projectId);
   await deduplicateCanonicalRows(connection, projectId);
   await rebuildProjectCumulativeIntervals(connection, projectId, timezone);
   await rebuildProjectCumulativeQualityEvents(connection, projectId);
@@ -897,6 +898,56 @@ const markRawOverlapConflicts = async (
           AND candidate.active_energy_kwh <> target.active_energy_kwh
       )
   `, [projectId, ...normalizedSources, ...normalizedSources]);
+};
+
+const assertNoAmbiguousOverlapConflicts = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+): Promise<void> => {
+  const normalized = await duckDbGet(connection, `
+    WITH sourced AS (
+      SELECT *, MAX(event_time) OVER (
+        PARTITION BY project_id, meter_node_id, source_sha256
+      ) AS source_coverage_end
+      FROM normalized_meter_readings
+      WHERE project_id = ?
+    )
+    SELECT COUNT(*) AS ambiguous_count
+    FROM sourced left_source
+    JOIN sourced right_source
+      ON right_source.project_id = left_source.project_id
+      AND right_source.meter_node_id = left_source.meter_node_id
+      AND right_source.event_time = left_source.event_time
+      AND right_source.source_sha256 > left_source.source_sha256
+      AND right_source.source_coverage_end = left_source.source_coverage_end
+      AND right_source.active_energy_kwh IS DISTINCT FROM left_source.active_energy_kwh
+  `, [projectId]);
+  const intervals = await duckDbGet(connection, `
+    WITH sourced AS (
+      SELECT *, MAX(interval_end) OVER (
+        PARTITION BY project_id, meter_node_id, source_sha256
+      ) AS source_coverage_end
+      FROM energy_interval_facts
+      WHERE project_id = ?
+    )
+    SELECT COUNT(*) AS ambiguous_count
+    FROM sourced left_source
+    JOIN sourced right_source
+      ON right_source.project_id = left_source.project_id
+      AND right_source.meter_node_id = left_source.meter_node_id
+      AND right_source.interval_start = left_source.interval_start
+      AND right_source.source_sha256 > left_source.source_sha256
+      AND right_source.source_coverage_end = left_source.source_coverage_end
+      AND (
+        right_source.interval_end IS DISTINCT FROM left_source.interval_end
+        OR right_source.usage_kwh IS DISTINCT FROM left_source.usage_kwh
+        OR right_source.quality_status IS DISTINCT FROM left_source.quality_status
+      )
+  `, [projectId]);
+  if (Number(normalized.ambiguous_count ?? 0) > 0
+    || Number(intervals.ambiguous_count ?? 0) > 0) {
+    throw new Error("ENERGYIQ_OVERLAP_CONFLICT_AMBIGUOUS");
+  }
 };
 
 const deduplicateCanonicalRows = async (
