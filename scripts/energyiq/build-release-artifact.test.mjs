@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   createReleaseArtifact,
@@ -34,7 +35,7 @@ const createFixture = async () => {
     config: {
       outputFileTracingRoot: root,
       turbopack: { root },
-      configFileName: "next.config.ts",
+      configFileName: "next.config.mjs",
     },
     appDir: path.join(root, "apps", "web"),
     relativeAppDir: path.join("apps", "web"),
@@ -77,7 +78,7 @@ const createFixture = async () => {
     scripts: { start: "next start" },
     dependencies: { "@datafoundry/contracts": "0.2.0", next: "15.5.19" },
   }, null, 2) + "\n");
-  await writeFixtureFile(root, "apps/web/next.config.ts", "export default { compress: false };\n");
+  await writeFixtureFile(root, "apps/web/next.config.mjs", "export default { compress: false };\n");
   await writeFixtureFile(root, "apps/web/.next/BUILD_ID", `${RELEASE_SHA}\n`);
   await writeFixtureFile(
     root,
@@ -152,7 +153,7 @@ test("creates a deterministic prebuilt artifact and exact sidecar manifest", asy
   assert.ok(entryPaths.includes("apps/api/dist/index.js"));
   assert.equal(entryPaths.some((entryPath) => /(?:\.test\.js|\.d\.ts|\.js\.map)$/.test(entryPath)), false);
   assert.ok(entryPaths.includes("apps/web/.next/static/chunks/app.js"));
-  assert.ok(entryPaths.includes("apps/web/next.config.ts"));
+  assert.ok(entryPaths.includes("apps/web/next.config.mjs"));
   assert.ok(entryPaths.includes("apps/web/public/logo.svg"));
   assert.ok(entryPaths.includes("packages/contracts/dist/index.js"));
   assert.ok(entryPaths.includes("scripts/energyiq/build-release-artifact.mjs"));
@@ -195,6 +196,65 @@ test("packages the complete builtin skill resource tree required by API bootstra
   }
 });
 
+test("rejects a runtime Next config that requires dev-only TypeScript", async (t) => {
+  const sourceDir = await createFixture();
+  const outputDir = await mkdtemp(path.join(tmpdir(), "energyiq-artifact-typescript-next-config-"));
+  t.after(() => Promise.all([
+    rm(sourceDir, { recursive: true, force: true }),
+    rm(outputDir, { recursive: true, force: true }),
+  ]));
+  const requiredPath = path.join(sourceDir, "apps", "web", ".next", "required-server-files.json");
+  const required = JSON.parse(await readFile(requiredPath, "utf8"));
+  required.config.configFileName = "next.config.ts";
+  await writeFile(requiredPath, JSON.stringify(required, null, 2) + "\n");
+  await writeFixtureFile(sourceDir, "apps/web/next.config.ts", "export default { compress: false };\n");
+
+  await assert.rejects(
+    packFixture(sourceDir, outputDir),
+    /Next config.*production-native.*\.m?js/i,
+  );
+});
+
+test("production Next config is native ESM and preserves release semantics", async () => {
+  const originalReleaseSha = process.env.ENERGYIQ_RELEASE_SHA;
+  const originalDistDir = process.env.NEXT_DIST_DIR;
+  const configUrl = pathToFileURL(path.resolve("apps/web/next.config.mjs")).href;
+  const validSha = "abcdef1234567890abcdef1234567890abcdef12";
+  try {
+    delete process.env.ENERGYIQ_RELEASE_SHA;
+    process.env.NEXT_DIST_DIR = ".next-contract-test";
+    const localConfig = (await import(`${configUrl}?local=${Date.now()}`)).default;
+    assert.equal(await localConfig.generateBuildId(), null);
+    assert.equal(localConfig.distDir, ".next-contract-test");
+    assert.equal(localConfig.outputFileTracingRoot, path.resolve("."));
+    assert.equal(localConfig.compress, false);
+    assert.deepEqual(localConfig.experimental.optimizePackageImports, ["zod"]);
+    assert.equal(localConfig.turbopack.root, path.resolve("."));
+    const webpackConfig = { output: {} };
+    assert.equal(localConfig.webpack(webpackConfig, { isServer: true }), webpackConfig);
+    assert.equal(webpackConfig.output.chunkFilename, "chunks/[name].js");
+
+    process.env.ENERGYIQ_RELEASE_SHA = validSha;
+    const releaseConfig = (await import(`${configUrl}?release=${Date.now()}`)).default;
+    assert.equal(await releaseConfig.generateBuildId(), validSha);
+
+    process.env.ENERGYIQ_RELEASE_SHA = "not-a-git-sha";
+    await assert.rejects(import(`${configUrl}?invalid=${Date.now()}`), /lowercase 40-character Git SHA/);
+
+    const [rootManifest, webManifest] = await Promise.all([
+      readFile("package.json", "utf8").then(JSON.parse),
+      readFile("apps/web/package.json", "utf8").then(JSON.parse),
+    ]);
+    assert.equal(rootManifest.dependencies?.typescript, undefined);
+    assert.equal(webManifest.dependencies?.typescript, undefined);
+  } finally {
+    if (originalReleaseSha === undefined) delete process.env.ENERGYIQ_RELEASE_SHA;
+    else process.env.ENERGYIQ_RELEASE_SHA = originalReleaseSha;
+    if (originalDistDir === undefined) delete process.env.NEXT_DIST_DIR;
+    else process.env.NEXT_DIST_DIR = originalDistDir;
+  }
+});
+
 for (const forbidden of [
   ["apps/web/.next/.env.production", "SECRET=value\n", /\.env/i],
   ["apps/web/.next/storage/workbench.sqlite", "sqlite", /storage|sqlite/i],
@@ -225,7 +285,7 @@ test("fails closed when a Next build-declared runtime file is missing", async (t
 
   const requiredPath = path.join(sourceDir, "apps", "web", ".next", "required-server-files.json");
   const required = JSON.parse(await readFile(requiredPath, "utf8"));
-  required.files.push("next.config.ts");
+  required.files.push("next.config.mjs");
   required.files.push("missing-runtime-config.json");
   await writeFile(requiredPath, JSON.stringify(required, null, 2) + "\n");
 

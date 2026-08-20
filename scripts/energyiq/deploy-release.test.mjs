@@ -44,7 +44,7 @@ const createArtifactFixture = async (root) => {
     version: 1,
     config: {
       outputFileTracingRoot: sourceDir,
-      configFileName: "next.config.ts",
+      configFileName: "next.config.mjs",
     },
     appDir: path.join(sourceDir, "apps", "web"),
     relativeAppDir: path.join("apps", "web"),
@@ -88,7 +88,7 @@ const createArtifactFixture = async (root) => {
     scripts: { start: "next start" },
     dependencies: { "@datafoundry/contracts": "0.2.0", next: "15.5.19" },
   }, null, 2) + "\n");
-  await writeFixtureFile(sourceDir, "apps/web/next.config.ts", "export default { compress: false };\n");
+  await writeFixtureFile(sourceDir, "apps/web/next.config.mjs", "export default { compress: false };\n");
   await writeFixtureFile(sourceDir, "apps/web/.next/BUILD_ID", `${RELEASE_SHA}\n`);
   await writeFixtureFile(
     sourceDir,

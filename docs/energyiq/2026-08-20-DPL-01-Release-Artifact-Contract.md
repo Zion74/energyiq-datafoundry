@@ -19,7 +19,7 @@ DPL-01 只建立 Build Host 输出合同，不上传或解压服务器文件，�
 
 构建入口是 exact clean Git checkout。Web release build 必须将
 `ENERGYIQ_RELEASE_SHA` 设为当前 40 字符 Git SHA；
-`apps/web/next.config.ts` 随后把 Next `BUILD_ID` 固定为该 SHA。普通本地 Web build 未设置此变量时，
+`apps/web/next.config.mjs` 随后把 Next `BUILD_ID` 固定为该 SHA。普通本地 Web build 未设置此变量时，
 仍使用 Next 默认 BUILD_ID。
 
 ## 2. 输出
@@ -71,6 +71,10 @@ Packager 不维护一份会随代码漂移的完整手写文件白名单，而�
 `required-server-files.json` 中 Build Host 的绝对 `appDir`、tracing root 和 Turbopack root 会改写为
 Release 相对路径；其他成品一旦仍包含 Build Host checkout 或 Build Host user profile 的绝对路径，
 pack 直接失败。
+
+Next `configFileName` 必须是 production-native `.js`、`.mjs` 或 `.cjs`。Artifact 拒绝
+`next.config.ts`，避免 `next start` 在只安装 production dependencies 的 Release Host 上尝试安装
+dev-only TypeScript 或访问 package registry。
 
 这解决的是“文件闭包从真实 start/build manifest 推导”，并不宣称已经选择依赖交付方式。
 Artifact v1 不含 `node_modules`。DPL-02/03 在依赖边界确定后仍须对解压成品做受控冷启动验收；

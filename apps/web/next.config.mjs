@@ -1,14 +1,15 @@
 import path from "node:path";
-import type { NextConfig } from "next";
+import { fileURLToPath } from "node:url";
 
-const workspaceRoot = path.join(__dirname, "../..");
+const workspaceRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const releaseSha = process.env.ENERGYIQ_RELEASE_SHA?.trim();
 
 if (releaseSha && !/^[0-9a-f]{40}$/.test(releaseSha)) {
   throw new Error("ENERGYIQ_RELEASE_SHA must be a lowercase 40-character Git SHA.");
 }
 
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   // Release builds pin Next's otherwise-random BUILD_ID to the exact source
   // identity. Ordinary local builds keep Next's default generated ID.
   generateBuildId: async () => releaseSha ?? null,

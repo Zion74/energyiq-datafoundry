@@ -339,6 +339,11 @@ const planReleaseEntries = async (sourceDir, gitSha) => {
   }
   const configFileName = requiredManifest.config?.configFileName;
   if (typeof configFileName === "string" && configFileName) {
+    if (!/\.(?:js|mjs|cjs)$/.test(configFileName)) {
+      throw new Error(
+        `Next config must be production-native .js/.mjs/.cjs, not dev-only TypeScript: ${configFileName}.`,
+      );
+    }
     const configPath = `${webPath}/${requireSafeRelativePath(configFileName, "Next config file")}`;
     addEntry(entries, configPath, await requireRegularFile(sourceDir, configPath, "Next config file"));
   }
