@@ -29,6 +29,8 @@ energyiq-<SHA>.sha256
   `verifyReleaseArtifact`；
 - 从收到的字节重新校验 Artifact SHA-256、checksum、逐 entry hash、Git SHA、
   `package-lock` hash、Web BUILD_ID、identity marker 和 Release Host exact Node；
+- 物理解析当前 `process.execPath`，只从该 Node 分发锚定位置解析 `npm-cli.js`，并由同一
+  Node executable 直接执行；不调用 PATH 中的 `npm` launcher；
 - malformed/tail/symlink/non-regular tar entry 全部拒绝；
 - 只从已验证内存 entry 解压到新的 `.staging-<SHA>`，避免 verify 后换包；
 - 新建 physical `releases/<SHA>`，不覆盖现有 release；
@@ -50,12 +52,17 @@ DPL-03 尚未决定 self-contained production dependencies 或 lock-hash depende
 该 seam 只在新 staging release 内执行：
 
 ```text
-npm ci --omit=dev --ignore-scripts
+<physical-process.execPath> <anchored-npm-cli.js> ci --omit=dev
 ```
 
-它不复用、链接或修改其他 release 的 `node_modules`，不运行 lifecycle/build script，并在命令后
-重新校验 `package-lock.json` 未变化。这仍然让生产机承担 dependency install，不能描述为最终“纯
-Release Host”。DPL-03 完成后应替换此 seam，而不是静默改变它的含义。
+它不复用、链接或修改其他 release 的 `node_modules`，也不运行 TypeScript/Next full build。
+此过渡 seam **有意保留 dependency lifecycle**，使 `duckdb`、`sharp` 等原生依赖能针对 Release
+Host exact Node 安装；同时在 install 期间临时移除 root manifest 的 install lifecycle（仓库当前
+root `postinstall` 会触发 development full build），并在命令成功或失败后恢复 Artifact 中的原始
+`package.json`。命令后仍重新校验 `package-lock.json` 未变化。切换 `current` 前，再由同一
+physical Node 加载 `duckdb` native binding 和 `sharp`，任一失败即 fail closed，保留 staging
+供诊断。这仍然让生产机承担 production dependency install，不能描述为最终“纯 Release Host”。
+DPL-03 完成后应把依赖安装移出生产，并替换此 seam，而不是静默改变它的含义。
 
 ## 3. 发布前人工门
 
@@ -99,7 +106,8 @@ npm run deploy:energyiq:release -- \
 ```
 
 服务单元名和 URL 必须以服务器实际配置为准，不能直接复制示例猜测。脚本从当前
-`process.version` 获取 Release Host Node，不接受 Operator 传一个伪造的 expected Node 值。
+`process.version` 获取 Release Host Node，不接受 Operator 传一个伪造的 expected Node 值；
+依赖安装和运行时探针均直接使用 `process.execPath` 解析后的 physical Node。
 
 成功后核对：
 
@@ -116,11 +124,11 @@ test ! -e /opt/energyiq-datafoundry/.deploy.lock
 
 ## 5. 失败语义
 
-- **Artifact/checksum/Manifest/SHA/Node 失败**：不解压、不安装依赖、不 smoke、不修改 `current`、
-  不 restart；释放本次创建的 lock。
+- **Artifact/checksum/Manifest/SHA/Node 或 physical npm CLI 失败**：不解压、不安装依赖、
+  不 smoke、不修改 `current`、不 restart；若已创建 lock 则释放。
 - **pre-switch smoke 失败**：不创建 staging/final，`current` 和现有服务保持不变。
-- **解压或 transitional dependency install 失败**：保留 staging 供诊断，`current` 不变；
-  lock 正常释放。
+- **解压、transitional dependency install 或 runtime dependency probe 失败**：保留已创建的
+  staging 供诊断，`current` 不变、不 restart；lock 正常释放。
 - **post-switch smoke 失败**：切回 verified previous physical release、restart 并再次 smoke；
   失败的新 physical release 保留。
 - **rollback 也失败**：返回组合错误并保留 `.deploy.lock`；停止自动操作，人工核对 current、

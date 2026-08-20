@@ -65,6 +65,7 @@ const createArtifactFixture = async (root) => {
     scripts: {
       "start:api": "npm --prefix apps/api run start",
       "start:web": "npm --prefix apps/web run start",
+      postinstall: "npm run build",
     },
   }, null, 2) + "\n");
   await writeFixtureFile(sourceDir, "package-lock.json", packageLockBody);
@@ -120,11 +121,15 @@ const createDeployFixture = async (t) => {
   const releasesRoot = path.join(appRoot, "releases");
   const previousRelease = path.join(releasesRoot, PREVIOUS_SHA);
   const backupPath = path.join(root, "backups", "metadata-before-release.tar.zst");
+  const nodeExecPath = path.join(root, "runtime", process.platform === "win32" ? "node.exe" : "node");
+  const npmCliPath = path.join(root, "runtime", "node_modules", "npm", "bin", "npm-cli.js");
   await mkdir(previousRelease, { recursive: true });
   await writeFile(path.join(previousRelease, "previous.txt"), "previous-release", "utf8");
   await symlink(previousRelease, path.join(appRoot, "current"), process.platform === "win32" ? "junction" : "dir");
   await mkdir(path.dirname(backupPath), { recursive: true });
   await writeFile(backupPath, "independent-backup", "utf8");
+  await writeFixtureFile(root, path.relative(root, nodeExecPath).replaceAll("\\", "/"), "fixture node\n");
+  await writeFixtureFile(root, path.relative(root, npmCliPath).replaceAll("\\", "/"), "fixture npm cli\n");
   const artifact = await createArtifactFixture(root);
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -134,6 +139,8 @@ const createDeployFixture = async (t) => {
     releasesRoot,
     previousRelease,
     backupPath,
+    nodeExecPath,
+    npmCliPath,
     artifact,
     input: {
       appRoot,
@@ -179,6 +186,7 @@ test("verifies and extracts a prebuilt release, installs dependencies explicitly
 
   const result = await deployEnergyIqRelease(fixture.input, {
     nodeVersion: NODE_VERSION,
+    nodeExecPath: fixture.nodeExecPath,
     verifyArtifact: async (input) => {
       events.push("verify");
       return verifyReleaseArtifact(input);
@@ -187,7 +195,12 @@ test("verifies and extracts a prebuilt release, installs dependencies explicitly
       events.push("extract");
       return extractVerifiedReleaseArtifact(verified, outputDir);
     },
-    run: commandRecorder(commands),
+    run: commandRecorder(commands, async (command, args, options) => {
+      if (command === fixture.nodeExecPath && args[0] === fixture.npmCliPath) {
+        const installManifest = JSON.parse(await readFile(path.join(options.cwd, "package.json"), "utf8"));
+        assert.equal(installManifest.scripts.postinstall, undefined);
+      }
+    }),
     checkHttp: async (url) => {
       events.push("smoke");
       smokeChecks.push(url);
@@ -201,27 +214,84 @@ test("verifies and extracts a prebuilt release, installs dependencies explicitly
   assert.equal(await readFile(path.join(finalRelease, "RELEASE_SHA"), "utf8"), `${RELEASE_SHA}\n`);
   assert.equal((await stat(path.join(finalRelease, "scripts", "energyiq", "deploy-release.mjs"))).isFile(), true);
   assert.equal(JSON.parse(await readFile(path.join(finalRelease, "release-manifest.json"), "utf8")).gitSha, RELEASE_SHA);
+  assert.equal(
+    JSON.parse(await readFile(path.join(finalRelease, "package.json"), "utf8")).scripts.postinstall,
+    "npm run build",
+  );
   assert.equal(await readFile(path.join(fixture.previousRelease, "previous.txt"), "utf8"), "previous-release");
   await assertCurrentIs(fixture, finalRelease);
   assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
 
-  assert.deepEqual(commands, [
-    {
-      command: "npm",
-      args: ["ci", "--omit=dev", "--ignore-scripts"],
-      cwd: path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`),
-    },
-    {
-      command: "systemctl",
-      args: ["restart", "energyiq-api", "energyiq-web"],
-      cwd: undefined,
-    },
-  ]);
+  const stagingDir = path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`);
+  assert.deepEqual(commands[0], {
+    command: fixture.nodeExecPath,
+    args: [fixture.npmCliPath, "ci", "--omit=dev"],
+    cwd: stagingDir,
+  });
+  assert.equal(commands[0].args.includes("--ignore-scripts"), false);
+  assert.equal(commands[1].command, fixture.nodeExecPath);
+  assert.equal(commands[1].args[0], "-e");
+  assert.match(commands[1].args[1], /require\(["']duckdb["']\)/);
+  assert.match(commands[1].args[1], /require\(["']sharp["']\)/);
+  assert.equal(commands[1].cwd, stagingDir);
+  assert.deepEqual(commands[2], {
+    command: "systemctl",
+    args: ["restart", "energyiq-api", "energyiq-web"],
+    cwd: undefined,
+  });
+  assert.equal(commands.some(({ command }) => command === "npm"), false);
   assert.equal(commands.some(({ args }) => args.includes("build") || args.includes("build:web")), false);
   assert.deepEqual(events.slice(0, 5), ["verify", "smoke", "smoke", "smoke", "extract"]);
   assert.deepEqual(smokeChecks, [...fixture.input.smokeUrls, ...fixture.input.smokeUrls]);
   assert.equal(result.dependencyInstall, "transitional-npm-ci");
   assert.equal(result.releaseHostNodeVersion, NODE_VERSION);
+});
+
+test("runtime dependency probe failure leaves current unchanged before restart", async (t) => {
+  const fixture = await createDeployFixture(t);
+  const commands = [];
+
+  await assert.rejects(
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
+      run: commandRecorder(commands, async (command, args) => {
+        if (command === fixture.nodeExecPath && args[0] === "-e") {
+          throw new Error("duckdb native binding is unavailable");
+        }
+      }),
+      checkHttp: async () => {},
+    }),
+    /runtime dependency probe failed/i,
+  );
+
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  assert.equal((await stat(path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`))).isDirectory(), true);
+  assert.equal(await lstat(path.join(fixture.releasesRoot, RELEASE_SHA)).then(() => true, () => false), false);
+  assert.equal(commands.some(({ command }) => command === "systemctl"), false);
+  assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
+});
+
+test("missing physical npm CLI fails closed before artifact verification or extraction", async (t) => {
+  const fixture = await createDeployFixture(t);
+  await rm(fixture.npmCliPath);
+  let verifyCalls = 0;
+
+  await assert.rejects(
+    deployEnergyIqRelease(fixture.input, {
+      nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
+      verifyArtifact: async () => { verifyCalls += 1; },
+      run: async () => { throw new Error("must not run"); },
+      checkHttp: async () => { throw new Error("must not smoke"); },
+    }),
+    /npm CLI was not found/i,
+  );
+
+  assert.equal(verifyCalls, 0);
+  await assertCurrentIs(fixture, fixture.previousRelease);
+  assert.equal(await lstat(path.join(fixture.releasesRoot, `.staging-${RELEASE_SHA}`)).then(() => true, () => false), false);
+  assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
 });
 
 for (const failure of [
@@ -256,6 +326,7 @@ for (const failure of [
     await assert.rejects(
       deployEnergyIqRelease(input, {
         nodeVersion: failure.nodeVersion ?? NODE_VERSION,
+        nodeExecPath: fixture.nodeExecPath,
         run: commandRecorder(commands),
         checkHttp: async (url) => { smokeChecks.push(url); },
       }),
@@ -309,6 +380,7 @@ for (const corruption of [
     await assert.rejects(
       deployEnergyIqRelease(fixture.input, {
         nodeVersion: NODE_VERSION,
+        nodeExecPath: fixture.nodeExecPath,
         run: commandRecorder(commands),
         checkHttp: async () => {},
       }),
@@ -327,6 +399,7 @@ test("pre-switch smoke failure leaves current and release directories untouched"
   await assert.rejects(
     deployEnergyIqRelease(fixture.input, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       run: commandRecorder(commands),
       checkHttp: async () => { throw new Error("pre-switch smoke failed"); },
       smokeAttempts: 1,
@@ -351,6 +424,7 @@ test("post-switch smoke failure rolls back to the previous physical release", as
   await assert.rejects(
     deployEnergyIqRelease(fixture.input, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       run: commandRecorder(commands),
       checkHttp: async (url) => {
         smokeChecks.push(url);
@@ -381,6 +455,7 @@ test("rollback verification failure retains the deploy lock for manual intervent
   await assert.rejects(
     deployEnergyIqRelease(fixture.input, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       run: async () => ({ stdout: "", stderr: "" }),
       checkHttp: async () => {
         smokeChecks += 1;
@@ -405,6 +480,7 @@ test("an existing deploy lock fails closed before verification", async (t) => {
   await assert.rejects(
     deployEnergyIqRelease(fixture.input, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       verifyArtifact: async () => { verifyCalls += 1; },
       run: async () => { throw new Error("must not run"); },
       checkHttp: async () => { throw new Error("must not smoke"); },
@@ -422,6 +498,7 @@ test("dependency install must be explicit and cannot change package-lock", async
   await assert.rejects(
     deployEnergyIqRelease({ ...fixture.input, dependencyInstall: undefined }, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       run: async () => { throw new Error("must not run"); },
       checkHttp: async () => {},
     }),
@@ -432,8 +509,11 @@ test("dependency install must be explicit and cannot change package-lock", async
   await assert.rejects(
     deployEnergyIqRelease(fixture.input, {
       nodeVersion: NODE_VERSION,
+      nodeExecPath: fixture.nodeExecPath,
       run: commandRecorder(commands, async (command, _args, options) => {
-        if (command === "npm") await writeFile(path.join(options.cwd, "package-lock.json"), "modified\n");
+        if (command === fixture.nodeExecPath && _args[0] === fixture.npmCliPath) {
+          await writeFile(path.join(options.cwd, "package-lock.json"), "modified\n");
+        }
       }),
       checkHttp: async () => {},
     }),

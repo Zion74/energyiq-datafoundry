@@ -25,7 +25,17 @@ import {
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const NODE_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:[-+].+)?$/;
 const TRANSITIONAL_DEPENDENCY_INSTALL = "transitional-npm-ci";
-const TRANSITIONAL_NPM_ARGS = ["ci", "--omit=dev", "--ignore-scripts"];
+const TRANSITIONAL_NPM_ARGS = ["ci", "--omit=dev"];
+const RUNTIME_DEPENDENCY_PROBE = 'require("duckdb");require("sharp");';
+const ROOT_INSTALL_LIFECYCLE_SCRIPTS = [
+  "preinstall",
+  "install",
+  "postinstall",
+  "prepublish",
+  "preprepare",
+  "prepare",
+  "postprepare",
+];
 
 const pathExists = async (value) => {
   try {
@@ -80,6 +90,32 @@ const requireAbsolutePhysicalFile = async (label, value) => {
   if (!details.isFile() || details.isSymbolicLink()) {
     throw new Error(`${label} must be a physical file.`);
   }
+};
+
+const resolveReleaseHostRuntime = async (nodeExecPath) => {
+  if (typeof nodeExecPath !== "string" || !path.isAbsolute(nodeExecPath)) {
+    throw new Error("Release Host Node executable must be an absolute path.");
+  }
+  const physicalNodeExecPath = await realpath(nodeExecPath);
+  await requireAbsolutePhysicalFile("Release Host Node executable", physicalNodeExecPath);
+
+  const nodeDirectory = path.dirname(physicalNodeExecPath);
+  const npmCliCandidates = [
+    path.join(nodeDirectory, "node_modules", "npm", "bin", "npm-cli.js"),
+    path.resolve(nodeDirectory, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    path.resolve(nodeDirectory, "..", "share", "nodejs", "npm", "bin", "npm-cli.js"),
+  ];
+  for (const candidate of npmCliCandidates) {
+    if (!await pathExists(candidate)) continue;
+    const physicalNpmCliPath = await realpath(candidate);
+    await requireAbsolutePhysicalFile("Release Host npm CLI", physicalNpmCliPath);
+    if (path.basename(physicalNpmCliPath) !== "npm-cli.js") {
+      throw new Error("Release Host npm CLI must resolve to the physical npm-cli.js file.");
+    }
+    return { physicalNodeExecPath, physicalNpmCliPath };
+  }
+
+  throw new Error(`Release Host npm CLI was not found in the Node distribution anchored at ${physicalNodeExecPath}.`);
 };
 
 const requireIndependentBackup = async (appRoot, backupPath) => {
@@ -191,6 +227,34 @@ const requireUnchangedPackageLock = async (releaseDir, expectedHash) => {
   }
 };
 
+const runTransitionalDependencyInstall = async (releaseDir, releaseHostRuntime, run) => {
+  const packageJsonPath = path.join(releaseDir, "package.json");
+  const originalPackageJson = await readFile(packageJsonPath);
+  const installManifest = JSON.parse(originalPackageJson.toString("utf8"));
+  if (installManifest.scripts && typeof installManifest.scripts === "object") {
+    installManifest.scripts = { ...installManifest.scripts };
+    for (const scriptName of ROOT_INSTALL_LIFECYCLE_SCRIPTS) {
+      delete installManifest.scripts[scriptName];
+    }
+  }
+
+  await writeFile(packageJsonPath, `${JSON.stringify(installManifest, null, 2)}\n`, "utf8");
+  try {
+    await run(
+      releaseHostRuntime.physicalNodeExecPath,
+      [releaseHostRuntime.physicalNpmCliPath, ...TRANSITIONAL_NPM_ARGS],
+      { cwd: releaseDir },
+    );
+  } finally {
+    await writeFile(packageJsonPath, originalPackageJson);
+  }
+
+  const restoredPackageJson = await readFile(packageJsonPath);
+  if (!restoredPackageJson.equals(originalPackageJson)) {
+    throw new Error("Transitional dependency install did not restore the verified root package.json.");
+  }
+};
+
 const requirePhysicalCurrentRelease = async (appRoot, releasesRoot) => {
   const currentLink = path.join(appRoot, "current");
   const currentDetails = await lstat(currentLink);
@@ -215,6 +279,7 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
   const smokeAttempts = dependencies.smokeAttempts ?? 60;
   const sleep = dependencies.sleep ?? defaultSleep;
   const releaseHostNodeVersion = dependencies.nodeVersion ?? process.version;
+  const releaseHostNodeExecPath = dependencies.nodeExecPath ?? process.execPath;
   const releaseSha = input.releaseSha?.trim();
 
   if (!RELEASE_SHA_PATTERN.test(releaseSha ?? "")) {
@@ -239,6 +304,7 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
   if (!input.apiService || !input.webService) {
     throw new Error("Both API and Web service names are required.");
   }
+  const releaseHostRuntime = await resolveReleaseHostRuntime(releaseHostNodeExecPath);
 
   const appRoot = await realpath(input.appRoot);
   const releasesRoot = path.join(appRoot, "releases");
@@ -286,9 +352,21 @@ export async function deployEnergyIqRelease(input, dependencies = {}) {
 
     // DPL-03 has not selected a dependency artifact/layer. This explicit seam
     // installs into this staging release only, never reuses or mutates another
-    // release's node_modules, and deliberately runs no lifecycle/build scripts.
-    await run("npm", TRANSITIONAL_NPM_ARGS, { cwd: stagingDir });
+    // release's node_modules. Dependency lifecycle scripts remain enabled so
+    // native DuckDB and Sharp bindings are installed for this exact Node. Root
+    // install lifecycles are suppressed temporarily because this repository's
+    // postinstall is a development full build; the verified manifest is restored.
+    await runTransitionalDependencyInstall(stagingDir, releaseHostRuntime, run);
     await requireUnchangedPackageLock(stagingDir, verifiedArtifact.manifest.packageLockHash);
+    try {
+      await run(
+        releaseHostRuntime.physicalNodeExecPath,
+        ["-e", RUNTIME_DEPENDENCY_PROBE],
+        { cwd: stagingDir },
+      );
+    } catch (error) {
+      throw new Error("Runtime dependency probe failed before current switch.", { cause: error });
+    }
     await requireReleaseIdentityMarkers(stagingDir, releaseSha);
     await rename(stagingDir, finalRelease);
 
