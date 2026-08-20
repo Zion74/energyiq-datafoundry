@@ -27,6 +27,7 @@ const NODE_VERSION_PATTERN = /^v\d+\.\d+\.\d+(?:[-+].+)?$/;
 const TRANSITIONAL_DEPENDENCY_INSTALL = "transitional-npm-ci";
 const TRANSITIONAL_NPM_ARGS = ["ci", "--omit=dev"];
 const RUNTIME_DEPENDENCY_PROBE = 'require("duckdb");require("sharp");';
+// Complete npm install/ci root lifecycle; dependency package lifecycles stay enabled.
 const ROOT_INSTALL_LIFECYCLE_SCRIPTS = [
   "preinstall",
   "install",

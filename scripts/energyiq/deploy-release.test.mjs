@@ -57,7 +57,7 @@ const createArtifactFixture = async (root) => {
   };
   const packageLockBody = "{\n  \"lockfileVersion\": 3\n}\n";
 
-  await writeFixtureFile(sourceDir, "package.json", JSON.stringify({
+  const rootPackageJsonBody = JSON.stringify({
     name: "datafoundry",
     private: true,
     type: "module",
@@ -66,8 +66,10 @@ const createArtifactFixture = async (root) => {
       "start:api": "npm --prefix apps/api run start",
       "start:web": "npm --prefix apps/web run start",
       postinstall: "npm run build",
+      prepare: "npm run build",
     },
-  }, null, 2) + "\n");
+  }, null, 2) + "\n";
+  await writeFixtureFile(sourceDir, "package.json", rootPackageJsonBody);
   await writeFixtureFile(sourceDir, "package-lock.json", packageLockBody);
   await writeFixtureFile(sourceDir, "scripts/energyiq/build-release-artifact.mjs", "export const buildTool = true;\n");
   await writeFixtureFile(sourceDir, "scripts/energyiq/deploy-release.mjs", "export const deployTool = true;\n");
@@ -105,7 +107,7 @@ const createArtifactFixture = async (root) => {
   }, null, 2) + "\n");
   await writeFixtureFile(sourceDir, "packages/contracts/dist/index.js", "export const contract = true;\n");
 
-  return createReleaseArtifact({
+  const artifact = await createReleaseArtifact({
     sourceDir,
     outputDir,
     gitSha: RELEASE_SHA,
@@ -113,6 +115,7 @@ const createArtifactFixture = async (root) => {
     nodeVersion: NODE_VERSION,
     metadataSchemaRevision: METADATA_SCHEMA_REVISION,
   });
+  return { ...artifact, rootPackageJsonBody };
 };
 
 const createDeployFixture = async (t) => {
@@ -199,6 +202,7 @@ test("verifies and extracts a prebuilt release, installs dependencies explicitly
       if (command === fixture.nodeExecPath && args[0] === fixture.npmCliPath) {
         const installManifest = JSON.parse(await readFile(path.join(options.cwd, "package.json"), "utf8"));
         assert.equal(installManifest.scripts.postinstall, undefined);
+        assert.equal(installManifest.scripts.prepare, undefined);
       }
     }),
     checkHttp: async (url) => {
@@ -214,10 +218,7 @@ test("verifies and extracts a prebuilt release, installs dependencies explicitly
   assert.equal(await readFile(path.join(finalRelease, "RELEASE_SHA"), "utf8"), `${RELEASE_SHA}\n`);
   assert.equal((await stat(path.join(finalRelease, "scripts", "energyiq", "deploy-release.mjs"))).isFile(), true);
   assert.equal(JSON.parse(await readFile(path.join(finalRelease, "release-manifest.json"), "utf8")).gitSha, RELEASE_SHA);
-  assert.equal(
-    JSON.parse(await readFile(path.join(finalRelease, "package.json"), "utf8")).scripts.postinstall,
-    "npm run build",
-  );
+  assert.equal(await readFile(path.join(finalRelease, "package.json"), "utf8"), fixture.artifact.rootPackageJsonBody);
   assert.equal(await readFile(path.join(fixture.previousRelease, "previous.txt"), "utf8"), "previous-release");
   await assertCurrentIs(fixture, finalRelease);
   assert.equal(await lstat(path.join(fixture.appRoot, ".deploy.lock")).then(() => true, () => false), false);
