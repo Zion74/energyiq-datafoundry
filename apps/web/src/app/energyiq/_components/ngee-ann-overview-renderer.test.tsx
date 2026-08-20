@@ -273,6 +273,9 @@ describe("NgeeAnnOverviewRenderer", () => {
 
     const circuit = container.querySelector("#ngee-ann-circuit-analysis");
     const recommendations = container.querySelector("#ngee-ann-recommendations");
+    const dailyTrend = container.querySelector("#ngee-ann-daily-trend");
+    expect(dailyTrend?.querySelector('[data-report-window="recent-operations"]')).not.toBeNull();
+    expect(dailyTrend?.querySelector('[data-report-window="current-month-progress"]')).toBeNull();
     expect(circuit?.querySelector('[data-report-window="recent-operations"]')).not.toBeNull();
     expect(circuit?.querySelector('[data-report-window="current-month-progress"]')).toBeNull();
     expect(recommendations?.querySelector('[data-report-window="current-month-progress"]')).not.toBeNull();

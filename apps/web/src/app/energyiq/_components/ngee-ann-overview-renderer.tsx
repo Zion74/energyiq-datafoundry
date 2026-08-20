@@ -177,6 +177,12 @@ export function NgeeAnnOverviewRenderer({
 
       <div id="ngee-ann-daily-trend" data-overview-section="true" className="scroll-mt-28">
         <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
+          <div className="mb-2 flex justify-end">
+            <OverviewWindowLabel
+              context={state.snapshot.reportTimeContext}
+              windowIds={["recent-operations"]}
+            />
+          </div>
           <p className="max-w-4xl text-sm font-semibold leading-6 text-foreground">{view.changeOverTime.headline}</p>
           <p className="mt-1 max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
         </div>

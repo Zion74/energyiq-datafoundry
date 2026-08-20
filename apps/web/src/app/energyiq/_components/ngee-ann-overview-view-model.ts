@@ -960,6 +960,11 @@ export function buildNgeeAnnOverviewViewModel(
     recentOperationsSnapshot,
     unavailable,
   );
+  const recentOperationsEnergyTrend = buildEnergyTrend(
+    recentOperationsSnapshot,
+    unavailable,
+    hint.trendGrain,
+  );
   const recentOperationsEnergyComposition = buildEnergyComposition(
     recentOperationsSnapshot,
     unavailable,
@@ -988,7 +993,10 @@ export function buildNgeeAnnOverviewViewModel(
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
     metadataLimitation: buildMetadataLimitation(snapshot),
     executiveSummary,
-    changeOverTime: buildChangeOverTimeSummary(executiveSummary, reportEditionDailyAnomalies),
+    changeOverTime: buildChangeOverTimeSummary(
+      recentOperationsEnergyTrend,
+      recentOperationsDailyAnomalies,
+    ),
     highlights: [
       {
         id: "total",
@@ -1054,7 +1062,7 @@ export function buildNgeeAnnOverviewViewModel(
     ],
     decisionPriorities: buildDecisionPriorities(snapshot, reportEditionDailyAnomalies),
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
-    energyTrend: buildEnergyTrend(recentOperationsSnapshot, unavailable, hint.trendGrain),
+    energyTrend: recentOperationsEnergyTrend,
     dailyAnomalies: recentOperationsDailyAnomalies,
     dayProfile: buildDayProfile(recentOperationsSnapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(recentOperationsSnapshot, unavailable),
@@ -2265,10 +2273,15 @@ function buildExecutiveSummary(
 }
 
 function buildChangeOverTimeSummary(
-  executiveSummary: NgeeAnnExecutiveSummaryViewModel,
+  energyTrend: NgeeAnnEnergyTrendViewModel,
   dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
 ): NgeeAnnChangeOverTimeSummaryViewModel {
-  const firstReview = executiveSummary.signals.find((signal) => signal.id === "first-review")!;
+  if (energyTrend.status === "unavailable") {
+    return {
+      headline: "Recent daily energy is unavailable",
+      detail: energyTrend.reason ?? "The bounded recent-operations window does not contain an accepted daily trend.",
+    };
+  }
   const largestIncident = largestDailyAnomalyIncident(dailyAnomalies);
   if (largestIncident) {
     return {
@@ -2276,9 +2289,15 @@ function buildChangeOverTimeSummary(
       detail: "The trend uses accepted daily energy. Exception markers use the separately governed comparable-day Rule; open the date to verify its Evidence before deciding why it happened.",
     };
   }
+  if (dailyAnomalies.status === "unavailable") {
+    return {
+      headline: "Recent accepted daily energy is available",
+      detail: "The 28-day curve uses accepted daily energy. Comparable-day exception markers are unavailable for this bounded window, so no alert is borrowed from the Report Edition.",
+    };
+  }
   return {
-    headline: firstReview.value,
-    detail: firstReview.detail,
+    headline: "No eligible comparable-day exception was found in recent operations",
+    detail: "The 28-day accepted daily energy curve remains available for review; the governed comparable-day Rule did not publish an eligible alert for this window.",
   };
 }
 

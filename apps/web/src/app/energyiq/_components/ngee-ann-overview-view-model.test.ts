@@ -441,6 +441,10 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.usageHeatmap.scopes[0]?.cells).toHaveLength(72);
     expect(view.dailyAnomalies.status).toBe("unavailable");
     expect(view.decisionPriorities.status).toBe("available");
+    expect(view.changeOverTime).toEqual({
+      headline: "Recent accepted daily energy is available",
+      detail: "The 28-day curve uses accepted daily energy. Comparable-day exception markers are unavailable for this bounded window, so no alert is borrowed from the Report Edition.",
+    });
     expect(view.energyComposition.evidence.period)
       .toBe("[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(view.energyComposition.circuits.rows.find((row) => (
