@@ -72,9 +72,9 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 
 ### M3 — #9 论点驱动 Overview
 
-- [ ] 页首只保留 1–3 个管理主题，回答“发生什么、为什么重要、先核查什么”；
-- [ ] 每个主题使用 `Claim → Visual proof → Meaning → Next check → Evidence/limitation`；
-- [ ] 图表和表格降为论据或 supporting diagnostics，不再平铺数据；
+- [x] 页首只保留 1–3 个管理主题，回答“发生什么、为什么重要、先核查什么”；
+- [x] 每个主题使用 `Claim → Visual proof → Meaning → Next check → Evidence/limitation`；
+- [x] 图表和表格降为论据或 supporting diagnostics，不再平铺数据；
 - [ ] Key Findings 不复制单个 Section Interpretation；
 - [ ] 无可证实结论时显示诚实空状态，不让 AI 用套话填满卡片；
 - [ ] 1440 / 1920 / tablet 浏览器核对信息层级、折行、Evidence 和可访问性。
@@ -180,6 +180,15 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - 安全：partial/unavailable 段不发布月总量；历史日明细不进入客户端 payload，6 段 JSON 小于 8 KB。
 - 验证：Report Time + Resolver 2 files / 15 tests；API build；Web production build；`git diff --check`。
 - 剩余：现有 compact fixture 只有 June 数据，因此历史月应 unavailable；M2 必须用四份真实 workbook 证明 May complete 和 June same-progress，不得用 synthetic 结果冒充。
+
+### 2026-08-21 M3 tracer 1 — 论点驱动的阅读顺序
+
+- RED：公开 Renderer 还将 `Daily Total Trend → Executive Summary → Summary of Findings → 深层诊断 → Recommendations → AI` 作为 DOM 顺序，管理用户需要穿过大量数据才能看到结论；
+- GREEN：重排为 `Management themes → Executive Summary → verified breakdown → Key Findings → Daily Trend → supporting diagnostics`，保留原 Snapshot、Period、Evidence 和 AI Artifact 恢复合同；
+- 视觉组织：既有 1–3 个决策主题继续承担 `Claim → Visual proof → Meaning → Next check → Evidence/limitation`；原六张平级 Summary cards 收入默认关闭的 `Supporting diagnostic index`，不删除任何真定性结果；
+- 可访问性：折叠层使用原生 `details/summary`、键盘 focus ring 与现有 icon system，DOM 与阅读顺序一致；
+- 验证：Renderer 74/74；Ngee Ann Renderer/ViewModel/AI slots 合跑为 241 pass + 1 个 5s timeout，该用例单跑 1/1 通过；Impeccable layout detector `[]`；
+- 未声称：尚未在 1440/1920/tablet 真实浏览器检查折行、折叠与阅读节奏，亦未经 Charles 人工判断。
 
 ## 9. 完成定义
 

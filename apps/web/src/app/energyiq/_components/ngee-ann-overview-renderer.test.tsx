@@ -195,7 +195,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("The server Day Profile contract is incomplete or invalid.");
   });
 
-  it("opens with an answer-first Executive Summary built only from verified Snapshot facts", () => {
+  it("opens with management themes, verified figures and AI before supporting diagnostics", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const view = buildNgeeAnnOverviewViewModel(snapshot);
 
@@ -239,13 +239,13 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain('href="#ngee-ann-circuit-analysis"');
     expect(markup).toContain('href="#incident-project-2026-06-13"');
     const expectedSections = [
-      ["ngee-ann-daily-trend", "Daily Total Trend"],
+      ["ngee-ann-recommendations", "Management themes"],
       ["ngee-ann-executive-summary", "Executive Summary"],
-      ["ngee-ann-summary-findings", "Summary of Findings"],
+      ["ngee-ann-daily-trend", "Daily Total Trend"],
+      ["ngee-ann-summary-findings", "Supporting diagnostic index"],
       ["ngee-ann-day-profile-analysis", "Day Profile Analysis"],
       ["ngee-ann-energy-health", "Energy Health Summary"],
       ["ngee-ann-circuit-analysis", "Circuit Category Analysis"],
-      ["ngee-ann-recommendations", "Personalized Recommendations"],
       ["ngee-ann-evidence", "Evidence and calculation details"],
     ] as const;
     const container = document.createElement("div");
@@ -257,10 +257,16 @@ describe("NgeeAnnOverviewRenderer", () => {
     }
     expect(markup).toContain("Detected Anomaly List");
     expect(container.querySelectorAll("[data-summary-finding]")).toHaveLength(6);
+    const supportingIndex = container.querySelector<HTMLDetailsElement>("#ngee-ann-summary-findings");
+    expect(supportingIndex?.open).toBe(false);
+    expect(supportingIndex?.querySelector("summary")?.textContent).toContain("Supporting diagnostic index");
     expect(container.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(1);
+    expect(markup.indexOf("Management themes")).toBeLessThan(markup.indexOf("Executive Summary"));
     expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Consumption Breakdown"));
     expect(markup.indexOf("Consumption Breakdown")).toBeLessThan(markup.indexOf("Energy Distribution"));
-    expect(markup.indexOf("Energy Distribution")).toBeLessThan(markup.indexOf("Summary of Findings"));
+    expect(markup.indexOf("Energy Distribution")).toBeLessThan(markup.indexOf("Key Findings"));
+    expect(markup.indexOf("Key Findings")).toBeLessThan(markup.indexOf("Daily Total Trend"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Supporting diagnostic index"));
   });
 
   it("labels Circuit evidence as recent operations and Recommendations as the Report Edition", () => {
@@ -542,9 +548,10 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI interpretation");
     expect(markup).toContain("Restoring saved AI analysis");
-    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Management themes")).toBeLessThan(markup.indexOf("Executive Summary"));
     expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Key Highlights"));
-    expect(markup.indexOf("Circuit Category Analysis")).toBeLessThan(markup.indexOf("Personalized Recommendations"));
+    expect(markup.indexOf("Key Findings")).toBeLessThan(markup.indexOf("Daily Total Trend"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Circuit Category Analysis"));
     expect(markup.indexOf('id="ngee-ann-recommendations"')).toBeLessThan(markup.indexOf('id="ngee-ann-ai-analysis"'));
     expect(markup.indexOf('id="ngee-ann-ai-analysis"')).toBeLessThan(markup.indexOf('id="ngee-ann-evidence"'));
 
@@ -785,8 +792,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("level-7");
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
-    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
-    expect(markup.indexOf("Detected Anomaly List")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Management themes")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Key Findings")).toBeLessThan(markup.indexOf("Daily Total Trend"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Detected Anomaly List"));
     expect(markup.indexOf("Day Profile Analysis")).toBeLessThan(markup.indexOf("Energy distribution"));
     expect(markup.indexOf("Energy distribution")).toBeLessThan(markup.indexOf("Energy composition"));
     expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));

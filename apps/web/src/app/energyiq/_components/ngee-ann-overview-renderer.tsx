@@ -175,33 +175,19 @@ export function NgeeAnnOverviewRenderer({
         </div>
       ) : null}
 
-      <div id="ngee-ann-daily-trend" data-overview-section="true" className="scroll-mt-28">
-        <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
-          <div className="mb-2 flex justify-end">
-            <OverviewWindowLabel
-              context={state.snapshot.reportTimeContext}
-              windowIds={["recent-operations"]}
-            />
-          </div>
-          <p className="max-w-4xl text-sm font-semibold leading-6 text-foreground">{view.changeOverTime.headline}</p>
-          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
-        </div>
-        <NgeeAnnDailyTrendSection
-          key={[
-            "daily-trend",
-            view.energyTrend.evidence.period,
-            view.dailyAnomalies.evidence.snapshotId,
-            view.dailyAnomalies.evidence.projectReleaseId,
-            view.dailyAnomalies.evidence.bundleId ?? "unavailable",
-          ].join(":")}
-          trend={view.energyTrend}
-          anomalies={view.dailyAnomalies}
-          comparison={comparison}
-          category={category}
-          onComparisonChange={onComparisonChange}
-          onCategoryChange={onCategoryChange}
-        />
-      </div>
+      <OverviewSectionHeading
+        id="ngee-ann-recommendations"
+        title="Management themes"
+        description="What changed, why it matters, and the first checks supported by this Report Edition. No saving is assumed."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["current-month-progress"]}
+      />
+
+      <NgeeAnnDecisionPriorities
+        view={view.decisionPriorities}
+        projectExplorerHref={projectExplorerHref}
+        aiAnalystHref={aiAnalystHref}
+      />
 
       <OverviewSectionHeading
         id="ngee-ann-executive-summary"
@@ -216,70 +202,6 @@ export function NgeeAnnOverviewRenderer({
       <NgeeAnnConsumptionBreakdown view={view.componentCategoryBreakdown} />
 
       <NgeeAnnEnergyDistribution view={view.componentCategoryBreakdown} />
-
-      <OverviewSectionHeading
-        id="ngee-ann-summary-findings"
-        title="Summary of Findings"
-        description="Verified findings from the selected Snapshot, kept separate from AI interpretation."
-        reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["current-month-progress"]}
-      />
-
-      <NgeeAnnSummaryFindings view={view} />
-
-      <OverviewSectionHeading
-        id="ngee-ann-day-profile-analysis"
-        title="Day Profile Analysis"
-        description="Compare the accepted 24-hour shape by Day Type and Scope."
-        reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["recent-operations", "day-type-reference"]}
-      />
-
-      <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
-
-      <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
-
-      <OverviewSectionHeading
-        id="ngee-ann-energy-health"
-        title="Time-based Behavioral Analysis"
-        description="Review day-type averages, weekday time bands and accepted Level totals before moving into Circuit evidence."
-        reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["recent-operations", "day-type-reference"]}
-      />
-
-      <NgeeAnnEnergyHealth dayProfile={view.dayProfile} levelComparison={view.levelComparison} />
-
-      <NgeeAnnLevelComparison view={view.levelComparison} />
-
-      <OverviewSectionHeading
-        id="ngee-ann-circuit-analysis"
-        title="Circuit Category Analysis"
-        description="Rank the published Circuit evidence that explains the Project result."
-        reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["recent-operations"]}
-      />
-
-      <NgeeAnnCircuitRanking view={view.energyComposition.circuits} />
-
-      <NgeeAnnEnergyComposition
-        view={view.energyComposition}
-        category={category}
-        onCategoryChange={onCategoryChange}
-      />
-
-      <OverviewSectionHeading
-        id="ngee-ann-recommendations"
-        title="Personalized Recommendations"
-        description="Prioritised operational checks supported by the current Report Edition; no saving is assumed."
-        reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["current-month-progress"]}
-      />
-
-      <NgeeAnnDecisionPriorities
-        view={view.decisionPriorities}
-        projectExplorerHref={projectExplorerHref}
-        aiAnalystHref={aiAnalystHref}
-      />
 
       <div id="ngee-ann-ai-analysis" className="scroll-mt-28 border-b border-border">
         {aiSlotMode === "saved" && savedAiArtifact?.contract === "energyiq-saved-ai-result@3"
@@ -320,6 +242,107 @@ export function NgeeAnnOverviewRenderer({
           } : {})}
         />}
       </div>
+
+      <div id="ngee-ann-daily-trend" data-overview-section="true" className="scroll-mt-28">
+        <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
+          <div className="mb-2 flex justify-end">
+            <OverviewWindowLabel
+              context={state.snapshot.reportTimeContext}
+              windowIds={["recent-operations"]}
+            />
+          </div>
+          <p className="max-w-4xl text-sm font-semibold leading-6 text-foreground">{view.changeOverTime.headline}</p>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
+        </div>
+        <NgeeAnnDailyTrendSection
+          key={[
+            "daily-trend",
+            view.energyTrend.evidence.period,
+            view.dailyAnomalies.evidence.snapshotId,
+            view.dailyAnomalies.evidence.projectReleaseId,
+            view.dailyAnomalies.evidence.bundleId ?? "unavailable",
+          ].join(":")}
+          trend={view.energyTrend}
+          anomalies={view.dailyAnomalies}
+          comparison={comparison}
+          category={category}
+          onComparisonChange={onComparisonChange}
+          onCategoryChange={onCategoryChange}
+        />
+      </div>
+
+      <details
+        id="ngee-ann-summary-findings"
+        data-overview-section="true"
+        className="group scroll-mt-28 border-b border-border bg-surface"
+      >
+        <summary className="cursor-pointer list-none px-5 pb-4 pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/20 lg:px-7 lg:pt-8 [&::-webkit-details-marker]:hidden">
+          <span className="flex items-start justify-between gap-4">
+            <span>
+              <span className="block text-lg font-semibold tracking-[-0.015em] text-foreground">
+                Supporting diagnostic index
+              </span>
+              <span className="mt-1.5 block max-w-3xl text-sm leading-6 text-muted">
+                Open the six verified data checks when you need the supporting diagnostics behind the management themes.
+              </span>
+            </span>
+            <EnergyIcon
+              name="chevron"
+              aria-hidden="true"
+              className="mt-1 h-4 w-4 shrink-0 text-muted transition-transform group-open:rotate-180"
+            />
+          </span>
+        </summary>
+        <div className="border-t border-border">
+          <div className="flex justify-end px-5 pt-4 lg:px-7">
+            <OverviewWindowLabel
+              context={state.snapshot.reportTimeContext}
+              windowIds={["current-month-progress"]}
+            />
+          </div>
+          <NgeeAnnSummaryFindings view={view} />
+        </div>
+      </details>
+
+      <OverviewSectionHeading
+        id="ngee-ann-day-profile-analysis"
+        title="Day Profile Analysis"
+        description="Compare the accepted 24-hour shape by Day Type and Scope."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations", "day-type-reference"]}
+      />
+
+      <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
+
+      <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
+
+      <OverviewSectionHeading
+        id="ngee-ann-energy-health"
+        title="Time-based Behavioral Analysis"
+        description="Review day-type averages, weekday time bands and accepted Level totals before moving into Circuit evidence."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations", "day-type-reference"]}
+      />
+
+      <NgeeAnnEnergyHealth dayProfile={view.dayProfile} levelComparison={view.levelComparison} />
+
+      <NgeeAnnLevelComparison view={view.levelComparison} />
+
+      <OverviewSectionHeading
+        id="ngee-ann-circuit-analysis"
+        title="Circuit Category Analysis"
+        description="Rank the published Circuit evidence that explains the Project result."
+        reportTimeContext={state.snapshot.reportTimeContext}
+        windowIds={["recent-operations"]}
+      />
+
+      <NgeeAnnCircuitRanking view={view.energyComposition.circuits} />
+
+      <NgeeAnnEnergyComposition
+        view={view.energyComposition}
+        category={category}
+        onCategoryChange={onCategoryChange}
+      />
 
       <div id="ngee-ann-evidence" data-overview-section="true" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">
         <div>
