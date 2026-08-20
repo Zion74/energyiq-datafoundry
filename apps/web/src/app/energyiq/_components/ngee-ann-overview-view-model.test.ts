@@ -342,6 +342,160 @@ const anomalyStrictRuleMismatchCases: Array<{
 ];
 
 describe("Ngee Ann Overview ViewModel", () => {
+  it("separates the current month, fair same-progress comparison and completed-month context", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.context.primaryPeriod = {
+      start: "2026-05-31T16:00:00.000Z",
+      endExclusive: "2026-06-16T16:00:00.000Z",
+    };
+    snapshot.context.from = snapshot.context.primaryPeriod.start;
+    snapshot.context.to = snapshot.context.primaryPeriod.endExclusive;
+    snapshot.analysis.summary.usageKwh = 480;
+    snapshot.analysis.summary.averageDailyUsageKwh = 30;
+    snapshot.reportTimeContext = {
+      contractRevision: "energyiq-report-time-context@1",
+      binding: {
+        workspaceId: snapshot.context.workspaceId,
+        projectId: snapshot.context.projectId,
+        scopeId: snapshot.context.scopeId,
+        resource: "electricity",
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+      },
+      timezone: "Asia/Singapore",
+      asOf: "2026-06-17T01:00:00.000Z",
+      acceptedDataEndExclusive: snapshot.context.primaryPeriod.endExclusive,
+      dataThroughLocalDate: "2026-06-16",
+      lastRefreshedAt: "2026-06-17T01:00:00.000Z",
+      policyId: "ngee-ann-report-time",
+      policyRevision: "1",
+      windows: [{
+        windowId: "current-month-progress",
+        role: "current_progress",
+        label: "Current month to date",
+        strategy: { kind: "calendar_month_to_date" },
+        phase: "partial",
+        from: snapshot.context.primaryPeriod.start,
+        toExclusive: snapshot.context.primaryPeriod.endExclusive,
+        completeDayCount: 16,
+        segments: [{
+          from: snapshot.context.primaryPeriod.start,
+          toExclusive: snapshot.context.primaryPeriod.endExclusive,
+        }],
+        comparisonCompatibilityKey: "current-month-progress",
+      }],
+    };
+    snapshot.reportWindowSegmentSummaries = [{
+      windowId: "completed-month-trend",
+      status: "ready",
+      segments: [{
+        period: { start: "2026-02-28T16:00:00.000Z", endExclusive: "2026-03-31T16:00:00.000Z" },
+        dataStatus: "unavailable",
+        expectedDayCount: 31,
+        completeDayCount: 0,
+        summary: null,
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }, {
+        period: { start: "2026-03-31T16:00:00.000Z", endExclusive: "2026-04-30T16:00:00.000Z" },
+        dataStatus: "partial",
+        expectedDayCount: 30,
+        completeDayCount: 10,
+        summary: null,
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }, {
+        period: { start: "2026-04-30T16:00:00.000Z", endExclusive: "2026-05-31T16:00:00.000Z" },
+        dataStatus: "complete",
+        expectedDayCount: 31,
+        completeDayCount: 31,
+        summary: { usageKwh: 900, averageDailyUsageKwh: 29.0323 },
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }],
+    }, {
+      windowId: "same-progress-comparison",
+      status: "ready",
+      segments: [{
+        period: { start: "2026-03-31T16:00:00.000Z", endExclusive: "2026-04-16T16:00:00.000Z" },
+        dataStatus: "partial",
+        expectedDayCount: 16,
+        completeDayCount: 10,
+        summary: null,
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }, {
+        period: { start: "2026-04-30T16:00:00.000Z", endExclusive: "2026-05-16T16:00:00.000Z" },
+        dataStatus: "complete",
+        expectedDayCount: 16,
+        completeDayCount: 16,
+        summary: { usageKwh: 400, averageDailyUsageKwh: 25 },
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }],
+    }];
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.monthlyContext.current).toMatchObject({
+      label: "Jun 2026",
+      phase: "partial",
+      completeDayCount: 16,
+      usageKwh: "480",
+      averageDailyUsageKwh: "30",
+    });
+    expect(view.monthlyContext.sameProgress).toMatchObject({
+      status: "available",
+      referenceLabel: "May 2026 · first 16 days",
+      deltaKwh: "80",
+      deltaPct: "+20%",
+    });
+    expect(view.monthlyContext.sameProgress.headline).toContain("20% more than May 2026 at the same 16-day progress");
+    expect(view.monthlyContext.completedMonths.rows).toEqual([
+      expect.objectContaining({ label: "Mar 2026", dataStatus: "unavailable", usageKwh: null }),
+      expect.objectContaining({ label: "Apr 2026", dataStatus: "partial", usageKwh: null }),
+      expect.objectContaining({ label: "May 2026", dataStatus: "complete", usageKwh: "900" }),
+    ]);
+  });
+
+  it("does not relabel a shorter primary analysis as current-month usage when the month projection is missing", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.reportTimeContext = {
+      contractRevision: "energyiq-report-time-context@1",
+      binding: {
+        workspaceId: snapshot.context.workspaceId,
+        projectId: snapshot.context.projectId,
+        scopeId: snapshot.context.scopeId,
+        resource: "electricity",
+        dataSnapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+      },
+      timezone: snapshot.context.timezone,
+      asOf: "2026-06-17T01:00:00.000Z",
+      acceptedDataEndExclusive: snapshot.context.primaryPeriod.endExclusive,
+      dataThroughLocalDate: "2026-06-16",
+      lastRefreshedAt: "2026-06-17T01:00:00.000Z",
+      policyId: "ngee-ann-report-time",
+      policyRevision: "1",
+      windows: [{
+        windowId: "current-month-progress",
+        role: "current_progress",
+        label: "Current month to date",
+        strategy: { kind: "calendar_month_to_date" },
+        phase: "partial",
+        from: "2026-05-31T16:00:00.000Z",
+        toExclusive: snapshot.context.primaryPeriod.endExclusive,
+        completeDayCount: 16,
+        segments: [{
+          from: "2026-05-31T16:00:00.000Z",
+          toExclusive: snapshot.context.primaryPeriod.endExclusive,
+        }],
+        comparisonCompatibilityKey: "current-month-progress",
+      }],
+    };
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.monthlyContext.status).toBe("unavailable");
+    expect(view.monthlyContext.current.usageKwh).toBeNull();
+    expect(view.monthlyContext.sameProgress.status).toBe("unavailable");
+  });
+
   it("uses the bounded recent-operations window for operational time and Circuit blocks", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const recentDailyTotals = structuredClone(snapshot.analysis.dailyTotals!);

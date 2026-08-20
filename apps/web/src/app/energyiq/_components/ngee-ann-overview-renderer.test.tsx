@@ -67,11 +67,11 @@ function reportTimeContextForRenderer(
       label: "Current month to date",
       strategy: { kind: "calendar_month_to_date" },
       phase: "partial",
-      from: snapshot.context.primaryPeriod.start,
+      from: "2026-05-31T16:00:00.000Z",
       toExclusive: snapshot.context.primaryPeriod.endExclusive,
-      completeDayCount: 7,
+      completeDayCount: 16,
       segments: [{
-        from: snapshot.context.primaryPeriod.start,
+        from: "2026-05-31T16:00:00.000Z",
         toExclusive: snapshot.context.primaryPeriod.endExclusive,
       }],
       comparisonCompatibilityKey: "current",
@@ -241,6 +241,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     const expectedSections = [
       ["ngee-ann-recommendations", "Management themes"],
       ["ngee-ann-executive-summary", "Executive Summary"],
+      ["ngee-ann-monthly-context", "Monthly context"],
       ["ngee-ann-daily-trend", "Daily Total Trend"],
       ["ngee-ann-summary-findings", "Supporting diagnostic index"],
       ["ngee-ann-day-profile-analysis", "Day Profile Analysis"],
@@ -267,6 +268,76 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup.indexOf("Energy Distribution")).toBeLessThan(markup.indexOf("Key Findings"));
     expect(markup.indexOf("Key Findings")).toBeLessThan(markup.indexOf("Daily Total Trend"));
     expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Supporting diagnostic index"));
+  });
+
+  it("shows fair month-to-date and completed-month context without comparing a partial month to a full month", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.reportTimeContext = reportTimeContextForRenderer(snapshot);
+    const currentMonthWindow = snapshot.reportTimeContext.windows.find((window) => (
+      window.windowId === "current-month-progress"
+    ))!;
+    snapshot.reportWindowAnalyses = [{
+      windowId: "current-month-progress",
+      status: "ready",
+      period: {
+        start: currentMonthWindow.from,
+        endExclusive: currentMonthWindow.toExclusive,
+      },
+      analysis: {
+        summary: snapshot.analysis.summary,
+        offHours: snapshot.analysis.offHours,
+      },
+    }];
+    const referenceUsage = snapshot.analysis.summary.usageKwh / 1.25;
+    snapshot.reportWindowSegmentSummaries = [{
+      windowId: "completed-month-trend",
+      status: "ready",
+      segments: [{
+        period: { start: "2026-03-31T16:00:00.000Z", endExclusive: "2026-04-30T16:00:00.000Z" },
+        dataStatus: "partial",
+        expectedDayCount: 30,
+        completeDayCount: 10,
+        summary: null,
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }, {
+        period: { start: "2026-04-30T16:00:00.000Z", endExclusive: "2026-05-31T16:00:00.000Z" },
+        dataStatus: "complete",
+        expectedDayCount: 31,
+        completeDayCount: 31,
+        summary: { usageKwh: 5_100, averageDailyUsageKwh: 164.5161 },
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }],
+    }, {
+      windowId: "same-progress-comparison",
+      status: "ready",
+      segments: [{
+        period: { start: "2026-04-30T16:00:00.000Z", endExclusive: "2026-05-16T16:00:00.000Z" },
+        dataStatus: "complete",
+        expectedDayCount: 16,
+        completeDayCount: 16,
+        summary: { usageKwh: referenceUsage, averageDailyUsageKwh: referenceUsage / 16 },
+        evidence: { dataSnapshotId: snapshot.dataSnapshot.id, queryId: "daily_totals_v1" },
+      }],
+    }];
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        projectExplorerHref="/energyiq/explorer"
+        aiAnalystHref="/energyiq/ai"
+      />,
+    );
+
+    expect(markup).toContain("Monthly context");
+    expect(markup).toContain("25% more than May 2026 at the same 16-day progress");
+    expect(markup).toContain("Fair month-to-date comparison");
+    expect(markup).toContain("Completed months");
+    expect(markup).toContain("Apr 2026");
+    expect(markup).toContain("Partial · 10 of 30 complete days");
+    expect(markup).toContain("May 2026");
+    expect(markup).toContain("5,100 kWh");
+    expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Monthly context"));
+    expect(markup.indexOf("Monthly context")).toBeLessThan(markup.indexOf("Key Findings"));
   });
 
   it("labels Circuit evidence as recent operations and Recommendations as the Report Edition", () => {

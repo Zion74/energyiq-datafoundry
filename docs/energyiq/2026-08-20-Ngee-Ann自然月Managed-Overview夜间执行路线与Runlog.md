@@ -59,7 +59,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - [x] 当前月比较历史相同进度，完整月比较上一个完整月；不足数据时诚实 unavailable；
 - [ ] Calendar/Holiday、Tariff、Data through 和 Section 窗口标签使用精确 revision；
 - [ ] 发布新的 Ngee Ann Template Revision，不能改写现有 immutable v6；
-- [ ] focused tests、API build、Web production build、diff-check 全绿。
+- [x] focused tests、API build、Web production build、diff-check 全绿。
 
 ### M2 — 多批次 Excel 与 A/B/C 数据基线
 
@@ -68,7 +68,7 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - [x] Level 6/7 Mapping 与 Source label 通过发布 Mapping 解析；四批 materialization 为 0 unmapped、18 canonical meter series，不按文件名生成 Meter identity；
 - [x] A = data through 19 May，B = data through 31 May，C = data through 16 Jun；
 - [x] A 证明 4 月 partial + 5 月 MTD；C 证明 6 月 MTD，并从同一 Snapshot 封存 B = May complete 与 May same-progress comparison；
-- [ ] 若生成合并 workbook，它只用于人工核对，不成为生产事实源。
+- [x] 已生成人工核对 workbook；它只包含 batch manifest、conflict audit、A/B/C 验收矩阵和 canonical reading 核对表，不成为生产事实源。
 
 ### M3 — #9 论点驱动 Overview
 
@@ -189,6 +189,15 @@ Token 成本不是今晚阻止 AI 每天运行的理由。真正的产品门是�
 - 可访问性：折叠层使用原生 `details/summary`、键盘 focus ring 与现有 icon system，DOM 与阅读顺序一致；
 - 验证：Renderer 74/74；Ngee Ann Renderer/ViewModel/AI slots 合跑为 241 pass + 1 个 5s timeout，该用例单跑 1/1 通过；Impeccable layout detector `[]`；
 - 未声称：尚未在 1440/1920/tablet 真实浏览器检查折行、折叠与阅读节奏，亦未经 Charles 人工判断。
+
+### 2026-08-21 M1 tracer 2 — 自然月语境进入 Overview
+
+- RED-1：API 已返回 `completed-month-trend` 和 `same-progress-comparison`，Web ViewModel 却没有 `monthlyContext`，因此用户看不到月间语境；
+- GREEN-1：增加受控 monthly projection；当前月只与历史相同完整日数比较，完整历史月独立展示，partial/unavailable 月不发布总量；
+- RED-2：当当月 window projection 缺失时，旧实现会把较短的 primary analysis 换标为月度数值；
+- GREEN-2：只接受 exact `current-month-progress` projection，或 primary Period 与该 window 完全相等；其他情况 fail closed 为 unavailable，不借用数字；
+- UI：`Monthly context` 在 Executive 后、AI Key Findings 前；左侧回答同进度差异，右侧只发布完整自然月，每行保留 complete-day count 与 Snapshot/query Evidence；
+- 自动证据：ViewModel 新增 2 个边界用例、Renderer 新增用户可见用例均 GREEN；Renderer 75/75；ViewModel 165 pass + 1 个累计运行时 5s timeout，该用例单跑 1/1；Web production build 通过；浏览器证据待后续总门。
 
 ## 9. 完成定义
 

@@ -19,6 +19,7 @@ import { NgeeAnnEnergyDistribution } from "./ngee-ann-energy-distribution";
 import { NgeeAnnEnergyHealth } from "./ngee-ann-energy-health";
 import { NgeeAnnExecutiveSummary } from "./ngee-ann-executive-summary";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
+import { NgeeAnnMonthlyContext } from "./ngee-ann-monthly-context";
 import { NgeeAnnSummaryFindings } from "./ngee-ann-summary-findings";
 import { NgeeAnnUsageHeatmap } from "./ngee-ann-usage-heatmap";
 import { OverviewWindowLabel } from "./overview-report-time";
@@ -198,6 +199,8 @@ export function NgeeAnnOverviewRenderer({
       />
 
       <NgeeAnnExecutiveSummary view={view} />
+
+      <NgeeAnnMonthlyContext view={view.monthlyContext} />
 
       <NgeeAnnConsumptionBreakdown view={view.componentCategoryBreakdown} />
 

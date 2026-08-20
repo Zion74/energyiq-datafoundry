@@ -43,6 +43,46 @@ export type NgeeAnnChangeOverTimeSummaryViewModel = {
   detail: string;
 };
 
+export type NgeeAnnMonthlyContextSegmentViewModel = {
+  label: string;
+  range: string;
+  dataStatus: "complete" | "partial" | "unavailable";
+  expectedDayCount: number;
+  completeDayCount: number;
+  usageKwhValue: number | null;
+  usageKwh: string | null;
+  averageDailyUsageKwh: string | null;
+  evidence: {
+    dataSnapshotId: string;
+    queryId: "daily_totals_v1";
+  };
+};
+
+export type NgeeAnnMonthlyContextViewModel = {
+  status: "available" | "unavailable";
+  current: {
+    label: string;
+    range: string;
+    phase: "complete" | "partial";
+    completeDayCount: number;
+    usageKwhValue: number | null;
+    usageKwh: string | null;
+    averageDailyUsageKwh: string | null;
+  };
+  sameProgress: {
+    status: "available" | "unavailable";
+    headline: string;
+    referenceLabel: string | null;
+    deltaKwh: string | null;
+    deltaPct: string | null;
+    direction: "increase" | "decrease" | "flat" | "unavailable";
+    rows: NgeeAnnMonthlyContextSegmentViewModel[];
+  };
+  completedMonths: {
+    rows: NgeeAnnMonthlyContextSegmentViewModel[];
+  };
+};
+
 export type NgeeAnnLatestAvailableRange = {
   from: string;
   to: string;
@@ -792,6 +832,7 @@ export type NgeeAnnOverviewViewModel = {
   metadataLimitation: string | null;
   highlights: NgeeAnnOverviewHighlight[];
   executiveSummary: NgeeAnnExecutiveSummaryViewModel;
+  monthlyContext: NgeeAnnMonthlyContextViewModel;
   changeOverTime: NgeeAnnChangeOverTimeSummaryViewModel;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
@@ -932,6 +973,118 @@ function snapshotForReportWindow(
   };
 }
 
+function buildMonthlyContext(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  unavailable: boolean,
+): NgeeAnnMonthlyContextViewModel {
+  const context = snapshot.reportTimeContext;
+  const timezone = context?.timezone ?? snapshot.context.timezone;
+  const currentWindow = context?.windows.find((window) => window.windowId === "current-month-progress");
+  const currentWindowProjection = snapshot.reportWindowAnalyses?.find((window) => (
+    window.windowId === "current-month-progress" && window.status === "ready"
+  ));
+  const primaryPeriodMatchesCurrentWindow = Boolean(currentWindow
+    && snapshot.context.primaryPeriod.start === currentWindow.from
+    && snapshot.context.primaryPeriod.endExclusive === currentWindow.toExclusive);
+  const currentSummary = currentWindowProjection?.analysis.summary
+    ?? (primaryPeriodMatchesCurrentWindow ? snapshot.analysis.summary : null);
+  const currentUsageKwhValue = !unavailable && currentWindow && currentSummary
+    ? currentSummary.usageKwh
+    : null;
+  const currentAverageDailyUsageKwh = !unavailable && currentWindow && currentSummary
+    ? currentSummary.averageDailyUsageKwh
+    : null;
+  const currentFrom = currentWindow?.from ?? snapshot.context.primaryPeriod.start;
+  const currentTo = currentWindow?.toExclusive ?? snapshot.context.primaryPeriod.endExclusive;
+  const currentCompleteDayCount = currentWindow?.completeDayCount ?? 0;
+  const completedMonths = monthlySegments(snapshot, "completed-month-trend", timezone);
+  const sameProgressRows = monthlySegments(snapshot, "same-progress-comparison", timezone);
+  const reference = [...sameProgressRows]
+    .reverse()
+    .find((row) => row.dataStatus === "complete"
+      && row.completeDayCount === currentCompleteDayCount
+      && row.usageKwhValue !== null);
+  const comparable = currentUsageKwhValue !== null
+    && currentCompleteDayCount > 0
+    && reference?.usageKwhValue !== null
+    && reference?.usageKwhValue !== undefined;
+  const delta = comparable ? currentUsageKwhValue - reference.usageKwhValue! : null;
+  const deltaPct = comparable && reference.usageKwhValue! !== 0
+    ? delta! / reference.usageKwhValue! * 100
+    : null;
+  const direction = delta === null
+    ? "unavailable" as const
+    : Math.abs(delta) < 0.0001
+      ? "flat" as const
+      : delta > 0
+        ? "increase" as const
+        : "decrease" as const;
+  const currentLabel = formatMonthLabel(currentFrom, timezone);
+  const referenceLabel = reference
+    ? `${reference.label} · first ${reference.completeDayCount} days`
+    : null;
+  const headline = comparable && reference
+    ? direction === "flat"
+      ? `${currentLabel} through day ${currentCompleteDayCount} is level with ${reference.label} at the same progress.`
+      : `${currentLabel} through day ${currentCompleteDayCount} used ${formatCustomerDecimal(Math.abs(deltaPct ?? 0), 1)}% ${direction === "increase" ? "more" : "less"} than ${reference.label} at the same ${currentCompleteDayCount}-day progress.`
+    : "A complete historical month at the same progress is not available for a fair comparison.";
+
+  return {
+    status: currentUsageKwhValue !== null && currentWindow ? "available" : "unavailable",
+    current: {
+      label: currentLabel,
+      range: formatPeriodRange(currentFrom, currentTo, timezone),
+      phase: currentWindow?.phase === "complete" ? "complete" : "partial",
+      completeDayCount: currentCompleteDayCount,
+      usageKwhValue: currentUsageKwhValue,
+      usageKwh: currentUsageKwhValue === null ? null : formatCustomerDecimal(currentUsageKwhValue, 1),
+      averageDailyUsageKwh: currentAverageDailyUsageKwh === null
+        ? null
+        : formatCustomerDecimal(currentAverageDailyUsageKwh, 1),
+    },
+    sameProgress: {
+      status: comparable ? "available" : "unavailable",
+      headline,
+      referenceLabel,
+      deltaKwh: delta === null ? null : formatCustomerDecimal(Math.abs(delta), 1),
+      deltaPct: deltaPct === null ? null : signedDisplayPercent(deltaPct, "Unavailable"),
+      direction,
+      rows: sameProgressRows,
+    },
+    completedMonths: { rows: completedMonths },
+  };
+}
+
+function monthlySegments(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  windowId: "completed-month-trend" | "same-progress-comparison",
+  timezone: string,
+): NgeeAnnMonthlyContextSegmentViewModel[] {
+  const segments = snapshot.reportWindowSegmentSummaries
+    ?.find((window) => window.windowId === windowId)?.segments ?? [];
+  return segments.map((segment) => ({
+    label: formatMonthLabel(segment.period.start, timezone),
+    range: formatPeriodRange(segment.period.start, segment.period.endExclusive, timezone),
+    dataStatus: segment.dataStatus,
+    expectedDayCount: segment.expectedDayCount,
+    completeDayCount: segment.completeDayCount,
+    usageKwhValue: segment.summary?.usageKwh ?? null,
+    usageKwh: segment.summary ? formatCustomerDecimal(segment.summary.usageKwh, 1) : null,
+    averageDailyUsageKwh: segment.summary
+      ? formatCustomerDecimal(segment.summary.averageDailyUsageKwh, 1)
+      : null,
+    evidence: { ...segment.evidence },
+  }));
+}
+
+function formatMonthLabel(value: string, timezone: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    month: "short",
+    year: "numeric",
+    timeZone: timezone,
+  }).format(new Date(value));
+}
+
 export function buildNgeeAnnOverviewViewModel(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   hint: {
@@ -993,6 +1146,7 @@ export function buildNgeeAnnOverviewViewModel(
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
     metadataLimitation: buildMetadataLimitation(snapshot),
     executiveSummary,
+    monthlyContext: buildMonthlyContext(snapshot, unavailable),
     changeOverTime: buildChangeOverTimeSummary(
       recentOperationsEnergyTrend,
       recentOperationsDailyAnomalies,
