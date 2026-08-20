@@ -264,9 +264,9 @@ export function NgeeAnnOverviewRenderer({
       <OverviewSectionHeading
         id="ngee-ann-recommendations"
         title="Personalized Recommendations"
-        description="Prioritised operational checks supported by this Snapshot; no saving is assumed."
+        description="Prioritised operational checks supported by the current Report Edition; no saving is assumed."
         reportTimeContext={state.snapshot.reportTimeContext}
-        windowIds={["recent-operations"]}
+        windowIds={["current-month-progress"]}
       />
 
       <NgeeAnnDecisionPriorities

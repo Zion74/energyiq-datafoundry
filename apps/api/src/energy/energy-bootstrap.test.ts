@@ -315,11 +315,16 @@ describe("ensureEnergyIqBootstrap", () => {
 
       const ngeeRevision = metadata.energyIq.templates.getLatestProjectRevision("ngee-ann-polytechnic");
       const preschoolRevision = metadata.energyIq.templates.getLatestProjectRevision("preschool-demo");
-      expect(metadata.energyIq.overviewDefinitions.get(ngeeRevision!.revision_id)).toMatchObject({
+      const ngeeDefinition = metadata.energyIq.overviewDefinitions.get(ngeeRevision!.revision_id);
+      expect(ngeeDefinition).toMatchObject({
         renderer_key: "ngee-ann-overview",
         time_policy_revision_id: "ngee-ann-report-time@1",
         definition: { sections: expect.arrayContaining([expect.objectContaining({ primaryWindowId: "current-month-progress" })]) },
       });
+      expect(ngeeDefinition?.definition.sections
+        .find((section) => section.key === "circuit-analysis")
+        ?.blocks.find((block) => block.key === "ngee-recommendations"))
+        .toMatchObject({ windowId: "current-month-progress" });
       expect(metadata.energyIq.overviewDefinitions.get(preschoolRevision!.revision_id)).toMatchObject({
         renderer_key: "preschool-overview",
         time_policy_revision_id: "preschool-report-time@1",

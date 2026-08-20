@@ -5,7 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { EnergyProjectOverviewAiReadModelDto } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  EnergyProjectOverviewAiReadModelDto,
+} from "../../../lib/config-api";
 
 import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
@@ -36,6 +39,59 @@ type DailyAnomalyRow = Extract<
   NonNullable<GoldenSnapshot["analysis"]["dailyUsageAnomalies"]>,
   { status: "available" }
 >["scopes"][number]["rows"][number];
+
+function reportTimeContextForRenderer(
+  snapshot: GoldenSnapshot,
+): NonNullable<EnergyProjectAnalysisSnapshotDto["reportTimeContext"]> {
+  const binding = {
+    workspaceId: snapshot.context.workspaceId,
+    projectId: snapshot.context.projectId,
+    scopeId: snapshot.context.scopeId,
+    resource: "electricity" as const,
+    dataSnapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+  };
+  return {
+    contractRevision: "energyiq-report-time-context@1",
+    binding,
+    timezone: snapshot.context.timezone,
+    asOf: "2026-06-17T01:00:00.000Z",
+    acceptedDataEndExclusive: snapshot.context.primaryPeriod.endExclusive,
+    dataThroughLocalDate: "2026-06-16",
+    lastRefreshedAt: "2026-06-17T01:00:00.000Z",
+    policyId: "ngee-ann-report-time",
+    policyRevision: "1",
+    windows: [{
+      windowId: "current-month-progress",
+      role: "current_progress",
+      label: "Current month to date",
+      strategy: { kind: "calendar_month_to_date" },
+      phase: "partial",
+      from: snapshot.context.primaryPeriod.start,
+      toExclusive: snapshot.context.primaryPeriod.endExclusive,
+      completeDayCount: 7,
+      segments: [{
+        from: snapshot.context.primaryPeriod.start,
+        toExclusive: snapshot.context.primaryPeriod.endExclusive,
+      }],
+      comparisonCompatibilityKey: "current",
+    }, {
+      windowId: "recent-operations",
+      role: "recent_operations",
+      label: "Recent 28 complete days",
+      strategy: { kind: "rolling_complete_days", days: 28 },
+      phase: "complete",
+      from: "2026-05-19T16:00:00.000Z",
+      toExclusive: snapshot.context.primaryPeriod.endExclusive,
+      completeDayCount: 28,
+      segments: [{
+        from: "2026-05-19T16:00:00.000Z",
+        toExclusive: snapshot.context.primaryPeriod.endExclusive,
+      }],
+      comparisonCompatibilityKey: "recent",
+    }],
+  };
+}
 
 function makeWithinThreshold(row: DailyAnomalyRow): void {
   if (row.outcome !== "triggered" || row.actualKwh === null) return;
@@ -205,6 +261,22 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Consumption Breakdown"));
     expect(markup.indexOf("Consumption Breakdown")).toBeLessThan(markup.indexOf("Energy Distribution"));
     expect(markup.indexOf("Energy Distribution")).toBeLessThan(markup.indexOf("Summary of Findings"));
+  });
+
+  it("labels Circuit evidence as recent operations and Recommendations as the Report Edition", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.reportTimeContext = reportTimeContextForRenderer(snapshot);
+    const container = document.createElement("div");
+    container.innerHTML = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    const circuit = container.querySelector("#ngee-ann-circuit-analysis");
+    const recommendations = container.querySelector("#ngee-ann-recommendations");
+    expect(circuit?.querySelector('[data-report-window="recent-operations"]')).not.toBeNull();
+    expect(circuit?.querySelector('[data-report-window="current-month-progress"]')).toBeNull();
+    expect(recommendations?.querySelector('[data-report-window="current-month-progress"]')).not.toBeNull();
+    expect(recommendations?.querySelector('[data-report-window="recent-operations"]')).toBeNull();
   });
 
   it("withholds aligned movements instead of relabelling opposite-direction facts", () => {

@@ -439,6 +439,8 @@ describe("Ngee Ann Overview ViewModel", () => {
       },
     });
     expect(view.usageHeatmap.scopes[0]?.cells).toHaveLength(72);
+    expect(view.dailyAnomalies.status).toBe("unavailable");
+    expect(view.decisionPriorities.status).toBe("available");
     expect(view.energyComposition.evidence.period)
       .toBe("[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(view.energyComposition.circuits.rows.find((row) => (
@@ -474,6 +476,8 @@ describe("Ngee Ann Overview ViewModel", () => {
       scopes: [],
     });
     expect(view.energyComposition.circuits.status).toBe("unavailable");
+    expect(view.dailyAnomalies.status).toBe("unavailable");
+    expect(view.decisionPriorities.status).toBe("available");
     expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
   });
 

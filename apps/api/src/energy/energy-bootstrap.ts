@@ -201,7 +201,7 @@ const NGEE_ANN_OVERVIEW_DEFINITION: EnergyIqOverviewDefinition = {
     ], ["day-type-reference"]),
     section("circuit-analysis", "Circuit analysis", "Which Levels and Circuits account for the observed use?", "recent-operations", [
       block("ngee-circuit-breakdown", "composition.project_meter_breakdown@1", "recent-operations"),
-      block("ngee-recommendations", "decision.recommended_actions@1", "recent-operations"),
+      block("ngee-recommendations", "decision.recommended_actions@1", "current-month-progress"),
     ]),
   ],
 };

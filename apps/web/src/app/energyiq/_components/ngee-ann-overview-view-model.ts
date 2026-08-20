@@ -952,10 +952,14 @@ export function buildNgeeAnnOverviewViewModel(
   const latestAvailableRange = unavailable ? hint.latestAvailableRange ?? null : null;
   const evidenceQueryIds = [...analysis.provenance.queryIds];
   const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
-  const dailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
+  const reportEditionDailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
   const levelComparison = buildLevelComparison(snapshot, unavailable);
   const componentCategoryBreakdown = buildComponentCategoryBreakdown(snapshot, unavailable);
   const recentOperationsSnapshot = snapshotForReportWindow(snapshot, "recent-operations");
+  const recentOperationsDailyAnomalies = buildDailyAnomalies(
+    recentOperationsSnapshot,
+    unavailable,
+  );
   const recentOperationsEnergyComposition = buildEnergyComposition(
     recentOperationsSnapshot,
     unavailable,
@@ -965,7 +969,7 @@ export function buildNgeeAnnOverviewViewModel(
     comparisonAvailable,
     unavailable,
     levelComparison,
-    dailyAnomalies,
+    reportEditionDailyAnomalies,
   );
 
   return {
@@ -984,7 +988,7 @@ export function buildNgeeAnnOverviewViewModel(
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
     metadataLimitation: buildMetadataLimitation(snapshot),
     executiveSummary,
-    changeOverTime: buildChangeOverTimeSummary(executiveSummary, dailyAnomalies),
+    changeOverTime: buildChangeOverTimeSummary(executiveSummary, reportEditionDailyAnomalies),
     highlights: [
       {
         id: "total",
@@ -1048,10 +1052,10 @@ export function buildNgeeAnnOverviewViewModel(
         comparison: null,
       },
     ],
-    decisionPriorities: buildDecisionPriorities(snapshot, dailyAnomalies),
+    decisionPriorities: buildDecisionPriorities(snapshot, reportEditionDailyAnomalies),
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(recentOperationsSnapshot, unavailable, hint.trendGrain),
-    dailyAnomalies,
+    dailyAnomalies: recentOperationsDailyAnomalies,
     dayProfile: buildDayProfile(recentOperationsSnapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(recentOperationsSnapshot, unavailable),
     levelComparison,
