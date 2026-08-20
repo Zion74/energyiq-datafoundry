@@ -877,16 +877,21 @@ function snapshotForReportWindow(
     endExclusive: declaredWindow.toExclusive,
   } : snapshot.context.primaryPeriod);
 
-  // Window projections currently carry only authoritative daily totals. Period-derived
-  // overlays from the primary Report Edition must not be relabelled as window Evidence.
+  // Period-derived facts from the primary Report Edition must not be relabelled as
+  // window Evidence. Each supported block is rebuilt from its bounded projection.
   const {
     dailyTotals: _primaryDailyTotals,
     timeBehaviour: _primaryTimeBehaviour,
     componentHourlyProfiles: _primaryComponentHourlyProfiles,
     dailyUsageAnomalies: _primaryDailyUsageAnomalies,
     componentCategoryBreakdown: _primaryComponentCategoryBreakdown,
+    categories: _primaryCategories,
+    circuits: _primaryCircuits,
+    designatedTotals: _primaryDesignatedTotals,
+    virtualMeterTraces: _primaryVirtualMeterTraces,
     ...analysis
   } = snapshot.analysis;
+  const composition = window?.analysis.composition;
   return {
     ...snapshot,
     context: {
@@ -911,6 +916,18 @@ function snapshotForReportWindow(
       ...(window?.analysis.componentHourlyProfiles
         ? { componentHourlyProfiles: window.analysis.componentHourlyProfiles }
         : {}),
+      categories: composition?.categories ?? [],
+      circuits: composition?.circuits ?? [],
+      designatedTotals: composition?.designatedTotals ?? [],
+      ...(composition?.virtualMeterTraces
+        ? { virtualMeterTraces: composition.virtualMeterTraces }
+        : {}),
+      ...(composition ? {
+        provenance: composition.provenance,
+        comparison: composition.comparison,
+        childScopes: composition.childScopes,
+        componentReconciliation: composition.componentReconciliation,
+      } : {}),
     },
   };
 }
@@ -937,14 +954,17 @@ export function buildNgeeAnnOverviewViewModel(
   const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
   const dailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
   const levelComparison = buildLevelComparison(snapshot, unavailable);
-  const energyComposition = buildEnergyComposition(snapshot, unavailable);
   const componentCategoryBreakdown = buildComponentCategoryBreakdown(snapshot, unavailable);
   const recentOperationsSnapshot = snapshotForReportWindow(snapshot, "recent-operations");
+  const recentOperationsEnergyComposition = buildEnergyComposition(
+    recentOperationsSnapshot,
+    unavailable,
+  );
   const executiveSummary = buildExecutiveSummary(
     snapshot,
     comparisonAvailable,
+    unavailable,
     levelComparison,
-    energyComposition,
     dailyAnomalies,
   );
 
@@ -1036,7 +1056,7 @@ export function buildNgeeAnnOverviewViewModel(
     usageHeatmap: buildUsageHeatmap(recentOperationsSnapshot, unavailable),
     levelComparison,
     componentCategoryBreakdown,
-    energyComposition,
+    energyComposition: recentOperationsEnergyComposition,
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
@@ -1371,12 +1391,7 @@ function buildEnergyComposition(
   );
 
   const expectedCategories = new Set(["load", "light"]);
-  const categoryContractAvailable = unavailableReason === null
-    && analysis.categories.length === expectedCategories.size
-    && analysis.categories.every((category) =>
-      expectedCategories.has(category.category)
-      && hasDataHealth(category),
-    );
+  const categoryContractAvailable = hasEnergyCategoryContract(snapshot, overviewUnavailable);
   const categories: NgeeAnnEnergyCompositionViewModel["categories"] = categoryContractAvailable
     ? {
       status: "available",
@@ -1552,6 +1567,18 @@ function buildEnergyComposition(
     derivedMeterTrace,
     evidence,
   };
+}
+
+function hasEnergyCategoryContract(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): boolean {
+  if (overviewUnavailable || snapshot.context.scopeType !== "project") return false;
+  const expectedCategories = new Set(["load", "light"]);
+  return snapshot.analysis.categories.length === expectedCategories.size
+    && snapshot.analysis.categories.every((category) => (
+      expectedCategories.has(category.category) && hasDataHealth(category)
+    ));
 }
 
 function buildDerivedMeterTrace(
@@ -2137,8 +2164,8 @@ function buildDecisionPriorities(
 function buildExecutiveSummary(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   comparisonAvailable: boolean,
+  overviewUnavailable: boolean,
   levelComparison: NgeeAnnLevelComparisonViewModel,
-  energyComposition: NgeeAnnEnergyCompositionViewModel,
   dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
 ): NgeeAnnExecutiveSummaryViewModel {
   const { analysis } = snapshot;
@@ -2164,7 +2191,7 @@ function buildExecutiveSummary(
       comparison.changeKwh,
     )
     : null;
-  const categoryDriver = energyComposition.categories.status === "available"
+  const categoryDriver = hasEnergyCategoryContract(snapshot, overviewUnavailable)
     ? selectDirectionalDriver(
       analysis.categories
         .filter((category) => category.comparison)

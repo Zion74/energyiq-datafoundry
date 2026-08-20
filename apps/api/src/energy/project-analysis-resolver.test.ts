@@ -333,6 +333,21 @@ describe("ProjectAnalysisResolver", () => {
           expect.objectContaining({ scopeId: "project", dayType: "weekday" }),
         ]),
       }));
+      expect(recentOperations?.analysis.composition).toEqual(expect.objectContaining({
+        provenance: expect.objectContaining({
+          dataSnapshotId: currentProjectResult.snapshot.dataSnapshot.id,
+        }),
+        categories: expect.arrayContaining([
+          expect.objectContaining({ category: "load" }),
+          expect.objectContaining({ category: "light" }),
+        ]),
+        circuits: expect.arrayContaining([
+          expect.objectContaining({ includedInOfficialTotal: false }),
+        ]),
+        componentReconciliation: expect.objectContaining({
+          componentMeterNodeIds: expect.any(Array),
+        }),
+      }));
       expect(JSON.stringify(currentProjectResult.snapshot.reportWindowAnalyses).length)
         .toBeLessThan(600_000);
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);

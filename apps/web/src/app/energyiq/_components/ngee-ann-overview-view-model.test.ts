@@ -342,7 +342,7 @@ const anomalyStrictRuleMismatchCases: Array<{
 ];
 
 describe("Ngee Ann Overview ViewModel", () => {
-  it("uses the bounded recent-operations window only for the operational daily trend", () => {
+  it("uses the bounded recent-operations window for operational time and Circuit blocks", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const recentDailyTotals = structuredClone(snapshot.analysis.dailyTotals!);
     for (const scope of recentDailyTotals.scopes) {
@@ -364,6 +364,22 @@ describe("Ngee Ann Overview ViewModel", () => {
     const recentUsageKwh = recentDailyTotals.scopes[0]!.rows
       .reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
     const recentStandbyKwh = 80;
+    const recentComposition = {
+      provenance: structuredClone(snapshot.analysis.provenance),
+      comparison: structuredClone(snapshot.analysis.comparison),
+      categories: structuredClone(snapshot.analysis.categories),
+      childScopes: structuredClone(snapshot.analysis.childScopes),
+      circuits: structuredClone(snapshot.analysis.circuits),
+      designatedTotals: structuredClone(snapshot.analysis.designatedTotals),
+      componentReconciliation: structuredClone(snapshot.analysis.componentReconciliation),
+      virtualMeterTraces: structuredClone(snapshot.analysis.virtualMeterTraces),
+    };
+    const recentCircuit = recentComposition.circuits.find((circuit) => (
+      circuit.includedInOfficialTotal === false
+    ));
+    if (!recentCircuit) throw new Error("Expected a recent component Circuit.");
+    recentCircuit.usageKwh = 432.1;
+    recentCircuit.sharePct = 12.3;
     snapshot.reportWindowAnalyses = [{
       windowId: "recent-operations",
       period: {
@@ -384,6 +400,7 @@ describe("Ngee Ann Overview ViewModel", () => {
         },
         timeBehaviour: recentTimeBehaviour,
         componentHourlyProfiles: structuredClone(snapshot.analysis.componentHourlyProfiles!),
+        composition: recentComposition,
       }),
     }];
 
@@ -422,6 +439,14 @@ describe("Ngee Ann Overview ViewModel", () => {
       },
     });
     expect(view.usageHeatmap.scopes[0]?.cells).toHaveLength(72);
+    expect(view.energyComposition.evidence.period)
+      .toBe("[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
+    expect(view.energyComposition.circuits.rows.find((row) => (
+      row.meterNodeId === recentCircuit.meterNodeId
+    ))).toMatchObject({
+      currentUsageKwh: "432.1",
+      projectShare: "12.3%",
+    });
     expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
     expect(view.context.periodRange).toBe("10 Jun 2026 - 16 Jun 2026");
   });
@@ -448,6 +473,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       },
       scopes: [],
     });
+    expect(view.energyComposition.circuits.status).toBe("unavailable");
     expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
   });
 

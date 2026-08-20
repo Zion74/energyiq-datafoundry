@@ -1895,6 +1895,16 @@ export type EnergyProjectReportWindowAnalysisDto = {
     dailyTotals?: NonNullable<EnergyProjectAnalysisPayloadDto["dailyTotals"]>;
     timeBehaviour?: NonNullable<EnergyProjectAnalysisPayloadDto["timeBehaviour"]>;
     componentHourlyProfiles?: NonNullable<EnergyProjectAnalysisPayloadDto["componentHourlyProfiles"]>;
+    composition?: Pick<EnergyProjectAnalysisPayloadDto,
+      | "provenance"
+      | "comparison"
+      | "categories"
+      | "childScopes"
+      | "circuits"
+      | "designatedTotals"
+      | "componentReconciliation"
+      | "virtualMeterTraces"
+    >;
   };
 };
 

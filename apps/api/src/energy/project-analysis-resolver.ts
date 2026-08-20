@@ -169,6 +169,16 @@ export type ProjectReportWindowAnalysis = {
     dailyTotals?: NonNullable<ProjectAnalysisPayload["dailyTotals"]>;
     timeBehaviour?: NonNullable<ProjectAnalysisPayload["timeBehaviour"]>;
     componentHourlyProfiles?: NonNullable<ProjectAnalysisPayload["componentHourlyProfiles"]>;
+    composition?: Pick<ProjectAnalysisPayload,
+      | "provenance"
+      | "comparison"
+      | "categories"
+      | "childScopes"
+      | "circuits"
+      | "designatedTotals"
+      | "componentReconciliation"
+      | "virtualMeterTraces"
+    >;
   };
 };
 
@@ -803,6 +813,18 @@ const reportWindowAnalysisProjection = (
   ...(includeHourly && analysis.componentHourlyProfiles
     ? { componentHourlyProfiles: analysis.componentHourlyProfiles }
     : {}),
+  ...(includeHourly ? {
+    composition: {
+      provenance: analysis.provenance,
+      comparison: analysis.comparison,
+      categories: analysis.categories,
+      childScopes: analysis.childScopes,
+      circuits: analysis.circuits,
+      designatedTotals: analysis.designatedTotals,
+      componentReconciliation: analysis.componentReconciliation,
+      ...(analysis.virtualMeterTraces ? { virtualMeterTraces: analysis.virtualMeterTraces } : {}),
+    },
+  } : {}),
 });
 
 const resolveSnapshotReportTimePolicy = (input: {
