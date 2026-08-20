@@ -342,6 +342,40 @@ const anomalyStrictRuleMismatchCases: Array<{
 ];
 
 describe("Ngee Ann Overview ViewModel", () => {
+  it("uses the bounded recent-operations window only for the operational daily trend", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const recentDailyTotals = structuredClone(snapshot.analysis.dailyTotals!);
+    for (const scope of recentDailyTotals.scopes) {
+      scope.rows = scope.rows.slice(-3);
+    }
+    snapshot.reportWindowAnalyses = [{
+      windowId: "recent-operations",
+      period: {
+        start: "2026-06-13T16:00:00.000Z",
+        endExclusive: "2026-06-16T16:00:00.000Z",
+      },
+      status: "ready",
+      analysis: { dailyTotals: recentDailyTotals },
+    }];
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyTrend).toMatchObject({
+      status: "available",
+      evidence: {
+        period: "[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+      },
+    });
+    expect(view.energyTrend.scopes[0]?.points.map((point) => point.localDate))
+      .toEqual(["2026-06-14", "2026-06-15", "2026-06-16"]);
+    expect(view.energyTrend.baselineOverlay).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringMatching(/does not include the authoritative daily anomaly contract/i),
+    });
+    expect(view.highlights.find((item) => item.id === "total")?.value).toBe("1,531.17");
+    expect(view.context.periodRange).toBe("10 Jun 2026 - 16 Jun 2026");
+  });
+
   it("explains the published tax-inclusive Tariff with its derived ex-tax reference rate", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     if (snapshot.analysis.cost.status !== "available") throw new Error("Expected cost Evidence.");

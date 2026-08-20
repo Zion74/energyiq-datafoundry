@@ -81,6 +81,7 @@ export type {
   EnergyProjectAnalysisMetadataDto,
   EnergyProjectAnalysisMetadataEvidenceDto,
   EnergyProjectAnalysisPayloadDto,
+  EnergyProjectReportWindowAnalysisDto,
   EnergyProjectAnalysisScopeMetadataDto,
   EnergyProjectAnalysisSnapshotDto,
   EnergyOverviewAiArtifactDto,

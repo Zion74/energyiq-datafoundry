@@ -861,6 +861,38 @@ export type NgeeAnnOverviewViewModel = {
   latestAvailableRange: NgeeAnnLatestAvailableRange | null;
 };
 
+function snapshotForReportWindow(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  windowId: string,
+): EnergyProjectAnalysisSnapshotDto {
+  const window = snapshot.reportWindowAnalyses?.find((candidate) => (
+    candidate.windowId === windowId && candidate.status === "ready"
+  ));
+  if (!window?.analysis.dailyTotals) return snapshot;
+
+  // Window projections currently carry only authoritative daily totals. Period-derived
+  // overlays from the primary Report Edition must not be relabelled as window Evidence.
+  const {
+    dailyUsageAnomalies: _primaryDailyUsageAnomalies,
+    componentCategoryBreakdown: _primaryComponentCategoryBreakdown,
+    ...analysis
+  } = snapshot.analysis;
+  return {
+    ...snapshot,
+    context: {
+      ...snapshot.context,
+      period: "Custom",
+      from: window.period.start,
+      to: window.period.endExclusive,
+      primaryPeriod: window.period,
+    },
+    analysis: {
+      ...analysis,
+      dailyTotals: window.analysis.dailyTotals,
+    },
+  };
+}
+
 export function buildNgeeAnnOverviewViewModel(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   hint: {
@@ -885,6 +917,7 @@ export function buildNgeeAnnOverviewViewModel(
   const levelComparison = buildLevelComparison(snapshot, unavailable);
   const energyComposition = buildEnergyComposition(snapshot, unavailable);
   const componentCategoryBreakdown = buildComponentCategoryBreakdown(snapshot, unavailable);
+  const recentOperationsSnapshot = snapshotForReportWindow(snapshot, "recent-operations");
   const executiveSummary = buildExecutiveSummary(
     snapshot,
     comparisonAvailable,
@@ -975,7 +1008,7 @@ export function buildNgeeAnnOverviewViewModel(
     ],
     decisionPriorities: buildDecisionPriorities(snapshot, dailyAnomalies),
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
-    energyTrend: buildEnergyTrend(snapshot, unavailable, hint.trendGrain),
+    energyTrend: buildEnergyTrend(recentOperationsSnapshot, unavailable, hint.trendGrain),
     dailyAnomalies,
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),

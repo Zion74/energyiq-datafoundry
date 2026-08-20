@@ -1882,6 +1882,18 @@ export type PreschoolDecisionSignalsDto = {
   }>;
 };
 
+export type EnergyProjectReportWindowAnalysisDto = {
+  windowId: string;
+  period: {
+    start: string;
+    endExclusive: string;
+  };
+  status: "ready";
+  analysis: {
+    dailyTotals?: NonNullable<EnergyProjectAnalysisPayloadDto["dailyTotals"]>;
+  };
+};
+
 export type EnergyProjectAnalysisSnapshotDto = {
   context: EnergyQueryContextDto & {
     primaryPeriod: {
@@ -1899,6 +1911,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   };
   projectRelease: EnergyPublishedProjectReleaseDto;
   reportTimeContext?: ReportTimeContext;
+  reportWindowAnalyses?: EnergyProjectReportWindowAnalysisDto[];
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
   renderer: EnergyPublishedProjectReleaseDto["renderer"];
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];
