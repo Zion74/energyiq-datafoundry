@@ -1109,6 +1109,7 @@ export function buildNgeeAnnOverviewViewModel(
   const levelComparison = buildLevelComparison(snapshot, unavailable);
   const componentCategoryBreakdown = buildComponentCategoryBreakdown(snapshot, unavailable);
   const recentOperationsSnapshot = snapshotForReportWindow(snapshot, "recent-operations");
+  const dayTypeReferenceSnapshot = snapshotForReportWindow(snapshot, "day-type-reference");
   const recentOperationsDailyAnomalies = buildDailyAnomalies(
     recentOperationsSnapshot,
     unavailable,
@@ -1218,7 +1219,7 @@ export function buildNgeeAnnOverviewViewModel(
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: recentOperationsEnergyTrend,
     dailyAnomalies: recentOperationsDailyAnomalies,
-    dayProfile: buildDayProfile(recentOperationsSnapshot, unavailable),
+    dayProfile: buildDayProfile(dayTypeReferenceSnapshot, unavailable, recentOperationsSnapshot),
     usageHeatmap: buildUsageHeatmap(recentOperationsSnapshot, unavailable),
     levelComparison,
     componentCategoryBreakdown,
@@ -3492,10 +3493,11 @@ function buildOperatingPolicySummary(
 function buildDayProfile(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
+  operatingPolicySnapshot: EnergyProjectAnalysisSnapshotDto = snapshot,
 ): NgeeAnnDayProfileViewModel {
   const evidence = timeBehaviourEvidence(snapshot);
   const componentEvidence = componentHourlyEvidence(snapshot);
-  const operatingPolicy = buildOperatingPolicySummary(snapshot);
+  const operatingPolicy = buildOperatingPolicySummary(operatingPolicySnapshot);
   const unavailable = (reason: string): NgeeAnnDayProfileViewModel => ({
     status: "unavailable",
     decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
@@ -3513,17 +3515,17 @@ function buildDayProfile(
   if (snapshot.context.scopeType !== "project") {
     return unavailable("Select the Project Scope to compare Project and Level Day Profiles.");
   }
-  const grid = validTimeGrid(snapshot);
-  if (!grid.valid) {
-    return unavailable(grid.reason);
+  const projection = validDayProfileProjection(snapshot);
+  if (!projection.valid) {
+    return unavailable(projection.reason);
   }
   const profiles = snapshot.analysis.timeBehaviour!.dayProfiles;
-  const expectedKeys = new Set(grid.scopes.flatMap((scope) => (
+  const expectedKeys = new Set(projection.scopes.flatMap((scope) => (
     ["weekday", "weekend", "public_holiday"].map((dayType) => `${scope.scopeId}:${dayType}`)
   )));
   const seenKeys = new Set<string>();
   const validProfiles = profiles.length === expectedKeys.size && profiles.every((profile) => {
-    const scope = grid.scopes.find((candidate) => candidate.scopeId === profile.scopeId);
+    const scope = projection.scopes.find((candidate) => candidate.scopeId === profile.scopeId);
     const key = `${profile.scopeId}:${profile.dayType}`;
     if (!scope || profile.scopeName !== scope.scopeName || !expectedKeys.has(key) || seenKeys.has(key)) {
       return false;
@@ -3631,7 +3633,7 @@ function buildDayProfile(
     decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason: null,
     operatingPolicy,
-    scopes: grid.scopes.map((scope) => ({
+    scopes: projection.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,
     })),
@@ -3931,10 +3933,34 @@ function validHourlyValues(values: Array<{ localHour: number; usageKwh: number }
 function validTimeGrid(snapshot: EnergyProjectAnalysisSnapshotDto):
   | { valid: true; scopes: TimeScope[] }
   | { valid: false; reason: string } {
+  const projection = validDayProfileProjection(snapshot);
+  if (!projection.valid) return projection;
+  const { context } = snapshot;
+  const timeBehaviour = snapshot.analysis.timeBehaviour!;
+  const projectCells = timeBehaviour.scopes[0]?.cells;
+  if (!projectCells || !validTimeSpine(projectCells, context.primaryPeriod)) {
+    return { valid: false, reason: "The hourly grid time spine is incomplete or invalid." };
+  }
+  const spine = projectCells.map((cell) => `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}`);
+  if (timeBehaviour.scopes.some((scope) => (
+    scope.cells.length !== spine.length
+    || scope.cells.some((cell, index) => (
+      `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}` !== spine[index]
+      || !validTimeCell(cell)
+    ))
+  ))) {
+    return { valid: false, reason: "The hourly grid cells do not share one valid authoritative time spine." };
+  }
+  return projection;
+}
+
+function validDayProfileProjection(snapshot: EnergyProjectAnalysisSnapshotDto):
+  | { valid: true; scopes: TimeScope[] }
+  | { valid: false; reason: string } {
   const { analysis, context, projectRelease } = snapshot;
   const timeBehaviour = analysis.timeBehaviour;
   if (!timeBehaviour) {
-    return { valid: false, reason: "This published Snapshot does not include the authoritative hourly time grid." };
+    return { valid: false, reason: "This published Snapshot does not include the authoritative hourly Day Profile projection." };
   }
   const hasEvidence = snapshot.evidence.some((reference) => (
     reference.metricId === "energy.total_usage_kwh@1"
@@ -3988,20 +4014,6 @@ function validTimeGrid(snapshot: EnergyProjectAnalysisSnapshotDto):
     })
   ) {
     return { valid: false, reason: "The hourly grid Scope contract is incomplete or out of order." };
-  }
-  const projectCells = timeBehaviour.scopes[0]?.cells;
-  if (!projectCells || !validTimeSpine(projectCells, context.primaryPeriod)) {
-    return { valid: false, reason: "The hourly grid time spine is incomplete or invalid." };
-  }
-  const spine = projectCells.map((cell) => `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}`);
-  if (timeBehaviour.scopes.some((scope) => (
-    scope.cells.length !== spine.length
-    || scope.cells.some((cell, index) => (
-      `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}` !== spine[index]
-      || !validTimeCell(cell)
-    ))
-  ))) {
-    return { valid: false, reason: "The hourly grid cells do not share one valid authoritative time spine." };
   }
   return { valid: true, scopes: timeBehaviour.scopes };
 }

@@ -515,6 +515,18 @@ describe("Ngee Ann Overview ViewModel", () => {
       throw new Error("Expected the recent Project weekday profile.");
     }
     recentProjectWeekday.values[0]!.usageKwh = 99;
+    const referenceTimeBehaviour = structuredClone(recentTimeBehaviour);
+    for (const scope of referenceTimeBehaviour.scopes) scope.cells = [];
+    const referenceProjectHoliday = referenceTimeBehaviour.dayProfiles.find((profile) => (
+      profile.scopeId === snapshot.context.scopeId
+      && profile.dayType === "public_holiday"
+    ));
+    if (!referenceProjectHoliday) throw new Error("Expected the reference Project holiday profile.");
+    Object.assign(referenceProjectHoliday, {
+      status: "available" as const,
+      sampleDayCount: 2,
+      values: recentProjectWeekday.values.map((value) => ({ ...value, usageKwh: value.usageKwh + 5 })),
+    });
     const recentUsageKwh = recentDailyTotals.scopes[0]!.rows
       .reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
     const recentStandbyKwh = 80;
@@ -556,6 +568,19 @@ describe("Ngee Ann Overview ViewModel", () => {
         componentHourlyProfiles: structuredClone(snapshot.analysis.componentHourlyProfiles!),
         composition: recentComposition,
       }),
+    }, {
+      windowId: "day-type-reference",
+      period: {
+        start: "2026-03-23T16:00:00.000Z",
+        endExclusive: "2026-06-21T16:00:00.000Z",
+      },
+      status: "ready",
+      analysis: {
+        summary: structuredClone(snapshot.analysis.summary),
+        offHours: structuredClone(snapshot.analysis.offHours),
+        timeBehaviour: referenceTimeBehaviour,
+        componentHourlyProfiles: structuredClone(snapshot.analysis.componentHourlyProfiles!),
+      },
     }];
 
     const view = buildNgeeAnnOverviewViewModel(snapshot);
@@ -575,12 +600,12 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.dayProfile).toMatchObject({
       status: "available",
       evidence: {
-        period: "[2026-06-13T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+        period: "[2026-03-23T16:00:00.000Z, 2026-06-21T16:00:00.000Z)",
       },
     });
     expect(view.dayProfile.profiles.find((profile) => (
-      profile.scopeId === snapshot.context.scopeId && profile.dayType === "weekday"
-    ))?.values[0]).toMatchObject({ acceptedUsageKwh: 99 });
+      profile.scopeId === snapshot.context.scopeId && profile.dayType === "public_holiday"
+    ))).toMatchObject({ status: "available", sampleDayCount: 2 });
     expect(view.usageHeatmap).toMatchObject({
       status: "available",
       dates: [
@@ -1643,7 +1668,8 @@ describe("Ngee Ann Overview ViewModel", () => {
 
     const gridView = buildNgeeAnnOverviewViewModel(invalidGrid);
     expect(gridView.usageHeatmap).toMatchObject({ status: "unavailable", scopes: [] });
-    expect(gridView.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
+    expect(gridView.dayProfile).toMatchObject({ status: "available" });
+    expect(gridView.dayProfile.profiles).toHaveLength(9);
     expect(gridView.energyTrend).toMatchObject({ status: "available", grain: "day" });
     expect(gridView.levelComparison.status).toBe("available");
   });

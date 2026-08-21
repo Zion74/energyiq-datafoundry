@@ -2080,6 +2080,38 @@ describe("EnergyScopeAnalysis", () => {
           qualityEventCount: 1,
         });
       expect(Math.max(...(analysis.hourlyProfile ?? []).map((row) => row.peakKw))).toBeLessThan(9_999);
+
+      const fullWeekContext = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-06-08",
+          to: "2026-06-14",
+        },
+      });
+      const fullWeek = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context: fullWeekContext,
+        databasePath,
+      });
+      expect(fullWeek.calendarTotals?.scopes[0]?.weeks.find((week) => (
+        week.localFrom === "2026-06-08"
+      ))).toMatchObject({
+        localToInclusive: "2026-06-14",
+        isPartialCalendarPeriod: false,
+        usageKwh: expect.any(Number),
+        dataHealth: {
+          status: "complete",
+          qualityEventCount: 1,
+        },
+      });
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);

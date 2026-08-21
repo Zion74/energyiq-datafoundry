@@ -245,13 +245,7 @@ export type EnergyScopeAnalysis = {
         from: string;
         to: string;
         usageKwh: number | null;
-        dataHealth: {
-          status: "complete" | "partial" | "unavailable";
-          coveragePct: number;
-          expectedMeterIntervalCount: number;
-          validIntervalCount: number;
-          qualityEventCount: number;
-        };
+        dataHealth: TimeBucketDataHealth;
       }>;
     }>;
   };
@@ -719,6 +713,10 @@ type TimeBucketDataHealth = {
   expectedMeterIntervalCount: number;
   validIntervalCount: number;
   qualityEventCount: number;
+  aggregateStatus?: "complete" | "partial" | "unavailable";
+  aggregateCoveragePct?: number;
+  aggregateEligibleIntervalCount?: number;
+  cadenceGapEventCount?: number;
 };
 
 type DailyTotalScope = {
@@ -1090,6 +1088,10 @@ export type EnergyDailyTotalsProjection = {
   };
 };
 
+export type EnergyDayProfileProjection = Pick<EnergyScopeAnalysis,
+  "timeBehaviour" | "componentHourlyProfiles"
+>;
+
 export const executeEnergyDailyTotalsProjection = async (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
@@ -1181,6 +1183,148 @@ export const executeEnergyDailyTotalsProjection = async (input: {
         dataSnapshotId: input.context.dataSnapshotId,
         queryId: "daily_totals_v1",
       },
+    };
+  });
+};
+
+export const executeEnergyDayProfileProjection = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  databasePath?: string;
+}): Promise<EnergyDayProfileProjection> => {
+  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    scopeId: input.context.scopeId,
+    resource: input.context.resource,
+    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId,
+  });
+  const prepared = await prepareEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      meterAttachments: publishedMeterRoute.attachments,
+      resource: input.context.resource,
+      from: input.context.from,
+      to: input.context.to,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion,
+    },
+    databasePath: input.databasePath ?? resolveEnergyFactStorePath(input.context.workspaceId),
+  });
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.hierarchyRevisionId,
+  );
+  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
+  if (!selectedNode) throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
+  const dateBuckets = buildDailyDateBuckets(input.context);
+
+  return input.dataGateway.withEnergySnapshotReadSession({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: prepared.sessionDatasourceId,
+  }, async (factScope) => {
+    const scoped = registerPreparedEnergyScopedDataSource({
+      metadataStore: input.metadataStore,
+      userId: input.userId,
+      prepared,
+      factScope,
+    });
+    const [meterResult, healthResult] = await Promise.all([
+      input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: meterBreakdownSql(scoped.viewName),
+        limit: 1000,
+      }),
+      input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: scopeHealthSql(scoped.viewName, publishedMeterRoute.officialMeterPointIds ?? []),
+      }),
+    ]);
+    const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
+    const scopes = resolveDailyTotalScopes({
+      metadataStore: input.metadataStore,
+      projectId: input.context.projectId,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: input.context.meterMappingRevisionId,
+      resource: input.context.resource,
+      selectedNode,
+      hierarchy,
+      meterAggregates,
+      aggregateMeterNodeIds: publishedMeterRoute.officialMeterPointIds ?? [],
+    });
+    const componentSeries = buildComponentHourlyCircuitSeries({
+      dailyTotalScopes: scopes,
+      hierarchy,
+      meterAggregates,
+      componentMeterNodeIds: publishedMeterRoute.componentMeterPointIds,
+    });
+    const [timeResult, componentResult] = await Promise.all([
+      input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: timeBucketGridSql(scoped.viewName, scopes),
+        limit: Math.max(1, scopes.length),
+      }),
+      componentSeries.length > 0
+        ? input.dataGateway.runSqlReadonly({
+            user_id: input.userId,
+            workspace_id: input.context.workspaceId,
+            datasource_id: scoped.datasourceId,
+            sql: componentHourlyProfilesSql(scoped.viewName, componentSeries),
+            limit: Math.max(1, componentSeries.length),
+          })
+        : Promise.resolve(undefined),
+    ]);
+    const intervalMinutes = numberAt(healthResult.rows[0] ?? [], 2) || 15;
+    const publicHolidayDatesByScopeId = resolvePublicHolidayDatesByScope({
+      metadataStore: input.metadataStore,
+      projectId: input.context.projectId,
+      businessCalendarVersion: input.context.businessCalendarVersion,
+      period: { from: input.context.from, to: input.context.to },
+      scopes,
+    });
+    const timeBehaviour = buildTimeBehaviour({
+      timezone: input.context.timezone,
+      scopes,
+      dateBuckets,
+      intervalMinutes,
+      rows: timeResult.rows,
+      publicHolidayDatesByScopeId,
+    });
+    return {
+      timeBehaviour: {
+        ...timeBehaviour,
+        scopes: timeBehaviour.scopes.map((scope) => ({ ...scope, cells: [] })),
+      },
+      ...(componentResult ? {
+        componentHourlyProfiles: buildComponentHourlyProfiles({
+          timezone: input.context.timezone,
+          scopes,
+          dateBuckets,
+          intervalMinutes,
+          series: componentSeries,
+          rows: componentResult.rows,
+          publicHolidayDatesByScopeId,
+        }),
+      } : {}),
     };
   });
 };
@@ -2983,12 +3127,23 @@ const buildDailyTotalsProjection = (input: {
         const row = factsByScopeAndDate.get(`${scope.scopeId}:${bucket.localDate}`);
         const validIntervalCount = row ? numberAt(row, 5) : 0;
         const qualityEventCount = row ? numberAt(row, 6) : 0;
+        const aggregateEligibleIntervalCount = row
+          ? numberAt(row, 7) / input.intervalMinutes
+          : 0;
+        const cadenceGapEventCount = row ? numberAt(row, 8) : 0;
+        const aggregateRejectedEventCount = row ? numberAt(row, 9) : 0;
         const expectedMeterIntervalCount = scope.meterNodeIds.length * Math.round(
           (Date.parse(bucket.to) - Date.parse(bucket.from)) / (input.intervalMinutes * 60_000),
         );
         const status = validIntervalCount === 0
           ? "unavailable" as const
           : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+            ? "complete" as const
+            : "partial" as const;
+        const aggregateStatus = aggregateEligibleIntervalCount === 0
+          ? "unavailable" as const
+          : aggregateEligibleIntervalCount >= expectedMeterIntervalCount
+            && aggregateRejectedEventCount === 0
             ? "complete" as const
             : "partial" as const;
         return {
@@ -3006,6 +3161,14 @@ const buildDailyTotalsProjection = (input: {
             expectedMeterIntervalCount,
             validIntervalCount,
             qualityEventCount,
+            ...(status === "complete" ? {} : {
+              aggregateStatus,
+              aggregateCoveragePct: expectedMeterIntervalCount > 0
+                ? round(Math.min(aggregateEligibleIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+                : 0,
+              aggregateEligibleIntervalCount: round(aggregateEligibleIntervalCount, 4),
+              cadenceGapEventCount,
+            }),
           },
         };
       }),
@@ -3525,9 +3688,20 @@ const aggregateDailyRowsByCalendarPeriod = (
       const usageRows = groupedRows.filter(
         (row): row is typeof row & { usageKwh: number } => row.usageKwh !== null,
       );
-      const status = validIntervalCount === 0
+      const aggregateEligibleIntervalCount = groupedRows.reduce(
+        (sum, row) => sum + (
+          row.dataHealth.status === "complete"
+            ? row.dataHealth.expectedMeterIntervalCount
+            : row.dataHealth.aggregateEligibleIntervalCount ?? row.dataHealth.validIntervalCount
+        ),
+        0,
+      );
+      const aggregateComplete = groupedRows.length > 0 && groupedRows.every((row) => (
+        row.dataHealth.status === "complete" || row.dataHealth.aggregateStatus === "complete"
+      ));
+      const status = aggregateEligibleIntervalCount === 0
         ? "unavailable" as const
-        : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+        : aggregateComplete
           ? "complete" as const
           : "partial" as const;
       return {
@@ -3543,11 +3717,22 @@ const aggregateDailyRowsByCalendarPeriod = (
         dataHealth: {
           status,
           coveragePct: expectedMeterIntervalCount > 0
-            ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+            ? round(Math.min(aggregateEligibleIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
             : 0,
           expectedMeterIntervalCount,
           validIntervalCount,
           qualityEventCount,
+          ...(qualityEventCount > 0 ? {
+            aggregateStatus: status,
+            aggregateCoveragePct: expectedMeterIntervalCount > 0
+              ? round(Math.min(aggregateEligibleIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              : 0,
+            aggregateEligibleIntervalCount: round(aggregateEligibleIntervalCount, 4),
+            cadenceGapEventCount: groupedRows.reduce(
+              (sum, row) => sum + (row.dataHealth.cadenceGapEventCount ?? 0),
+              0,
+            ),
+          } : {}),
         },
       };
     });
@@ -4777,6 +4962,11 @@ const dailyTotalsSql = (
     SUM(source.usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql("source")}) AS usage_kwh,
     COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
     COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+    COALESCE(SUM(source.elapsed_minutes) FILTER (
+      WHERE ${aggregateEligibleQualitySql("source")}
+    ), 0) AS aggregate_eligible_minutes,
+    COUNT(*) FILTER (WHERE source.quality_status = 'gap') AS cadence_gap_event_count,
+    COUNT(*) FILTER (WHERE NOT (${aggregateEligibleQualitySql("source")})) AS aggregate_rejected_event_count,
     ${index} AS scope_order
   FROM ${quoteIdentifier(viewName)} source
   WHERE ${meterNodeFilter(scope.meterNodeIds)}

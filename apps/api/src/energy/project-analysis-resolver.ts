@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
 import {
+  executeEnergyDayProfileProjection,
   executeEnergyDailyTotalsProjection,
   executeEnergyScopeAnalysis,
   executeEnergyScopeAnalysisWithLatestAvailable,
@@ -169,8 +170,8 @@ export type ProjectReportWindowAnalysis = {
   };
   status: "ready";
   analysis: {
-    summary: ProjectAnalysisPayload["summary"];
-    offHours: ProjectAnalysisPayload["offHours"];
+    summary?: ProjectAnalysisPayload["summary"];
+    offHours?: ProjectAnalysisPayload["offHours"];
     dailyTotals?: NonNullable<ProjectAnalysisPayload["dailyTotals"]>;
     timeBehaviour?: NonNullable<ProjectAnalysisPayload["timeBehaviour"]>;
     componentHourlyProfiles?: NonNullable<ProjectAnalysisPayload["componentHourlyProfiles"]>;
@@ -789,6 +790,10 @@ const materializeReportWindowAnalyses = async (input: {
   .filter((window) => (
     window.strategy.kind === "calendar_month_to_date"
     || window.strategy.kind === "rolling_complete_days"
+    || (
+      input.projectRelease.renderer.key === "ngee-ann-overview"
+      && window.strategy.kind === "same_day_type_baseline"
+    )
   ))
   .map(async (window): Promise<ProjectReportWindowAnalysis> => {
     const period = {
@@ -803,7 +808,7 @@ const materializeReportWindowAnalyses = async (input: {
         windowId: window.windowId,
         period,
         status: "ready",
-        analysis: reportWindowAnalysisProjection(input.primaryAnalysis, false),
+        analysis: reportWindowAnalysisProjection(input.primaryAnalysis, "summary"),
       };
     }
     const context: EnergyQueryContext = {
@@ -812,6 +817,20 @@ const materializeReportWindowAnalyses = async (input: {
       from: period.start,
       to: period.endExclusive,
     };
+    if (window.strategy.kind === "same_day_type_baseline") {
+      return {
+        windowId: window.windowId,
+        period,
+        status: "ready",
+        analysis: await executeEnergyDayProfileProjection({
+          metadataStore: input.metadataStore,
+          dataGateway: input.dataGateway,
+          userId: input.userId,
+          context,
+          databasePath: input.databasePath,
+        }),
+      };
+    }
     const scopeAnalysis = await executeEnergyScopeAnalysis({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,
@@ -839,22 +858,24 @@ const materializeReportWindowAnalyses = async (input: {
       windowId: window.windowId,
       period,
       status: "ready",
-      analysis: reportWindowAnalysisProjection(analysis, true),
+      analysis: reportWindowAnalysisProjection(analysis, "full-hourly"),
     };
   }));
 
 const reportWindowAnalysisProjection = (
   analysis: ProjectAnalysisPayload,
-  includeHourly: boolean,
+  mode: "summary" | "full-hourly",
 ): ProjectReportWindowAnalysis["analysis"] => ({
   summary: analysis.summary,
   offHours: analysis.offHours,
   ...(analysis.dailyTotals ? { dailyTotals: analysis.dailyTotals } : {}),
-  ...(includeHourly && analysis.timeBehaviour ? { timeBehaviour: analysis.timeBehaviour } : {}),
-  ...(includeHourly && analysis.componentHourlyProfiles
+  ...(mode === "full-hourly" && analysis.timeBehaviour
+    ? { timeBehaviour: analysis.timeBehaviour }
+    : {}),
+  ...(mode === "full-hourly" && analysis.componentHourlyProfiles
     ? { componentHourlyProfiles: analysis.componentHourlyProfiles }
     : {}),
-  ...(includeHourly ? {
+  ...(mode === "full-hourly" ? {
     composition: {
       provenance: analysis.provenance,
       comparison: analysis.comparison,
@@ -920,7 +941,9 @@ const materializeReportWindowSegmentSummaries = async (input: {
         const rows = selectedScopeRows.filter((row) => (
           row.from >= segment.from && row.to <= segment.toExclusive
         ));
-        const completeRows = rows.filter((row) => row.dataHealth.status === "complete");
+        const completeRows = rows.filter((row) => (
+          row.dataHealth.status === "complete" || row.dataHealth.aggregateStatus === "complete"
+        ));
         const availableRows = rows.filter((row) => row.usageKwh !== null);
         const dataStatus = completeRows.length === expectedDayCount
           ? "complete" as const

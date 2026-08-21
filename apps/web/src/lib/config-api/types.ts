@@ -435,9 +435,7 @@ export type EnergyDailyTotalsDto = {
       from: string;
       to: string;
       usageKwh: number | null;
-      dataHealth: EnergyAnalysisDataHealthDto & {
-        status: "complete" | "partial" | "unavailable";
-      };
+      dataHealth: EnergyTimeBucketDataHealthDto;
     }>;
   }>;
 };
@@ -517,6 +515,10 @@ export type EnergyCalendarTotalRowDto = {
 
 export type EnergyTimeBucketDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "partial" | "unavailable";
+  aggregateStatus?: "complete" | "partial" | "unavailable";
+  aggregateCoveragePct?: number;
+  aggregateEligibleIntervalCount?: number;
+  cadenceGapEventCount?: number;
 };
 
 export type EnergyTimeBehaviourDto = {

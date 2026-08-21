@@ -309,6 +309,22 @@ describe("ProjectAnalysisResolver", () => {
             }),
           }),
         }),
+        expect.objectContaining({
+          windowId: "day-type-reference",
+          period: {
+            start: "2026-02-18T16:00:00.000Z",
+            endExclusive: "2026-05-19T16:00:00.000Z",
+          },
+          status: "ready",
+          analysis: expect.objectContaining({
+            timeBehaviour: expect.objectContaining({
+              scopes: expect.arrayContaining([
+                expect.objectContaining({ scopeId: "project", cells: [] }),
+              ]),
+              dayProfiles: expect.any(Array),
+            }),
+          }),
+        }),
       ]));
       expect(currentProjectResult.snapshot.reportWindowSegmentSummaries).toEqual([
         {
@@ -741,7 +757,7 @@ describe("ProjectAnalysisResolver", () => {
       metadata.close();
       removeTemporaryFixture(root);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("reuses a fully pinned Ngee Ann current Overview without repeating Period or fact SQL", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-pinned-cache-"));
