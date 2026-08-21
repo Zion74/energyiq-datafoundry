@@ -193,6 +193,7 @@ export const buildNgeeAnnSectionPrompt = (
     "Insights may be observed, inferred, or speculative. Inference and speculation are encouraged when they offer a relevant new angle, but label them honestly and never present a possible cause as confirmed.",
     "The epistemicStatus applies to the whole title and text. If any sentence proposes a cause, possibility or action that is not directly observed, use inferred or speculative rather than observed.",
     "Evidence refs anchor the observation beneath an Insight; they do not claim that a hypothesis has been proven.",
+    "Keep every factual number bound to its supplied field meaning and entity. A comparison percentage is not a share of total, a Level total is not off-hours usage, and a baseline value is not an actual value.",
     "A speculative Insight may suggest a relationship, counterexample, question, or low-risk line of inquiry without inventing measurements.",
     "When comparing day types, follow the direction of the supplied Project-scope profiles. Do not call one day type higher or lower than another unless the profile values support that direction.",
     "Each candidate must cite one or more exact Evidence IDs from the Pack. Aim for Summary under 480 characters, titles under 96, text under 480, and deep-dive questions under 220; preserve a useful explanation when it needs a little more room.",
@@ -216,7 +217,8 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
   requirePackIdentity(input.pack, input.identity);
   const proposal = parseProposal(input.answer, input.pack.sectionId);
   const evidenceIds = new Set(input.pack.evidence.map(({ id }) => id));
-  const packText = JSON.stringify(projectSectionPackForPrompt(input.pack));
+  const packProjection = projectSectionPackForPrompt(input.pack);
+  const narrativeAuthority = createNarrativeFactAuthority(packProjection);
   const dayTypeProfileMeans = dayTypeProfileMeansForPack(input.pack);
 
   if (proposal.status === "empty") {
@@ -226,7 +228,12 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
     return resultBase(input, "empty", [], [], 0);
   }
 
-  const summary = parseSummary(proposal.summary, evidenceIds, packText, dayTypeProfileMeans);
+  const summary = parseSummary(
+    proposal.summary,
+    evidenceIds,
+    narrativeAuthority,
+    dayTypeProfileMeans,
+  );
   if (!summary) throw new Error("ENERGYIQ_NGEE_ANN_SECTION_RESULT_INVALID");
   const accepted: NgeeAnnSectionInsight[] = [];
   const rejectedCandidateIds: string[] = [];
@@ -241,7 +248,7 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
       continue;
     }
     seenCandidateIds.add(candidateId);
-    const insight = parseInsight(candidate, evidenceIds, packText, dayTypeProfileMeans);
+    const insight = parseInsight(candidate, evidenceIds, narrativeAuthority, dayTypeProfileMeans);
     if (!insight) {
       rejectedCandidateIds.push(candidateId);
       continue;
@@ -345,7 +352,7 @@ const parseProposal = (
 const parseSummary = (
   value: unknown,
   evidenceIds: Set<string>,
-  packText: string,
+  narrativeAuthority: NarrativeFactAuthority,
   dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): NgeeAnnSectionSummary | null => {
   const text = isRecord(value) && typeof value.text === "string"
@@ -354,14 +361,14 @@ const parseSummary = (
   if (!isRecord(value)
     || !boundedString(text, MAX_SUMMARY_CHARS)
     || !validEvidenceRefs(value.evidenceRefs, evidenceIds)) return null;
-  if (narrativeFactsSupported(text, packText, dayTypeProfileMeans)) {
+  if (narrativeFactsSupported(text, narrativeAuthority, dayTypeProfileMeans)) {
     return { text, evidenceRefs: [...value.evidenceRefs] };
   }
   const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
     .segment(text)]
     .map(({ segment }) => segment.trim())
     .filter((sentence) => sentence.length > 0
-      && narrativeFactsSupported(sentence, packText, dayTypeProfileMeans))
+      && narrativeFactsSupported(sentence, narrativeAuthority, dayTypeProfileMeans))
     .join(" ");
   return supportedText.length > 0
     ? { text: supportedText, evidenceRefs: [...value.evidenceRefs] }
@@ -371,7 +378,7 @@ const parseSummary = (
 const parseInsight = (
   value: unknown,
   evidenceIds: Set<string>,
-  packText: string,
+  narrativeAuthority: NarrativeFactAuthority,
   dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): NgeeAnnSectionInsight | null => {
   if (!isRecord(value)) return null;
@@ -397,7 +404,7 @@ const parseInsight = (
     || (deepDiveQuestion !== undefined
       && !boundedString(deepDiveQuestion, MAX_DEEP_DIVE_CHARS))) return null;
   const narrative = [title, text, deepDiveQuestion ?? ""].join(" ");
-  if (!narrativeFactsSupported(narrative, packText, dayTypeProfileMeans)) return null;
+  if (!narrativeFactsSupported(narrative, narrativeAuthority, dayTypeProfileMeans)) return null;
   return {
     id: value.id,
     title,
@@ -429,17 +436,149 @@ const validEvidenceRefs = (
   && value.every((item) => nonEmptyString(item) && evidenceIds.has(item))
   && new Set(value).size === value.length;
 
-const numbersSupported = (text: string, packText: string): boolean =>
-  [...text.matchAll(NUMBER_TOKEN)].every(([token]) => numericTokenSupported(token, packText));
+type NumericFact = {
+  value: number;
+  path: string;
+  context: string;
+};
+
+type NarrativeFactAuthority = {
+  packText: string;
+  numericFacts: NumericFact[];
+};
+
+const createNarrativeFactAuthority = (projection: Record<string, unknown>): NarrativeFactAuthority => ({
+  packText: JSON.stringify(projection),
+  numericFacts: collectNumericFacts(projection),
+});
+
+const numbersSupported = (
+  text: string,
+  authority: NarrativeFactAuthority,
+): boolean => [...text.matchAll(NUMBER_TOKEN)].every((match) => {
+  const token = match[0];
+  if (!numericTokenSupported(token, authority.packText)) return false;
+  const matchingFacts = authority.numericFacts.filter((fact) => numericValuesMatch(token, fact.value));
+  return semanticNumberBindingSupported(text, match, matchingFacts);
+});
 
 const narrativeFactsSupported = (
   text: string,
-  packText: string,
+  authority: NarrativeFactAuthority,
   dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): boolean =>
-  numbersSupported(text, packText)
-  && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => packText.includes(token))
+  numbersSupported(text, authority)
+  && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => authority.packText.includes(token))
   && dayTypeRelationsSupported(text, dayTypeProfileMeans);
+
+const collectNumericFacts = (
+  value: unknown,
+  path: string[] = [],
+  arrayItemContext = "",
+): NumericFact[] => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return [{ value, path: path.join("."), context: `${path.join(" ")} ${arrayItemContext}`.toLowerCase() }];
+  }
+  if (typeof value === "string") {
+    return [...value.matchAll(NUMBER_TOKEN)].flatMap(([token]) => {
+      const numericValue = Number(token.replaceAll(",", ""));
+      return Number.isFinite(numericValue)
+        ? [{
+            value: numericValue,
+            path: path.join("."),
+            context: `${path.join(" ")} ${arrayItemContext} ${value}`.toLowerCase(),
+          }]
+        : [];
+    });
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) => collectNumericFacts(
+      item,
+      [...path, `[${index}]`],
+      isRecord(item) ? collectPrimitiveStrings(item).join(" ").toLowerCase() : arrayItemContext,
+    ));
+  }
+  if (!isRecord(value)) return [];
+  const localContext = Object.values(value)
+    .filter((item): item is string => typeof item === "string")
+    .join(" ")
+    .toLowerCase();
+  return Object.entries(value).flatMap(([key, item]) => collectNumericFacts(
+    item,
+    [...path, key],
+    [arrayItemContext, localContext].filter(Boolean).join(" "),
+  ));
+};
+
+const collectPrimitiveStrings = (value: unknown): string[] => {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(collectPrimitiveStrings);
+  if (!isRecord(value)) return [];
+  return Object.values(value).flatMap(collectPrimitiveStrings);
+};
+
+const semanticNumberBindingSupported = (
+  text: string,
+  match: RegExpMatchArray,
+  facts: NumericFact[],
+): boolean => {
+  const matchIndex = match.index;
+  if (facts.length === 0 || matchIndex === undefined) return false;
+  const tokenEnd = matchIndex + match[0].length;
+  const rawClause = narrativeClauseAt(text, matchIndex);
+  const clause = rawClause.toLowerCase();
+  const unitTail = text.slice(tokenEnd, tokenEnd + 16).trimStart();
+  const unit = unitTail.startsWith("%")
+    ? "pct"
+    : /^kwh\b/iu.test(unitTail)
+      ? "kwh"
+      : /^kw\b/iu.test(unitTail)
+        ? "kw"
+        : null;
+  const entityRefs = [...rawClause.matchAll(/\b(level|circuit)\s+([a-z0-9_-]+)\b/giu)]
+    .filter((entity) => isEntityCodeToken(entity[2]!))
+    .map((entity) => `${entity[1]} ${entity[2]}`.toLowerCase());
+  return facts.some((fact) => {
+    const path = fact.path.toLowerCase();
+    const context = fact.context;
+    if (unit === "pct" && !/(?:pct|percent|ratio)$/u.test(path)) return false;
+    if (unit === "kwh" && !/kwh$/u.test(path)) return false;
+    if (unit === "kw" && (!/kw$/u.test(path) || /kwh$/u.test(path))) return false;
+    if (entityRefs.length > 0 && !entityRefs.every((entity) => context.includes(entity))) return false;
+    if (/\b(?:off[- ]?hours?|outside\s+(?:of\s+)?(?:normal\s+)?operating\s+hours?|non[- ]operating|standby)\b/iu.test(clause)
+      && !/(?:offhours|nonoperating|standby)/u.test(`${path} ${context}`)) return false;
+    if (unit === "pct"
+      && /\b(?:of\s+(?:all\s+|total\s+)?(?:energy\s+)?usage|share\s+of|accounts?\s+for)\b/iu.test(clause)
+      && !/(?:sharepct|ratiopct|percentage)/u.test(path)) return false;
+    if (unit === "pct"
+      && /\b(?:above|below|higher|lower|increase|decrease|change|difference)\b/iu.test(clause)
+      && /\b(?:baseline|comparison|previous|prior)\b/iu.test(clause)
+      && !/(?:relativepct|changepct|deltapct)/u.test(path)) return false;
+    if (unit === "kwh"
+      && numberDescribesBaseline(text, matchIndex, tokenEnd)
+      && !/baselinekwh$/u.test(path)) return false;
+    if (unit === "kw" && /\bpeak\b/iu.test(clause) && !/peakkw$/u.test(path)) return false;
+    return true;
+  });
+};
+
+const isEntityCodeToken = (value: string): boolean => /^[0-9]+$/u.test(value)
+  || /^(?=[A-Za-z0-9_-]*[0-9])[A-Za-z0-9_-]+$/u.test(value)
+  || /^[A-Z]{1,3}$/u.test(value);
+
+const narrativeClauseAt = (text: string, index: number): string => {
+  const before = text.slice(0, index);
+  const after = text.slice(index);
+  const start = Math.max(before.lastIndexOf("."), before.lastIndexOf(";"), before.lastIndexOf(","), before.lastIndexOf("?"), before.lastIndexOf("!")) + 1;
+  const relativeEnds = [".", ";", ",", "?", "!"]
+    .map((delimiter) => after.indexOf(delimiter))
+    .filter((candidate) => candidate >= 0);
+  const end = relativeEnds.length > 0 ? index + Math.min(...relativeEnds) : text.length;
+  return text.slice(start, end);
+};
+
+const numberDescribesBaseline = (text: string, start: number, end: number): boolean =>
+  /\bbaseline\b/iu.test(text.slice(Math.max(0, start - 12), Math.min(text.length, end + 24)));
 
 type NgeeAnnDayType = "weekday" | "weekend" | "public_holiday";
 
@@ -519,6 +658,16 @@ const numericTokenSupported = (token: string, packText: string): boolean => {
     return Number.isFinite(sourceValue)
       && Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
   });
+};
+
+const numericValuesMatch = (token: string, sourceValue: number): boolean => {
+  const normalized = token.replaceAll(",", "");
+  const reportedValue = Number(normalized);
+  if (!Number.isFinite(reportedValue)) return false;
+  const precision = normalized.split(".")[1]?.length ?? 0;
+  const tolerance = 0.5 * (10 ** -precision);
+  const floatingPointSlack = Number.EPSILON * Math.max(1, Math.abs(reportedValue)) * 4;
+  return Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
 };
 
 const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, unknown> => {
@@ -821,8 +970,8 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  const expectedPromptRevision = "energyiq-project-section-discovery-v6";
-  if (identity.identityContractRevision !== "ngee-ann-section-v12"
+  const expectedPromptRevision = "energyiq-project-section-discovery-v7";
+  if (identity.identityContractRevision !== "ngee-ann-section-v13"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

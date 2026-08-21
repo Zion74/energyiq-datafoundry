@@ -329,6 +329,114 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("rejects numeric facts attached to the wrong metric meaning while preserving a supported sibling", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
+    pack.facts.decisionPriorities = {
+      status: "available",
+      limitation: null,
+      evidencePins: {} as never,
+      items: [{
+        finding: {
+          code: "DAILY_USAGE_ABOVE_BASELINE",
+          title: "Level 7 recorded a daily usage exception.",
+          actualKwh: 3_046.478,
+          baselineKwh: 2_025.584,
+          relativePct: 50.4,
+        },
+        evidence: {
+          occurrence: {
+            scopeId: "level-7",
+            scopeName: "Level 7",
+            scopeType: "level",
+          },
+        },
+      } as never],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Level 7 recorded a daily usage exception in the current period.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:wrong-metric-binding",
+          title: "Half of all usage occurs outside operating hours",
+          text: "50.4% of total usage (3,046.478 kWh) happened outside operating hours.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:wrong-entity-binding",
+          title: "Level 6 is materially above its daily baseline",
+          text: "Level 6 used 3,046.478 kWh, which is 50.4% above its 2,025.584 kWh baseline.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:correct-metric-binding",
+          title: "Level 7 is materially above its daily baseline",
+          text: "Level 7 used 3,046.478 kWh, which is 50.4% above its 2,025.584 kWh baseline.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:semantic-number-binding",
+    });
+
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:correct-metric-binding"]);
+    expect(result.publication.rejectedCandidateIds).toEqual([
+      "candidate:wrong-metric-binding",
+      "candidate:wrong-entity-binding",
+    ]);
+  });
+
+  it("keeps the same off-hours wording when the cited numbers come from the off-hours facts", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
+    pack.facts.offHours = {
+      status: "available",
+      usageKwh: 2_255.9,
+      standbyKwh: 2_255.9,
+      operatingKwh: 2_220.29,
+      sharePct: 50.4,
+    } as never;
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "The current time-behaviour facts include an off-hours split.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:correct-off-hours-binding",
+          title: "Off-hours usage is material",
+          text: "50.4% of total usage (2,255.9 kWh) happened outside operating hours.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:correct-off-hours-binding",
+    });
+
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:correct-off-hours-binding"]);
+  });
+
   it("keeps an exploratory angle but lowers an observed label when the narrative contains a hypothesis", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["time-behaviour"];
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
@@ -362,6 +470,11 @@ describe("materializeNgeeAnnSectionResult", () => {
 
   it("does not present a suggesting relationship as directly observed", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    if (!pack.facts.dailyTotals) throw new Error("Expected daily totals fixture.");
+    pack.facts.dailyTotals = {
+      ...pack.facts.dailyTotals,
+      scopes: [{ scopeId: "level-7", scopeName: "Level 7", rows: [] } as never],
+    };
     const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
       baseIdentity: baseIdentity(),
       targetId: pack.sectionId,
