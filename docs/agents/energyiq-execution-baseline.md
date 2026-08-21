@@ -134,6 +134,16 @@ authorised sibling source checkout at `..\energyiq-datafoundry\.env`. Use
 output reports only `secretMasterKeyConfigured: true/false` about the secret;
 it never emits the value.
 
+The API and all Workspace fact stores must share one authorised absolute
+`STORAGE_ROOT_DIR`. The restart command resolves it in this order: explicit
+`-StorageRoot`, an absolute value in the selected `.env`, then the single
+checked sibling path `..\energyiq-datafoundry\storage`. Before any listener is
+stopped it requires `metadata\workbench.sqlite` and at least one
+`energy\<workspace>\energy.duckdb`, rejects relative paths and the
+Integration-local `storage` tree, and reports only the resolved non-secret
+root. This prevents a healthy-looking API from reading Metadata and Energy
+facts from different checkout-relative trees.
+
 The API must pass both `/healthz` and `/ready`; the Web must make
 `/energyiq/overview` reachable on port 3000. On failure, the command terminates
 only the PIDs it created. It refuses to stop a listener whose absolute command

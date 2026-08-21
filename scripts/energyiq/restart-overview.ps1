@@ -11,6 +11,7 @@ through -ExpectedExistingApiPid or -ExpectedExistingWebPid.
 param(
   [string]$IntegrationRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
   [string]$EnvFile = "",
+  [string]$StorageRoot = "",
   [int]$ApiPort = 8787,
   [int]$WebPort = 3000,
   [int]$ExpectedExistingApiPid = 0,
@@ -75,6 +76,52 @@ function Read-DotEnvValues {
     $values[$name] = $value
   }
   return $values
+}
+
+function Test-AbsoluteWindowsPath {
+  param([string]$Value)
+
+  return [bool]($Value -match '^(?:[A-Za-z]:[\\/]|\\\\)')
+}
+
+function Resolve-AuthoritativeStorageRoot {
+  param(
+    [string]$ExplicitPath,
+    $EnvironmentValues,
+    [string]$Root
+  )
+
+  $configuredPath = if ($ExplicitPath) {
+    $ExplicitPath
+  } elseif ($EnvironmentValues.ContainsKey("STORAGE_ROOT_DIR") -and
+    [string]$EnvironmentValues["STORAGE_ROOT_DIR"] -and
+    [string]$EnvironmentValues["STORAGE_ROOT_DIR"].Trim()) {
+    [string]$EnvironmentValues["STORAGE_ROOT_DIR"]
+  } else {
+    Join-Path (Split-Path -Parent $Root) "energyiq-datafoundry\storage"
+  }
+  if (-not (Test-AbsoluteWindowsPath $configuredPath)) {
+    throw "STORAGE_ROOT_DIR must be an explicit absolute path."
+  }
+
+  $resolved = Resolve-RequiredPath $configuredPath "Authorised shared storage root"
+  $item = Get-Item -LiteralPath $resolved
+  if (-not $item.PSIsContainer) {
+    throw "Authorised shared storage root must be a directory: $resolved"
+  }
+  $integrationLocalStorage = Join-Path $Root "storage"
+  if ((Test-Path -LiteralPath $integrationLocalStorage) -and
+      (Resolve-Path -LiteralPath $integrationLocalStorage).Path -eq $resolved) {
+    throw "Refusing the Integration-local storage tree; use the authorised shared storage root."
+  }
+
+  Resolve-RequiredPath (Join-Path $resolved "metadata\workbench.sqlite") "Metadata store" | Out-Null
+  $energyRoot = Resolve-RequiredPath (Join-Path $resolved "energy") "Workspace Energy store root"
+  $workspaceStores = @(Get-ChildItem -LiteralPath $energyRoot -Filter "energy.duckdb" -File -Recurse)
+  if ($workspaceStores.Count -eq 0) {
+    throw "No Workspace Energy store was found beneath the authorised shared storage root."
+  }
+  return $resolved
 }
 
 function Get-ListenerProcesses {
@@ -166,6 +213,8 @@ if (-not $gitRoot -or (Resolve-Path -LiteralPath $gitRoot).Path -ne $root) {
 }
 $resolvedEnvFile = Resolve-AuthoritativeEnvFile $EnvFile $root
 $envValues = Read-DotEnvValues $resolvedEnvFile
+$resolvedStorageRoot = Resolve-AuthoritativeStorageRoot $StorageRoot $envValues $root
+$envValues["STORAGE_ROOT_DIR"] = $resolvedStorageRoot
 $secretMasterKeyConfigured = [bool]($envValues.ContainsKey("SECRET_MASTER_KEY") -and
   [string]$envValues["SECRET_MASTER_KEY"] -and
   [string]$envValues["SECRET_MASTER_KEY"].Trim())
@@ -189,6 +238,7 @@ $webOwned = $webListeners.Count -le 1 -and ($webListeners.Count -eq 0 -or
 Write-Output ([pscustomobject]@{
   integrationRoot = $root
   envFile = $resolvedEnvFile
+  storageRoot = $resolvedStorageRoot
   secretMasterKeyConfigured = $secretMasterKeyConfigured
   apiPort = $ApiPort
   apiExistingPid = if ($apiListeners.Count -eq 1) { $apiListeners[0].ProcessId } else { $null }
