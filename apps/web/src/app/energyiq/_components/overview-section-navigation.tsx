@@ -29,7 +29,10 @@ export function OverviewSectionNavigation({
             <a
               key={section.id}
               href={`#${section.id}`}
-              onClick={() => onSelect(section.id)}
+              onClick={(event) => {
+                event.preventDefault();
+                onSelect(section.id);
+              }}
               aria-current={active ? "location" : undefined}
               className={[
                 "flex min-h-10 shrink-0 items-center rounded-md px-3 py-2 text-ui-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 xl:w-full",

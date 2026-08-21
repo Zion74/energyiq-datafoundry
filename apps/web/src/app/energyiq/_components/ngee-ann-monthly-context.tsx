@@ -25,7 +25,9 @@ export function NgeeAnnMonthlyContext({
     <section
       id="ngee-ann-monthly-context"
       data-overview-section="true"
+      data-overview-navigation-label="Monthly context"
       aria-labelledby="ngee-ann-monthly-context-title"
+      tabIndex={-1}
       className="scroll-mt-28 border-b border-border bg-surface px-5 py-7 lg:px-7 lg:py-8"
     >
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">

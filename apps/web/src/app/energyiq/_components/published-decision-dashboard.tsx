@@ -30,12 +30,10 @@ import {
 } from "./overview-history-state";
 import {
   OverviewSectionNavigation,
-  type OverviewNavigationSection,
 } from "./overview-section-navigation";
-import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { OverviewChangeDialog } from "./overview-change-dialog";
 import { formatReportDataThrough, formatSourceDataCoverage } from "./overview-report-time";
-import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
+import { useOverviewSectionOutline } from "./overview-section-outline";
 import { buildPreschoolAiArtifactReadInput, invalidatePreschoolAiRun } from "./preschool-ai-run";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
@@ -152,7 +150,6 @@ function PublishedDecisionDashboardView({
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [refreshRevision, setRefreshRevision] = useState(0);
-  const [activeSection, setActiveSection] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
@@ -187,6 +184,7 @@ function PublishedDecisionDashboardView({
   const refreshBypassPendingRef = useRef(false);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
   const changeButtonRef = useRef<HTMLButtonElement>(null);
+  const overviewContentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     pendingUrlSearchRef.current = urlSearch;
@@ -494,34 +492,27 @@ function PublishedDecisionDashboardView({
         ...(currentHandoffPin ? { currentOverviewPin: currentHandoffPin } : {}),
       };
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
-  const navigationSections = useMemo<ReadonlyArray<OverviewNavigationSection>>(() => {
-    if (isNgeeAnnRenderer) return NGEE_ANN_OVERVIEW_SECTIONS;
-    if (isPreschoolRenderer) return PRESCHOOL_OVERVIEW_SECTIONS;
-    return publishedSections.map((section) => ({
+  const fallbackNavigationSections = useMemo(() => publishedSections.map((section) => ({
       id: sectionDomId(section.section_id),
       label: section.navigation_label,
-    }));
-  }, [isNgeeAnnRenderer, isPreschoolRenderer, publishedSections]);
-
-  useEffect(() => {
-    setActiveSection(navigationSections[0]?.id ?? "");
-  }, [projectId, navigationSections]);
-
-  useEffect(() => {
-    const elements = navigationSections
-      .map((section) => document.getElementById(section.id))
-      .filter((element): element is HTMLElement => Boolean(element));
-    if (elements.length === 0) return;
-    const scrollContainer = elements[0]?.closest("main");
-    if (!scrollContainer) return;
-    const updateActiveSection = () => {
-      const passed = elements.filter((element) => element.getBoundingClientRect().top <= 176);
-      setActiveSection((passed.at(-1) ?? elements[0]).id);
-    };
-    updateActiveSection();
-    scrollContainer.addEventListener("scroll", updateActiveSection, { passive: true });
-    return () => scrollContainer.removeEventListener("scroll", updateActiveSection);
-  }, [navigationSections]);
+    })), [publishedSections]);
+  const overviewIdentityKey = [
+    rendererState.status,
+    projectId,
+    rendererRequest?.rendererKey ?? "generic",
+    currentSnapshot?.context.dataSnapshotId ?? "no-snapshot",
+    currentSnapshot?.projectRelease.id ?? "no-release",
+    refreshRevision,
+  ].join(":");
+  const {
+    sections: navigationSections,
+    activeSectionId: activeSection,
+    selectSection,
+  } = useOverviewSectionOutline({
+    rootRef: overviewContentRef,
+    fallbackSections: fallbackNavigationSections,
+    identityKey: overviewIdentityKey,
+  });
 
   return (
     <>
@@ -738,9 +729,9 @@ function PublishedDecisionDashboardView({
           <OverviewSectionNavigation
             sections={navigationSections}
             activeSectionId={activeSection}
-            onSelect={setActiveSection}
+            onSelect={selectSection}
           />
-          <div className="min-w-0">
+          <div ref={overviewContentRef} className="min-w-0">
             {isDedicatedOverviewRenderer && rendererRequest && projectRendererState ? (
               <ProjectRenderer
                 key={`dedicated-overview:${projectId}:${refreshRevision}`}

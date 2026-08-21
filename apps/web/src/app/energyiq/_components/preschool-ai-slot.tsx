@@ -929,9 +929,17 @@ function AiFrame({
 }) {
   if (sectionId === "overall-summary") {
     return (
-      <section aria-labelledby="preschool-additional-ai-insights" className="border-b border-border bg-surface px-5 py-6 lg:px-7 lg:py-7" data-ai-section={sectionId}>
+      <section
+        id="preschool-additional-ai-insights"
+        aria-labelledby="preschool-additional-ai-insights-heading"
+        data-overview-section="true"
+        data-overview-navigation-label="Additional AI Insights"
+        data-ai-section={sectionId}
+        tabIndex={-1}
+        className="scroll-mt-28 border-b border-border bg-surface px-5 py-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-7"
+      >
         <div className="mb-5 flex flex-wrap items-center gap-2">
-          <h3 id="preschool-additional-ai-insights" className="text-lg font-semibold tracking-[-0.02em] text-foreground">Additional AI Insights</h3>
+          <h3 id="preschool-additional-ai-insights-heading" className="text-lg font-semibold tracking-[-0.02em] text-foreground">Additional AI Insights</h3>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
         </div>
         {children}

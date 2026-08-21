@@ -70,6 +70,21 @@ describe("EnergyTemplateRenderer states", () => {
     expect(source).toContain("Analysis data advisories");
   });
 
+  it("publishes the same rendered Section contract used by every Overview navigation", () => {
+    const plan = renderPlanFixture();
+    const markup = renderToStaticMarkup(
+      <EnergyTemplateRenderer state={{ status: "ready", analysis: analysisFixture(), plan }} sectionIdPrefix="customer-overview" />,
+    );
+    for (const section of plan.sections) {
+      const id = `customer-overview-${section.section_id}`;
+      expect(markup).toContain(`id="${id}"`);
+      expect(markup).toContain(`data-overview-navigation-label="${section.navigation_label}"`);
+      expect(markup).toContain(`aria-labelledby="${id}-heading"`);
+      expect(markup).toContain(`id="${id}-heading"`);
+      expect(markup).toContain('tabindex="-1"');
+    }
+  });
+
   it("renders published recommended actions without recomputing the finding", () => {
     const analysis = analysisFixture();
     analysis.attention.push({

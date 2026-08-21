@@ -63,14 +63,18 @@ export function EnergyTemplateRenderer({
         <section
           key={section.section_id}
           id={`${sectionIdPrefix}-${section.section_id}`}
-          className="scroll-mt-24"
+          data-overview-section="true"
+          data-overview-navigation-label={section.navigation_label}
+          aria-labelledby={`${sectionIdPrefix}-${section.section_id}-heading`}
+          tabIndex={-1}
+          className="scroll-mt-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
         >
           <div className="mb-4 flex items-start gap-3">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-[10px] font-bold text-muted">
               {String(sectionIndex + 1).padStart(2, "0")}
             </span>
             <div>
-              <h2 className="text-base font-semibold tracking-tight text-foreground">{section.title}</h2>
+              <h2 id={`${sectionIdPrefix}-${section.section_id}-heading`} className="text-base font-semibold tracking-tight text-foreground">{section.title}</h2>
               {section.description ? <p className="mt-1 text-xs leading-5 text-muted">{section.description}</p> : null}
             </div>
           </div>

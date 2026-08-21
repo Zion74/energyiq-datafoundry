@@ -242,10 +242,11 @@ describe("NgeeAnnOverviewRenderer", () => {
       ["ngee-ann-recommendations", "Management themes"],
       ["ngee-ann-executive-summary", "Executive Summary"],
       ["ngee-ann-monthly-context", "Monthly context"],
+      ["ngee-ann-ai-analysis", "AI interpretation"],
       ["ngee-ann-daily-trend", "Daily Total Trend"],
       ["ngee-ann-summary-findings", "Supporting diagnostic index"],
       ["ngee-ann-day-profile-analysis", "Day Profile Analysis"],
-      ["ngee-ann-energy-health", "Energy Health Summary"],
+      ["ngee-ann-energy-health", "Time-based Behavioral Analysis"],
       ["ngee-ann-circuit-analysis", "Circuit Category Analysis"],
       ["ngee-ann-evidence", "Evidence and calculation details"],
     ] as const;
@@ -253,6 +254,8 @@ describe("NgeeAnnOverviewRenderer", () => {
     container.innerHTML = markup;
     expect(Array.from(container.querySelectorAll<HTMLElement>("[data-overview-section]"), (section) => section.id))
       .toEqual(expectedSections.map(([id]) => id));
+    expect(Array.from(container.querySelectorAll<HTMLElement>("[data-overview-section]"), (section) => section.dataset.overviewNavigationLabel))
+      .toEqual(expectedSections.map(([, label]) => label));
     for (let index = 1; index < expectedSections.length; index += 1) {
       expect(markup.indexOf(expectedSections[index - 1]![1])).toBeLessThan(markup.indexOf(expectedSections[index]![1]));
     }

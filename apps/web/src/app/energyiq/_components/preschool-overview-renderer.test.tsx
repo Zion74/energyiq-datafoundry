@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { EnergySavedAnalysisAiArtifactDto, EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
-import { PRESCHOOL_OVERVIEW_SECTIONS, PreschoolOverviewRenderer } from "./preschool-overview-renderer";
+import { PreschoolOverviewRenderer } from "./preschool-overview-renderer";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
@@ -66,14 +66,17 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       />,
     );
 
-    expect(PRESCHOOL_OVERVIEW_SECTIONS).toEqual([
+    const expectedSections = [
       { id: "preschool-overall-summary", label: "1 · Overview" },
+      { id: "preschool-ai-analysis", label: "AI interpretation" },
       { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
       { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
       { id: "preschool-operating-hours", label: "4 · Operating hours" },
       { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
-    ]);
-    expect(markup.match(/data-overview-section=/g)).toHaveLength(5);
+      { id: "preschool-centre-ranking", label: "Centre detail" },
+      { id: "preschool-evidence", label: "Supporting evidence" },
+    ] as const;
+    expect(markup.match(/data-overview-section=/g)).toHaveLength(expectedSections.length);
     expect(markup).toContain("Energy Review");
     expect(markup).toContain("Sections 1–4");
     expect(markup).toContain("Calendar-month window");
@@ -146,7 +149,12 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const overallTotalRow = container.querySelector<HTMLElement>("#preschool-overall-summary tfoot tr");
     expect(overallTotalRow?.textContent).toContain("All centres");
     expect(overallTotalRow?.textContent).not.toContain("Portfolio total");
-    const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
+    const renderedSections = Array.from(container.querySelectorAll<HTMLElement>("[data-overview-section]"), (section) => ({
+      id: section.id,
+      label: section.dataset.overviewNavigationLabel,
+    }));
+    expect(renderedSections).toEqual(expectedSections);
+    const sectionPositions = expectedSections.map((section) => markup.indexOf(`id="${section.id}"`));
     expect(sectionPositions.every((position) => position >= 0)).toBe(true);
     expect(sectionPositions).toEqual([...sectionPositions].sort((left, right) => left - right));
     expect(markup.indexOf("Overall metrics")).toBeLessThan(markup.indexOf("At a glance"));
@@ -201,6 +209,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Additional AI Insights");
     expect(markup).toContain("Additional insights unavailable");
     expect(markup).toContain("Centre detail");
+    expect(markup).toContain('id="preschool-additional-ai-insights"');
+    expect(markup).toContain('data-overview-navigation-label="Additional AI Insights"');
     expect(markup.indexOf("Monthly Energy Outlook")).toBeLessThan(markup.indexOf("Additional AI Insights"));
     expect(markup.indexOf("Additional AI Insights")).toBeLessThan(markup.indexOf("Centre detail"));
   });

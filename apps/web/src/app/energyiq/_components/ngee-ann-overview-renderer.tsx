@@ -206,7 +206,13 @@ export function NgeeAnnOverviewRenderer({
 
       <NgeeAnnEnergyDistribution view={view.componentCategoryBreakdown} />
 
-      <div id="ngee-ann-ai-analysis" className="scroll-mt-28 border-b border-border">
+      <div
+        id="ngee-ann-ai-analysis"
+        data-overview-section="true"
+        data-overview-navigation-label="AI interpretation"
+        tabIndex={-1}
+        className="scroll-mt-28 border-b border-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+      >
         {aiSlotMode === "saved" && savedAiArtifact?.contract === "energyiq-saved-ai-result@3"
           ? <NgeeAnnProjectAiSlots snapshot={state.snapshot} savedModel={savedAiArtifact.result} />
           : aiSlotMode === "saved" ? <NgeeAnnAiSlot
@@ -246,7 +252,13 @@ export function NgeeAnnOverviewRenderer({
         />}
       </div>
 
-      <div id="ngee-ann-daily-trend" data-overview-section="true" className="scroll-mt-28">
+      <div
+        id="ngee-ann-daily-trend"
+        data-overview-section="true"
+        data-overview-navigation-label="Daily Total Trend"
+        tabIndex={-1}
+        className="scroll-mt-28 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+      >
         <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
           <div className="mb-2 flex justify-end">
             <OverviewWindowLabel
@@ -277,6 +289,8 @@ export function NgeeAnnOverviewRenderer({
       <details
         id="ngee-ann-summary-findings"
         data-overview-section="true"
+        data-overview-navigation-label="Supporting diagnostic index"
+        tabIndex={-1}
         className="group scroll-mt-28 border-b border-border bg-surface"
       >
         <summary className="cursor-pointer list-none px-5 pb-4 pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/20 lg:px-7 lg:pt-8 [&::-webkit-details-marker]:hidden">
@@ -347,7 +361,13 @@ export function NgeeAnnOverviewRenderer({
         onCategoryChange={onCategoryChange}
       />
 
-      <div id="ngee-ann-evidence" data-overview-section="true" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">
+      <div
+        id="ngee-ann-evidence"
+        data-overview-section="true"
+        data-overview-navigation-label="Evidence and calculation details"
+        tabIndex={-1}
+        className="scroll-mt-28 px-5 py-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-6"
+      >
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -426,9 +446,16 @@ function OverviewSectionHeading({
   windowIds: readonly string[];
 }) {
   return (
-    <div id={id} data-overview-section="true" className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 lg:px-7 lg:pt-8">
+    <div
+      id={id}
+      data-overview-section="true"
+      data-overview-navigation-label={title}
+      aria-labelledby={`${id}-heading`}
+      tabIndex={-1}
+      className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:pt-8"
+    >
       <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-2">
-        <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
+        <h3 id={`${id}-heading`} className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
         <OverviewWindowLabel context={reportTimeContext} windowIds={windowIds} />
       </div>
       <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">{description}</p>

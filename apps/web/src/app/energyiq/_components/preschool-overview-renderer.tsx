@@ -31,14 +31,6 @@ import {
   type PreschoolOperationalCentre,
 } from "./preschool-overview-view-model";
 
-export const PRESCHOOL_OVERVIEW_SECTIONS = [
-  { id: "preschool-overall-summary", label: "1 · Overview" },
-  { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
-  { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
-  { id: "preschool-operating-hours", label: "4 · Operating hours" },
-  { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
-] as const;
-
 export type PreschoolOverviewRendererState =
   | {
     status: "loading" | "empty" | "unsupported" | "error";
@@ -219,7 +211,9 @@ export function PreschoolOverviewRenderer({
         id="preschool-overall-summary"
         aria-labelledby="preschool-overall-summary-heading"
         data-overview-section="1"
-        className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8"
+        data-overview-navigation-label="1 · Overview"
+        tabIndex={-1}
+        className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8"
       >
         <SectionHeader
           id="preschool-overall-summary-heading"
@@ -336,7 +330,13 @@ export function PreschoolOverviewRenderer({
           ) : null}
         </div>
 
-        <div id="preschool-ai-analysis" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+        <div
+          id="preschool-ai-analysis"
+          data-overview-section="true"
+          data-overview-navigation-label="AI interpretation"
+          tabIndex={-1}
+          className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+        >
           <PreschoolAiSlot
             snapshot={state.snapshot}
             sectionId="page-synthesis"
@@ -352,7 +352,7 @@ export function PreschoolOverviewRenderer({
 
       </section>
 
-      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" data-overview-navigation-label="2 · Benchmarks" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-benchmark-analysis-heading"
           sectionNumber={2}
@@ -446,7 +446,7 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" data-overview-navigation-label="3 · Standby wastage" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-standby-wastage-heading"
           sectionNumber={3}
@@ -510,7 +510,7 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" data-overview-navigation-label="4 · Operating hours" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-operating-hours-heading"
           sectionNumber={4}
@@ -571,7 +571,7 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" data-overview-navigation-label="5 · Monthly outlook" tabIndex={-1} className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-monthly-outlook-heading"
           sectionNumber={5}
@@ -601,7 +601,7 @@ export function PreschoolOverviewRenderer({
       />
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
+        <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" data-overview-section="true" data-overview-navigation-label="Centre detail" tabIndex={-1} className="min-w-0 scroll-mt-28 px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 id="preschool-centre-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Centre detail</h3>
@@ -647,7 +647,7 @@ export function PreschoolOverviewRenderer({
         <aside className="border-t border-border bg-surface-subtle px-5 py-5 xl:border-l xl:border-t-0 lg:px-7 lg:py-6">
           <h3 className="text-base font-semibold text-foreground">Data confidence</h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">The decisions use the same published Snapshot. Technical IDs stay available when you need to audit them.</p>
-          <details id="preschool-evidence" tabIndex={-1} className="mt-5 scroll-mt-28 border-t border-border pt-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+          <details id="preschool-evidence" data-overview-section="true" data-overview-navigation-label="Supporting evidence" tabIndex={-1} className="mt-5 scroll-mt-28 border-t border-border pt-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
             <summary className="cursor-pointer text-sm font-semibold text-foreground">View normalisation and evidence</summary>
             <dl className="mt-4 space-y-3 text-xs">
               <ReadinessRow label="EUI coverage" value={`${view.normalisation.euiAvailableCount} / ${view.normalisation.totalCentreCount} Centres`} />

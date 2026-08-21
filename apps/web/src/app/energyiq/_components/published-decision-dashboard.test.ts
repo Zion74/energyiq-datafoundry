@@ -296,14 +296,16 @@ describe("published Overview URL reload", () => {
       anchor.textContent,
       anchor.getAttribute("href"),
     ])).toEqual([
-      ["Daily trend", "#ngee-ann-daily-trend"],
-      ["Executive summary", "#ngee-ann-executive-summary"],
-      ["Summary of findings", "#ngee-ann-summary-findings"],
-      ["Day profile", "#ngee-ann-day-profile-analysis"],
-      ["Energy health", "#ngee-ann-energy-health"],
-      ["Circuit analysis", "#ngee-ann-circuit-analysis"],
-      ["Recommendations", "#ngee-ann-recommendations"],
-      ["Evidence", "#ngee-ann-evidence"],
+      ["Management themes", "#ngee-ann-recommendations"],
+      ["Executive Summary", "#ngee-ann-executive-summary"],
+      ["Monthly context", "#ngee-ann-monthly-context"],
+      ["AI interpretation", "#ngee-ann-ai-analysis"],
+      ["Daily Total Trend", "#ngee-ann-daily-trend"],
+      ["Supporting diagnostic index", "#ngee-ann-summary-findings"],
+      ["Day Profile Analysis", "#ngee-ann-day-profile-analysis"],
+      ["Time-based Behavioral Analysis", "#ngee-ann-energy-health"],
+      ["Circuit Category Analysis", "#ngee-ann-circuit-analysis"],
+      ["Evidence and calculation details", "#ngee-ann-evidence"],
     ]);
     for (const anchor of Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [])) {
       expect(container.querySelector(anchor.getAttribute("href")!)).not.toBeNull();
@@ -424,10 +426,13 @@ describe("published Overview URL reload", () => {
     const contentLinks = Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? []);
     expect(contentLinks.map((anchor) => [anchor.textContent, anchor.getAttribute("href")])).toEqual([
       ["1 · Overview", "#preschool-overall-summary"],
+      ["AI interpretation", "#preschool-ai-analysis"],
       ["2 · Benchmarks", "#preschool-benchmark-analysis"],
       ["3 · Standby wastage", "#preschool-standby-wastage"],
       ["4 · Operating hours", "#preschool-operating-hours"],
       ["5 · Monthly outlook", "#preschool-monthly-outlook"],
+      ["Centre detail", "#preschool-centre-ranking"],
+      ["Supporting evidence", "#preschool-evidence"],
     ]);
     for (const anchor of contentLinks) {
       const href = anchor.getAttribute("href");
