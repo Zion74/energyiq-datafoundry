@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
-import { formatReportDataThrough, OverviewWindowLabel } from "./overview-report-time";
+import {
+  formatReportDataThrough,
+  formatSourceDataCoverage,
+  OverviewWindowLabel,
+} from "./overview-report-time";
 
 describe("Overview report time presentation", () => {
   it("renders exact Section windows and distinguishes partial facts from forecast", () => {
@@ -28,6 +32,23 @@ describe("Overview report time presentation", () => {
       reportTimeContext: reportTimeContext(),
     } as EnergyProjectAnalysisSnapshotDto;
     expect(formatReportDataThrough(snapshot)).toBe("16 Jun 2026");
+  });
+
+  it("shows the immutable Snapshot source history separately from the report window", () => {
+    const snapshot = {
+      context: { to: "2026-08-20T16:00:00.000Z", timezone: "Asia/Singapore" },
+      dataSnapshot: {
+        id: "snapshot-b",
+        importBatchIds: ["batch-l6", "batch-l7"],
+        lastSeenAt: "2026-08-20T15:45:00.000Z",
+        sourceCoverage: {
+          fromLocalDate: "2026-04-21",
+          throughLocalDate: "2026-08-20",
+        },
+      },
+    } as EnergyProjectAnalysisSnapshotDto;
+
+    expect(formatSourceDataCoverage(snapshot)).toBe("21 Apr 2026–20 Aug 2026");
   });
 });
 

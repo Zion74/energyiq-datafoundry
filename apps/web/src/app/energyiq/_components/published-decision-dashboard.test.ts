@@ -249,6 +249,10 @@ describe("published Overview URL reload", () => {
       start: snapshot.context.from,
       endExclusive: snapshot.context.to,
     };
+    snapshot.dataSnapshot.sourceCoverage = {
+      fromLocalDate: "2026-04-21",
+      throughLocalDate: "2026-08-20",
+    };
     snapshot.analysis.context.from = snapshot.context.from;
     snapshot.analysis.context.to = snapshot.context.to;
     snapshot.decisionPriorities = {
@@ -278,6 +282,8 @@ describe("published Overview URL reload", () => {
     expect(container.textContent).toContain("Energy decision overview");
     expect(container.textContent).toContain("Calendar month to date");
     expect(container.textContent).toContain("1 Jun 2026–16 Jun 2026");
+    expect(container.textContent).toContain("Report data through 16 Jun 2026");
+    expect(container.textContent).toContain("Data available 21 Apr 2026–20 Aug 2026");
     expect(container.textContent).not.toContain("Published overview");
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(

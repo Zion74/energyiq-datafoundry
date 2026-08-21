@@ -1965,6 +1965,10 @@ export type EnergyProjectAnalysisSnapshotDto = {
     id: string;
     importBatchIds: string[];
     lastSeenAt: string | null;
+    sourceCoverage?: {
+      fromLocalDate: string;
+      throughLocalDate: string;
+    };
   };
   latestAvailablePeriod?: {
     period: "Custom";

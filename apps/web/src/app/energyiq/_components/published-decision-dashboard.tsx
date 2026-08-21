@@ -34,7 +34,7 @@ import {
 } from "./overview-section-navigation";
 import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { OverviewChangeDialog } from "./overview-change-dialog";
-import { formatReportDataThrough } from "./overview-report-time";
+import { formatReportDataThrough, formatSourceDataCoverage } from "./overview-report-time";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
 import { buildPreschoolAiArtifactReadInput, invalidatePreschoolAiRun } from "./preschool-ai-run";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
@@ -545,7 +545,10 @@ function PublishedDecisionDashboardView({
                 {currentSnapshot ? <span>{formatAnalysisWindow(currentSnapshot)}</span> : null}
                 {currentAnalysis ? <span>{currentAnalysis.context.timezone}</span> : null}
                 {currentSnapshot ? (
-                  <span>Data through {formatReportDataThrough(currentSnapshot)}</span>
+                  <span>Report data through {formatReportDataThrough(currentSnapshot)}</span>
+                ) : null}
+                {currentSnapshot && formatSourceDataCoverage(currentSnapshot) ? (
+                  <span>Data available {formatSourceDataCoverage(currentSnapshot)}</span>
                 ) : null}
               </div>
             </>

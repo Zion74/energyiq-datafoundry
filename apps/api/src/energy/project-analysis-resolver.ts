@@ -152,6 +152,10 @@ export type ProjectAnalysisSnapshot = {
     id: string;
     importBatchIds: string[];
     lastSeenAt: string | null;
+    sourceCoverage?: {
+      fromLocalDate: string;
+      throughLocalDate: string;
+    };
   };
   latestAvailablePeriod?: {
     period: "Custom";
@@ -229,6 +233,46 @@ type PublishedRunContext = {
   projectRelease: PublishedProjectRelease | null;
   validatePinnedOverviewPeriod?: () => Promise<void>;
 };
+
+const resolveDataSnapshotSourceCoverage = (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+}): ProjectAnalysisSnapshot["dataSnapshot"]["sourceCoverage"] => {
+  const snapshot = input.metadataStore.energyIq.getDataSnapshot(input.dataSnapshotId);
+  if (snapshot.workspace_id !== input.workspaceId || snapshot.project_id !== input.projectId) {
+    throw new Error(`ENERGYIQ_DATA_SNAPSHOT_BINDING_MISMATCH:${input.dataSnapshotId}`);
+  }
+  const manifest = JSON.parse(snapshot.manifest_json) as unknown;
+  if (!isJsonRecord(manifest) || !isJsonRecord(manifest.identity) || !Array.isArray(manifest.identity.batches)) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${input.dataSnapshotId}`);
+  }
+  const fromDates: string[] = [];
+  const throughDates: string[] = [];
+  for (const batch of manifest.identity.batches) {
+    if (!isJsonRecord(batch)) continue;
+    const fromLocalDate = sourceCoverageLocalDate(batch.coverageFrom);
+    const throughLocalDate = sourceCoverageLocalDate(batch.coverageTo);
+    if (fromLocalDate) fromDates.push(fromLocalDate);
+    if (throughLocalDate) throughDates.push(throughLocalDate);
+  }
+  if (fromDates.length === 0 || throughDates.length === 0) return undefined;
+  return {
+    fromLocalDate: fromDates.sort()[0]!,
+    throughLocalDate: throughDates.sort().at(-1)!,
+  };
+};
+
+const sourceCoverageLocalDate = (value: unknown): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  const match = /^(\d{4}-\d{2}-\d{2})(?:T|$)/.exec(value);
+  return match?.[1];
+};
+
+const isJsonRecord = (value: unknown): value is Record<string, unknown> => (
+  typeof value === "object" && value !== null && !Array.isArray(value)
+);
 
 const PROJECT_ANALYSIS_CACHE_CAPACITY = 6;
 // Snapshot and Release identity are immutable cache-key inputs. Keep the hot
@@ -610,6 +654,12 @@ export const resolveProjectAnalysis = async (input: {
             })
           : undefined;
       const latestAvailablePeriod = scopeAnalysis.latestAvailablePeriod ?? null;
+      const sourceCoverage = resolveDataSnapshotSourceCoverage({
+        metadataStore: input.metadataStore,
+        workspaceId: releasedContext.workspaceId,
+        projectId: releasedContext.projectId,
+        dataSnapshotId: analysis.provenance.dataSnapshotId,
+      });
       const reportTimePolicy = resolveSnapshotReportTimePolicy({
         metadataStore: input.metadataStore,
         projectRelease,
@@ -690,6 +740,7 @@ export const resolveProjectAnalysis = async (input: {
             id: analysis.provenance.dataSnapshotId,
             importBatchIds: analysis.dataHealth.importBatchIds,
             lastSeenAt: analysis.dataHealth.lastSeenAt ?? null,
+            ...(sourceCoverage ? { sourceCoverage } : {}),
           },
           ...(latestAvailablePeriod ? { latestAvailablePeriod } : {}),
           metadata,

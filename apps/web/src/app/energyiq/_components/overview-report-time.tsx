@@ -38,6 +38,14 @@ export function formatReportDataThrough(snapshot: EnergyProjectAnalysisSnapshotD
   return formatLocalDate(localDate, snapshot.reportTimeContext!.timezone);
 }
 
+export function formatSourceDataCoverage(snapshot: EnergyProjectAnalysisSnapshotDto): string | null {
+  const coverage = snapshot.dataSnapshot.sourceCoverage;
+  if (!coverage) return null;
+  const from = formatLocalDate(coverage.fromLocalDate, snapshot.context.timezone);
+  const through = formatLocalDate(coverage.throughLocalDate, snapshot.context.timezone);
+  return from === through ? from : `${from}–${through}`;
+}
+
 function formatWindowRange(
   window: ReportTimeContext["windows"][number],
   timezone: string,

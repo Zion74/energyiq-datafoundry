@@ -241,6 +241,10 @@ describe("ProjectAnalysisResolver", () => {
         from: "2026-05-31T16:00:00.000Z",
         to: NGEE_ANN_GOLDEN.selection.period.to,
       });
+      expect(currentProjectResult.snapshot.dataSnapshot.sourceCoverage).toEqual({
+        fromLocalDate: "2026-06-03",
+        throughLocalDate: "2026-06-16",
+      });
       expect(currentProjectResult.snapshot.reportTimeContext).toMatchObject({
         contractRevision: "energyiq-report-time-context@1",
         binding: {
@@ -1393,6 +1397,21 @@ const materializeNgeeAnnLatestPeriodFixture = async (
     intervalFacts,
     qualityEvents: [],
   }];
+  metadataStore.energyIq.createImportBatch({
+    id: importBatchId,
+    workspace_id: NGEE_ANN_GOLDEN.workspaceId,
+    project_id: NGEE_ANN_GOLDEN.projectId,
+    source_kind: "excel",
+    source_sha256: sourceSha256,
+    filename: sourceFile,
+    status: "inspected",
+    inspection: {
+      sourceLabels: meters.map((meter) => ({ label: meter.sourceLabel, rowCount: 1 })),
+      coverageFrom: "2026-06-03T00:00:00.000Z",
+      coverageTo: "2026-06-16T23:45:00.000Z",
+    },
+    created_by: "dev-user",
+  });
   return materializeTestProjectSnapshot({
     metadataStore,
     databasePath,
