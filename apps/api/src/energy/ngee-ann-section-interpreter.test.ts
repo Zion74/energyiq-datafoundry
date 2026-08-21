@@ -329,6 +329,44 @@ describe("materializeNgeeAnnSectionResult", () => {
     });
   });
 
+  it("accepts a positive display magnitude when explicit wording preserves a negative change direction", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["trend-and-demand"];
+    if (!pack.facts.comparison) throw new Error("Expected comparison fixture.");
+    pack.facts.comparison = {
+      ...pack.facts.comparison,
+      changePct: -6.8829,
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Project usage was down 6.9% versus the previous period.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:direction-preserved",
+          title: "The current period used less energy",
+          text: "Usage fell 6.9% versus the previous period; the supplied facts do not establish a cause.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:direction-preserved",
+    });
+
+    expect(result.summary?.text).toBe("Project usage was down 6.9% versus the previous period.");
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:direction-preserved"]);
+  });
+
   it("rejects numeric facts attached to the wrong metric meaning while preserving a supported sibling", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
     pack.facts.decisionPriorities = {

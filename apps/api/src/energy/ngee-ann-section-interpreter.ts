@@ -457,8 +457,10 @@ const numbersSupported = (
   authority: NarrativeFactAuthority,
 ): boolean => [...text.matchAll(NUMBER_TOKEN)].every((match) => {
   const token = match[0];
-  if (!numericTokenSupported(token, authority.packText)) return false;
-  const matchingFacts = authority.numericFacts.filter((fact) => numericValuesMatch(token, fact.value));
+  const clause = match.index === undefined ? "" : narrativeClauseAt(text, match.index);
+  const matchingFacts = authority.numericFacts.filter((fact) =>
+    numericValuesMatch(token, fact.value)
+    || directionalMagnitudeMatches(token, fact.value, clause));
   return semanticNumberBindingSupported(text, match, matchingFacts);
 });
 
@@ -551,7 +553,7 @@ const semanticNumberBindingSupported = (
       && /\b(?:of\s+(?:all\s+|total\s+)?(?:energy\s+)?usage|share\s+of|accounts?\s+for)\b/iu.test(clause)
       && !/(?:sharepct|ratiopct|percentage)/u.test(path)) return false;
     if (unit === "pct"
-      && /\b(?:above|below|higher|lower|increase|decrease|change|difference)\b/iu.test(clause)
+      && /\b(?:above|below|higher|lower|increase|decrease|change|difference|down|fell|fallen|reduced|declined|dropped)\b/iu.test(clause)
       && /\b(?:baseline|comparison|previous|prior)\b/iu.test(clause)
       && !/(?:relativepct|changepct|deltapct)/u.test(path)) return false;
     if (unit === "kwh"
@@ -644,22 +646,6 @@ const normalizeDayType = (value: string | undefined): NgeeAnnDayType | undefined
     : undefined;
 };
 
-const numericTokenSupported = (token: string, packText: string): boolean => {
-  const normalized = token.replaceAll(",", "");
-  if (packText.includes(normalized) || packText.includes(token)) return true;
-  const reportedValue = Number(normalized);
-  if (!Number.isFinite(reportedValue)) return false;
-  const decimal = normalized.split(".")[1];
-  const precision = decimal?.length ?? 0;
-  const tolerance = 0.5 * (10 ** -precision);
-  const floatingPointSlack = Number.EPSILON * Math.max(1, Math.abs(reportedValue)) * 4;
-  return [...packText.matchAll(NUMBER_TOKEN)].some(([sourceToken]) => {
-    const sourceValue = Number(sourceToken.replaceAll(",", ""));
-    return Number.isFinite(sourceValue)
-      && Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
-  });
-};
-
 const numericValuesMatch = (token: string, sourceValue: number): boolean => {
   const normalized = token.replaceAll(",", "");
   const reportedValue = Number(normalized);
@@ -669,6 +655,15 @@ const numericValuesMatch = (token: string, sourceValue: number): boolean => {
   const floatingPointSlack = Number.EPSILON * Math.max(1, Math.abs(reportedValue)) * 4;
   return Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
 };
+
+const directionalMagnitudeMatches = (
+  token: string,
+  sourceValue: number,
+  clause: string,
+): boolean => sourceValue < 0
+  && !token.startsWith("-")
+  && /\b(?:down|fell|fallen|decreased|reduced|declined|dropped|lower)\b/iu.test(clause)
+  && numericValuesMatch(token, Math.abs(sourceValue));
 
 const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, unknown> => {
   const { analysisPeriod: _analysisPeriod, ...bindingWithoutUtcPeriod } = pack.binding;
@@ -971,7 +966,7 @@ const requirePackIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedPromptRevision = "energyiq-project-section-discovery-v7";
-  if (identity.identityContractRevision !== "ngee-ann-section-v13"
+  if (identity.identityContractRevision !== "ngee-ann-section-v14"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId
