@@ -1096,7 +1096,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("Day profile unavailable");
     expect(markup).toContain("Usage heatmap unavailable");
-    expect(markup).toContain("does not include the authoritative hourly time grid");
+    expect(markup).toContain("does not include the authoritative hourly Day Profile projection");
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Energy composition");
   });

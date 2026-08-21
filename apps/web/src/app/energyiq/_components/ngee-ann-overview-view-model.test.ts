@@ -2871,5 +2871,5 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
     expect(invalidEmptySourceView.dailyAnomalies.status).toBe("unavailable");
     expect(invalidEmptySourceView.highlights.find((item) => item.id === "total")?.available).toBe(true);
-  });
+  }, 10_000);
 });

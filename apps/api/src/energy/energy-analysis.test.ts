@@ -1903,6 +1903,10 @@ describe("EnergyScopeAnalysis", () => {
           expectedMeterIntervalCount: 384,
           validIntervalCount: 0,
           qualityEventCount: 0,
+          aggregateStatus: "unavailable",
+          aggregateCoveragePct: 0,
+          aggregateEligibleIntervalCount: 0,
+          cadenceGapEventCount: 0,
         },
       });
       expect(row("project", "2026-06-13")).toMatchObject({
