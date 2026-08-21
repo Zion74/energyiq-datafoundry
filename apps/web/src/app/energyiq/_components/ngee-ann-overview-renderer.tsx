@@ -296,7 +296,7 @@ export function NgeeAnnOverviewRenderer({
         <summary className="cursor-pointer list-none px-5 pb-4 pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/20 lg:px-7 lg:pt-8 [&::-webkit-details-marker]:hidden">
           <span className="flex items-start justify-between gap-4">
             <span>
-              <span className="block text-lg font-semibold tracking-[-0.015em] text-foreground">
+              <span data-overview-heading="true" className="block text-lg font-semibold tracking-[-0.015em] text-foreground">
                 Supporting diagnostic index
               </span>
               <span className="mt-1.5 block max-w-3xl text-sm leading-6 text-muted">

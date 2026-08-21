@@ -22,7 +22,12 @@ describe("readRenderedOverviewSections", () => {
   it("uses the rendered DOM order and section-owned labels as the only outline truth", () => {
     const root = document.createElement("div");
     root.innerHTML = `
-      <section id="second" data-overview-section data-overview-navigation-label="Second"></section>
+      <section id="second" data-overview-section data-overview-navigation-label="Second">
+        <h2 id="second-heading">Second heading</h2>
+        <section id="second-detail" data-overview-module data-overview-navigation-label="Supporting detail">
+          <h3 id="second-detail-heading">Supporting detail</h3>
+        </section>
+      </section>
       <section id="first" data-overview-section aria-labelledby="first-heading">
         <h2 id="first-heading">First in the rendered report</h2>
       </section>
@@ -32,9 +37,13 @@ describe("readRenderedOverviewSections", () => {
     document.body.append(root);
 
     expect(readRenderedOverviewSections(root)).toEqual([
-      { id: "second", label: "Second" },
-      { id: "first", label: "First in the rendered report" },
+      { id: "second", label: "Second", number: "1", depth: 0 },
+      { id: "second-detail", label: "Supporting detail", number: "1.1", depth: 1 },
+      { id: "first", label: "First in the rendered report", number: "2", depth: 0 },
     ]);
+    expect(root.querySelector("#second-heading")?.getAttribute("data-overview-heading-number")).toBe("1");
+    expect(root.querySelector("#second-detail-heading")?.getAttribute("data-overview-heading-number")).toBe("1.1");
+    expect(root.querySelector("#first-heading")?.getAttribute("data-overview-heading-number")).toBe("2");
     root.remove();
   });
 
@@ -46,7 +55,7 @@ describe("readRenderedOverviewSections", () => {
     await act(async () => {
       root.render(React.createElement(OutlineHarness, { showSecond: false }));
     });
-    expect(Array.from(host.querySelectorAll("button"), (button) => button.textContent)).toEqual(["First"]);
+    expect(Array.from(host.querySelectorAll("button"), (button) => button.textContent)).toEqual(["1 First"]);
 
     await act(async () => {
       root.render(React.createElement(OutlineHarness, { showSecond: true }));
@@ -54,7 +63,7 @@ describe("readRenderedOverviewSections", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 40));
     });
-    expect(Array.from(host.querySelectorAll("button"), (button) => button.textContent)).toEqual(["First", "Second"]);
+    expect(Array.from(host.querySelectorAll("button"), (button) => button.textContent)).toEqual(["1 First", "2 Second"]);
 
     await act(async () => host.querySelectorAll("button")[1]?.click());
     expect(window.location.hash).toBe("#second");
@@ -98,7 +107,7 @@ function OutlineHarness({ showSecond }: { showSecond: boolean }) {
       ...outline.sections.map((section) => React.createElement(
         "button",
         { key: section.id, type: "button", onClick: () => outline.selectSection(section.id) },
-        section.label,
+        `${section.number} ${section.label}`,
       )),
     ),
   );

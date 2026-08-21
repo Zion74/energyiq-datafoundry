@@ -67,12 +67,12 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     );
 
     const expectedSections = [
-      { id: "preschool-overall-summary", label: "1 · Overview" },
+      { id: "preschool-overall-summary", label: "Overview" },
       { id: "preschool-ai-analysis", label: "AI interpretation" },
-      { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
-      { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
-      { id: "preschool-operating-hours", label: "4 · Operating hours" },
-      { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
+      { id: "preschool-benchmark-analysis", label: "Benchmarks" },
+      { id: "preschool-standby-wastage", label: "Standby wastage" },
+      { id: "preschool-operating-hours", label: "Operating hours" },
+      { id: "preschool-monthly-outlook", label: "Monthly outlook" },
       { id: "preschool-centre-ranking", label: "Centre detail" },
       { id: "preschool-evidence", label: "Supporting evidence" },
     ] as const;
@@ -342,7 +342,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const benchmarkSection = container.querySelector<HTMLElement>("#preschool-benchmark-analysis")!;
     expect(benchmarkSection.querySelector("[data-benchmark-interpretation-status]")?.getAttribute("data-benchmark-interpretation-status")).toBe("pending");
     expect(benchmarkSection.textContent).toContain("AI interpretation pending for this Snapshot.");
-    expect(benchmarkSection.textContent).toContain("2.1 — Centre Efficiency Metrics");
+    expect(benchmarkSection.textContent).toContain("Centre Efficiency Metrics");
     expect(benchmarkSection.querySelectorAll("[data-benchmark-priority-label]")).toHaveLength(3);
     expect([...benchmarkSection.querySelectorAll("[data-benchmark-priority-label]")].map((node) => node.textContent?.trim())).toEqual([
       "3. Centre J",
@@ -352,8 +352,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect([...benchmarkSection.querySelectorAll("[data-benchmark-priority-centre]")].map((node) => node.getAttribute("data-benchmark-priority-centre"))).toEqual(["G", "M", "J"]);
     expect(benchmarkSection.textContent).toContain("All-centre P75 review threshold");
     expect(benchmarkSection.querySelectorAll("[data-benchmark-summary]")).toHaveLength(2);
-    expect(benchmarkSection.textContent).toContain("2.2 — EUI Benchmark");
-    expect(benchmarkSection.textContent).toContain("2.3 — Per-pax Energy Benchmark");
+    expect(benchmarkSection.textContent).toContain("EUI Benchmark");
+    expect(benchmarkSection.textContent).toContain("Per-pax Energy Benchmark");
 
     for (const summary of benchmarkSection.querySelectorAll<HTMLElement>("[data-benchmark-summary]")) {
       const header = summary.firstElementChild as HTMLElement;
@@ -513,7 +513,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(standbySection.textContent).toContain("Unusual closed-hour Spikes7");
     expect(standbySection.textContent).toContain("Centres to review3");
 
-    expect(standbySection.textContent).toContain("3.1 Standby Energy by Appliance");
+    expect(standbySection.textContent).toContain("Standby Energy by Appliance");
     const standbySegments = standbySection.querySelectorAll<SVGElement>("[data-standby-appliance-segment]");
     const standbyApplianceRows = standbySection.querySelectorAll<HTMLElement>("[data-standby-appliance]");
     expect(standbySegments).toHaveLength(9);
@@ -538,7 +538,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(standbySection.textContent).toContain("40.0%");
     expect(standbySection.textContent).not.toContain("Plug Load3 · Living Area Plug Load · Kitchen Plug Load");
 
-    expect(standbySection.textContent).toContain("3.2 Non-operating Hours Spike Analysis");
+    expect(standbySection.textContent).toContain("Non-operating Hours Spike Analysis");
     const standbySpikeTable = standbySection.querySelector<HTMLElement>("[data-standby-spike-table]")!;
     expect(standbySpikeTable.classList.contains("overflow-x-auto")).toBe(false);
     expect(standbySpikeTable.classList.contains("overflow-hidden")).toBe(true);
@@ -554,7 +554,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(centreDetails[0]!.open).toBe(true);
     centreDetails[0]!.open = false;
 
-    expect(standbySection.textContent).toContain("3.3 After-hours Review Priority");
+    expect(standbySection.textContent).toContain("After-hours Review Priority");
     expect([...standbySection.querySelectorAll("[data-review-priority-centre]")].map((node) => node.getAttribute("data-review-priority-centre")))
       .toEqual(["L", "E", "N"]);
     expect([...standbySection.querySelectorAll<HTMLElement>("[data-review-priority-centre]")].every((row) => (
@@ -644,7 +644,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(operatingSection.textContent).toContain("Unusual operating-hour Spikes21");
     expect(operatingSection.textContent).toContain("Centres to review14");
 
-    expect(operatingSection.textContent).toContain("4.1 Operating Energy by Appliance");
+    expect(operatingSection.textContent).toContain("Operating Energy by Appliance");
     const operatingSegments = operatingSection.querySelectorAll<SVGElement>("[data-operating-appliance-segment]");
     const operatingApplianceRows = operatingSection.querySelectorAll<HTMLElement>("[data-operating-appliance]");
     expect(operatingSegments).toHaveLength(9);
@@ -661,7 +661,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(operatingSection.querySelector("[data-operating-appliance]")?.getAttribute("data-operating-appliance")).toBe("Plug Load3");
     expect([...operatingApplianceRows].map((node) => node.getAttribute("data-appliance-series-index"))).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 
-    expect(operatingSection.textContent).toContain("4.2 Operating Hours Spike Analysis");
+    expect(operatingSection.textContent).toContain("Operating Hours Spike Analysis");
     const operatingSpikeTable = operatingSection.querySelector<HTMLElement>("[data-operating-spike-table]")!;
     expect(operatingSpikeTable.classList.contains("overflow-x-auto")).toBe(false);
     expect(operatingSpikeTable.classList.contains("overflow-hidden")).toBe(true);
@@ -690,8 +690,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const readingOrder = [
       "Key focus / AI interpretation",
       "Total operating energy",
-      "4.1 Operating Energy by Appliance",
-      "4.2 Operating Hours Spike Analysis",
+      "Operating Energy by Appliance",
+      "Operating Hours Spike Analysis",
       "Supporting Evidence · all-hours Appliance context across all Centres",
       "Method, tariff and evidence",
     ].map((label) => operatingSection.textContent!.indexOf(label));

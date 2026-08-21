@@ -492,9 +492,11 @@ function PublishedDecisionDashboardView({
         ...(currentHandoffPin ? { currentOverviewPin: currentHandoffPin } : {}),
       };
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
-  const fallbackNavigationSections = useMemo(() => publishedSections.map((section) => ({
+  const fallbackNavigationSections = useMemo(() => publishedSections.map((section, index) => ({
       id: sectionDomId(section.section_id),
       label: section.navigation_label,
+      number: String(index + 1),
+      depth: 0,
     })), [publishedSections]);
   const overviewIdentityKey = [
     rendererState.status,

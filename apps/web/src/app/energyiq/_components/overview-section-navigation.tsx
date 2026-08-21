@@ -1,6 +1,8 @@
 export type OverviewNavigationSection = {
   id: string;
   label: string;
+  number: string;
+  depth: number;
 };
 
 export function OverviewSectionNavigation({
@@ -20,7 +22,7 @@ export function OverviewSectionNavigation({
         Overview contents
       </p>
       <nav
-        className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1 shadow-[var(--shadow-card)] xl:flex-col xl:overflow-visible xl:shadow-none"
+        className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1 shadow-[var(--shadow-card)] xl:max-h-[calc(100dvh-7rem)] xl:flex-col xl:overflow-y-auto xl:overscroll-contain xl:shadow-none"
         aria-label="Overview contents"
       >
         {sections.map((section) => {
@@ -34,14 +36,19 @@ export function OverviewSectionNavigation({
                 onSelect(section.id);
               }}
               aria-current={active ? "location" : undefined}
+              aria-label={`${section.number} ${section.label}`}
               className={[
-                "flex min-h-10 shrink-0 items-center rounded-md px-3 py-2 text-ui-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 xl:w-full",
+                "flex min-h-10 shrink-0 items-center gap-2 rounded-md px-3 py-2 text-ui-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 xl:w-full",
+                section.depth > 0 ? "xl:pl-7" : "",
                 active
                   ? "bg-surface-subtle text-foreground ring-1 ring-inset ring-border"
                   : "text-muted hover:bg-surface-subtle hover:text-foreground",
               ].join(" ")}
             >
-              {section.label}
+              <span aria-hidden="true" className="min-w-[2.2rem] shrink-0 text-xs font-semibold tabular-nums text-muted-light">
+                {section.number}{" "}
+              </span>
+              <span className={section.depth > 0 ? "text-xs" : ""}>{section.label}</span>
             </a>
           );
         })}

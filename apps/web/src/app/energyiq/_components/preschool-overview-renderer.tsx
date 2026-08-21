@@ -211,13 +211,12 @@ export function PreschoolOverviewRenderer({
         id="preschool-overall-summary"
         aria-labelledby="preschool-overall-summary-heading"
         data-overview-section="1"
-        data-overview-navigation-label="1 · Overview"
+        data-overview-navigation-label="Overview"
         tabIndex={-1}
         className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8"
       >
         <SectionHeader
           id="preschool-overall-summary-heading"
-          sectionNumber={1}
           title="Overall metrics"
           description={`Energy use and estimated cost across ${view.overallSummary.total.centreCount} Centres.`}
           meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
@@ -293,7 +292,14 @@ export function PreschoolOverviewRenderer({
           ) : null}
         </div>
 
-        <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+        <div
+          id="preschool-decision-summary"
+          data-overview-module="true"
+          data-overview-navigation-label="At a glance"
+          aria-labelledby="preschool-decision-summary-heading"
+          tabIndex={-1}
+          className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+        >
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-2.5">
@@ -352,10 +358,9 @@ export function PreschoolOverviewRenderer({
 
       </section>
 
-      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" data-overview-navigation-label="2 · Benchmarks" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
+      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" data-overview-navigation-label="Benchmarks" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-benchmark-analysis-heading"
-          sectionNumber={2}
           title="Benchmark Analysis"
           description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
           meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
@@ -375,11 +380,18 @@ export function PreschoolOverviewRenderer({
         />
         {view.benchmark.status === "provisional" ? (
           <>
-            <div className="mt-7 border-t border-border pt-6">
+            <div
+              id="preschool-centre-efficiency-metrics"
+              data-overview-module="true"
+              data-overview-navigation-label="Centre efficiency metrics"
+              aria-labelledby="preschool-centre-efficiency-metrics-heading"
+              tabIndex={-1}
+              className="mt-7 scroll-mt-28 border-t border-border pt-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            >
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <h4 className="text-base font-semibold text-foreground">2.1 — Centre Efficiency Metrics</h4>
+                    <h4 id="preschool-centre-efficiency-metrics-heading" className="text-base font-semibold text-foreground">Centre Efficiency Metrics</h4>
                     <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
                   </div>
                   <p className="mt-1.5 text-sm leading-6 text-muted">Which Centres are high for both floor-area intensity and energy used per person?</p>
@@ -429,11 +441,10 @@ export function PreschoolOverviewRenderer({
               </div>
             </div>
 
-            {view.benchmark.distributions.map((distribution, index) => (
+            {view.benchmark.distributions.map((distribution) => (
               <BenchmarkMetricSection
                 key={distribution.id}
                 distribution={distribution}
-                sectionNumber={`2.${index + 2}`}
               />
             ))}
           </>
@@ -446,10 +457,9 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" data-overview-navigation-label="3 · Standby wastage" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
+      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" data-overview-navigation-label="Standby wastage" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-standby-wastage-heading"
-          sectionNumber={3}
           title="Standby Energy Wastage — Post Operating Hours"
           description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
           meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview", "day-type-reference"]} />}
@@ -471,20 +481,20 @@ export function PreschoolOverviewRenderer({
           <>
             <StandbyKpiStrip standby={view.operational.standby} />
 
-            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-appliances-heading">
-              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">3.1 Standby Energy by Appliance</h4>
+            <section id="preschool-standby-appliances" data-overview-module="true" data-overview-navigation-label="Standby energy by appliance" tabIndex={-1} className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" aria-labelledby="preschool-standby-appliances-heading">
+              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">Standby Energy by Appliance</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which published Appliance aliases continue to consume energy while the Calendar marks Centres as closed?</p>
               <StandbyApplianceComposition standby={view.operational.standby} />
             </section>
 
-            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-spikes-heading">
-              <h4 id="preschool-standby-spikes-heading" className="text-base font-semibold text-foreground">3.2 Non-operating Hours Spike Analysis</h4>
+            <section id="preschool-standby-spikes" data-overview-module="true" data-overview-navigation-label="Non-operating hours spikes" tabIndex={-1} className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" aria-labelledby="preschool-standby-spikes-heading">
+              <h4 id="preschool-standby-spikes-heading" className="text-base font-semibold text-foreground">Non-operating Hours Spike Analysis</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Start with the Centres that have repeated closed-hour exceptions. Expand a row to inspect every event for that Centre.</p>
               <StandbySpikeTable centres={view.operational.standby.centres} />
             </section>
 
-            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-after-hours-review-heading">
-              <h4 id="preschool-after-hours-review-heading" className="text-base font-semibold text-foreground">3.3 {view.operational.sop.label}</h4>
+            <section id="preschool-after-hours-review" data-overview-module="true" data-overview-navigation-label={view.operational.sop.label} tabIndex={-1} className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" aria-labelledby="preschool-after-hours-review-heading">
+              <h4 id="preschool-after-hours-review-heading" className="text-base font-semibold text-foreground">{view.operational.sop.label}</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Use this provisional score to order an investigation, not to certify SOP compliance.</p>
               <AfterHoursReviewPriority sop={view.operational.sop} />
             </section>
@@ -510,10 +520,9 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" data-overview-navigation-label="4 · Operating hours" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
+      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" data-overview-navigation-label="Operating hours" tabIndex={-1} className="scroll-mt-28 border-b border-border px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-operating-hours-heading"
-          sectionNumber={4}
           title="Operating Hours Analysis"
           description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
           meta={<OverviewWindowLabel context={state.snapshot.reportTimeContext} windowIds={["current-overview"]} />}
@@ -535,14 +544,14 @@ export function PreschoolOverviewRenderer({
           <>
             <OperatingKpiStrip operating={view.operational.operating} />
 
-            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-appliances-heading">
-              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">4.1 Operating Energy by Appliance</h4>
+            <section id="preschool-operating-appliances" data-overview-module="true" data-overview-navigation-label="Operating energy by appliance" tabIndex={-1} className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" aria-labelledby="preschool-operating-appliances-heading">
+              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">Operating Energy by Appliance</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which observed published Appliance aliases account for energy while the Calendar marks Centres as open?</p>
               <OperatingApplianceComposition operating={view.operational.operating} />
             </section>
 
-            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-spikes-heading">
-              <h4 id="preschool-operating-spikes-heading" className="text-base font-semibold text-foreground">4.2 Operating Hours Spike Analysis</h4>
+            <section id="preschool-operating-spikes" data-overview-module="true" data-overview-navigation-label="Operating hours spikes" tabIndex={-1} className="mt-8 scroll-mt-28 border-t border-border pt-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20" aria-labelledby="preschool-operating-spikes-heading">
+              <h4 id="preschool-operating-spikes-heading" className="text-base font-semibold text-foreground">Operating Hours Spike Analysis</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Contact Centres with repeated opening-hour exceptions first. Expand a row to inspect every event recorded for that Centre.</p>
               <OperatingSpikeTable centres={view.operational.operating.centres} />
             </section>
@@ -571,10 +580,9 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" data-overview-navigation-label="5 · Monthly outlook" tabIndex={-1} className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
+      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" data-overview-navigation-label="Monthly outlook" tabIndex={-1} className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:px-7 lg:py-8">
         <SectionHeader
           id="preschool-monthly-outlook-heading"
-          sectionNumber={5}
           title="Monthly Energy Outlook"
           description={view.forecast.status === "unavailable"
             ? "A transparent next-month energy view with Plan and Actual kept as separate, Snapshot-bound facts."
@@ -702,13 +710,11 @@ const toSavedPreschoolAiArtifact = (
 
 function SectionHeader({
   id,
-  sectionNumber,
   title,
   description,
   meta,
 }: {
   id: string;
-  sectionNumber: 1 | 2 | 3 | 4 | 5;
   title: string;
   description: string;
   meta?: React.ReactNode;
@@ -716,12 +722,7 @@ function SectionHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
       <div className="min-w-0 max-w-4xl">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex min-h-7 items-center rounded-md bg-foreground px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-background">
-            Section {sectionNumber}
-          </span>
-          <h3 id={id} className="text-xl font-semibold tracking-[-0.02em] text-foreground">{title}</h3>
-        </div>
+        <h3 id={id} className="text-xl font-semibold tracking-[-0.02em] text-foreground">{title}</h3>
         <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted">{description}</p>
       </div>
       {meta ? <div className="shrink-0 tabular-nums">{meta}</div> : null}
@@ -954,18 +955,23 @@ type BenchmarkDistributionView = BenchmarkView["distributions"][number];
 
 function BenchmarkMetricSection({
   distribution,
-  sectionNumber,
 }: {
   distribution: BenchmarkDistributionView;
-  sectionNumber: string;
 }) {
   const metricTitle = distribution.id === "eui" ? "EUI Benchmark" : "Per-pax Energy Benchmark";
   const rowGridClass = "grid min-w-[760px] grid-cols-[minmax(180px,1.15fr)_56px_78px_78px_minmax(240px,1.8fr)_40px] items-center gap-3";
   return (
-    <section className="mt-7 border-t border-border pt-6" aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}>
+    <section
+      id={`preschool-${distribution.id}-benchmark`}
+      data-overview-module="true"
+      data-overview-navigation-label={metricTitle}
+      tabIndex={-1}
+      className="mt-7 scroll-mt-28 border-t border-border pt-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+      aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}
+    >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h4 id={`preschool-${distribution.id}-benchmark-heading`} className="text-base font-semibold text-foreground">{sectionNumber} — {metricTitle}</h4>
+          <h4 id={`preschool-${distribution.id}-benchmark-heading`} className="text-base font-semibold text-foreground">{metricTitle}</h4>
           <p className="mt-1.5 text-sm leading-6 text-muted">{distribution.question}</p>
         </div>
         <span className="text-xs text-muted">P50 = midpoint · P75 = review threshold</span>

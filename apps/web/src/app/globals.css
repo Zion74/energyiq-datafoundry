@@ -509,6 +509,16 @@ nextjs-portal {
   background-color: var(--primary-light);
 }
 
+/* The rendered Overview outline owns numbering for both headings and navigation. */
+[data-overview-heading-number]::before {
+  content: attr(data-overview-heading-number) " ";
+  color: var(--muted-light);
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
 /* Inline assistant loading row (avatar + pill dots) */
 [data-copilotkit] .chat-assistant-loading-pill {
   color: var(--foreground);

@@ -296,17 +296,19 @@ describe("published Overview URL reload", () => {
       anchor.textContent,
       anchor.getAttribute("href"),
     ])).toEqual([
-      ["Management themes", "#ngee-ann-recommendations"],
-      ["Executive Summary", "#ngee-ann-executive-summary"],
-      ["Monthly context", "#ngee-ann-monthly-context"],
-      ["AI interpretation", "#ngee-ann-ai-analysis"],
-      ["Daily Total Trend", "#ngee-ann-daily-trend"],
-      ["Supporting diagnostic index", "#ngee-ann-summary-findings"],
-      ["Day Profile Analysis", "#ngee-ann-day-profile-analysis"],
-      ["Time-based Behavioral Analysis", "#ngee-ann-energy-health"],
-      ["Circuit Category Analysis", "#ngee-ann-circuit-analysis"],
-      ["Evidence and calculation details", "#ngee-ann-evidence"],
+      ["1 Management themes", "#ngee-ann-recommendations"],
+      ["2 Executive Summary", "#ngee-ann-executive-summary"],
+      ["3 Monthly context", "#ngee-ann-monthly-context"],
+      ["4 AI interpretation", "#ngee-ann-ai-analysis"],
+      ["5 Daily Total Trend", "#ngee-ann-daily-trend"],
+      ["6 Supporting diagnostic index", "#ngee-ann-summary-findings"],
+      ["7 Day Profile Analysis", "#ngee-ann-day-profile-analysis"],
+      ["8 Time-based Behavioral Analysis", "#ngee-ann-energy-health"],
+      ["9 Circuit Category Analysis", "#ngee-ann-circuit-analysis"],
+      ["10 Evidence and calculation details", "#ngee-ann-evidence"],
     ]);
+    expect(container.querySelector("#ngee-ann-recommendations-heading")?.getAttribute("data-overview-heading-number")).toBe("1");
+    expect(container.querySelector("#ngee-ann-circuit-analysis-heading")?.getAttribute("data-overview-heading-number")).toBe("9");
     for (const anchor of Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [])) {
       expect(container.querySelector(anchor.getAttribute("href")!)).not.toBeNull();
     }
@@ -425,15 +427,26 @@ describe("published Overview URL reload", () => {
     const contents = container.querySelector("[aria-label='Overview contents']");
     const contentLinks = Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? []);
     expect(contentLinks.map((anchor) => [anchor.textContent, anchor.getAttribute("href")])).toEqual([
-      ["1 · Overview", "#preschool-overall-summary"],
-      ["AI interpretation", "#preschool-ai-analysis"],
-      ["2 · Benchmarks", "#preschool-benchmark-analysis"],
-      ["3 · Standby wastage", "#preschool-standby-wastage"],
-      ["4 · Operating hours", "#preschool-operating-hours"],
-      ["5 · Monthly outlook", "#preschool-monthly-outlook"],
-      ["Centre detail", "#preschool-centre-ranking"],
-      ["Supporting evidence", "#preschool-evidence"],
+      ["1 Overview", "#preschool-overall-summary"],
+      ["1.1 At a glance", "#preschool-decision-summary"],
+      ["1.2 AI interpretation", "#preschool-ai-analysis"],
+      ["2 Benchmarks", "#preschool-benchmark-analysis"],
+      ["2.1 Centre efficiency metrics", "#preschool-centre-efficiency-metrics"],
+      ["2.2 EUI Benchmark", "#preschool-eui-benchmark"],
+      ["2.3 Per-pax Energy Benchmark", "#preschool-per-pax-benchmark"],
+      ["3 Standby wastage", "#preschool-standby-wastage"],
+      ["3.1 Standby energy by appliance", "#preschool-standby-appliances"],
+      ["3.2 Non-operating hours spikes", "#preschool-standby-spikes"],
+      ["3.3 After-hours Review Priority", "#preschool-after-hours-review"],
+      ["4 Operating hours", "#preschool-operating-hours"],
+      ["4.1 Operating energy by appliance", "#preschool-operating-appliances"],
+      ["4.2 Operating hours spikes", "#preschool-operating-spikes"],
+      ["5 Monthly outlook", "#preschool-monthly-outlook"],
+      ["6 Centre detail", "#preschool-centre-ranking"],
+      ["7 Supporting evidence", "#preschool-evidence"],
     ]);
+    expect(container.querySelector("#preschool-overall-summary-heading")?.getAttribute("data-overview-heading-number")).toBe("1");
+    expect(container.querySelector("#preschool-standby-spikes-heading")?.getAttribute("data-overview-heading-number")).toBe("3.2");
     for (const anchor of contentLinks) {
       const href = anchor.getAttribute("href");
       expect(href).toMatch(/^#preschool-/);

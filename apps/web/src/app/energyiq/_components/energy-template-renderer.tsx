@@ -59,7 +59,7 @@ export function EnergyTemplateRenderer({
   return (
     <div className="space-y-10">
       {state.advisories?.length ? <RendererAdvisories advisories={state.advisories} /> : null}
-      {plan.sections.map((section, sectionIndex) => (
+      {plan.sections.map((section) => (
         <section
           key={section.section_id}
           id={`${sectionIdPrefix}-${section.section_id}`}
@@ -69,19 +69,17 @@ export function EnergyTemplateRenderer({
           tabIndex={-1}
           className="scroll-mt-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
         >
-          <div className="mb-4 flex items-start gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-[10px] font-bold text-muted">
-              {String(sectionIndex + 1).padStart(2, "0")}
-            </span>
-            <div>
-              <h2 id={`${sectionIdPrefix}-${section.section_id}-heading`} className="text-base font-semibold tracking-tight text-foreground">{section.title}</h2>
-              {section.description ? <p className="mt-1 text-xs leading-5 text-muted">{section.description}</p> : null}
-            </div>
+          <div className="mb-4">
+            <h2 id={`${sectionIdPrefix}-${section.section_id}-heading`} className="text-base font-semibold tracking-tight text-foreground">{section.title}</h2>
+            {section.description ? <p className="mt-1 text-xs leading-5 text-muted">{section.description}</p> : null}
           </div>
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            {section.modules.map((module, moduleIndex) => (
+            {section.modules.map((module) => (
               <div key={module.placement.placement_id} className={spanClass(module.placement.layout.span)}>
-                <TemplateModuleFrame index={moduleIndex} module={module}>
+                <TemplateModuleFrame
+                  id={`${sectionIdPrefix}-${section.section_id}-${module.placement.placement_id}`}
+                  module={module}
+                >
                   {module.readiness.status === "missing" ? (
                     <UnavailableModule detail={module.readiness.detail} />
                   ) : (
@@ -150,11 +148,11 @@ function RendererAdvisories({ advisories }: { advisories: readonly EnergyTemplat
 }
 
 function TemplateModuleFrame({
-  index,
+  id,
   module,
   children,
 }: {
-  index: number;
+  id: string;
   module: EnergyTemplateRenderModule;
   children: ReactNode;
 }) {
@@ -162,24 +160,27 @@ function TemplateModuleFrame({
   const title = presentation.title ?? module.component.display_name;
   const description = presentation.description ?? module.component.description;
   return (
-    <article className={[
+    <article
+      id={id}
+      data-overview-module="true"
+      data-overview-navigation-label={title}
+      aria-labelledby={`${id}-heading`}
+      tabIndex={-1}
+      className={[
       "h-full overflow-hidden rounded-xl border bg-surface shadow-[var(--shadow-card)]",
       presentation.tone === "highlight" ? "border-primary/30 ring-1 ring-primary/5" : "border-border",
       presentation.tone === "quiet" ? "shadow-none" : "",
       heightClass(layout.height),
-    ].join(" ")}>
+      "scroll-mt-24 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+    ].join(" ")}
+    >
       <div className={[
         "flex flex-wrap items-start justify-between gap-3 border-b border-border",
         presentation.density === "compact" ? "px-4 py-3" : "px-5 py-4",
       ].join(" ")}>
-        <div className="flex min-w-0 items-start gap-3">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-surface-subtle text-[10px] font-bold text-muted">
-            {String(index + 1).padStart(2, "0")}
-          </span>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-            <p className="mt-1 text-[11px] leading-4 text-muted">{description}</p>
-          </div>
+        <div className="min-w-0">
+          <h3 id={`${id}-heading`} className="text-sm font-semibold text-foreground">{title}</h3>
+          <p className="mt-1 text-[11px] leading-4 text-muted">{description}</p>
         </div>
         <span className={[
           "rounded-full px-2.5 py-1 text-[9px] font-semibold",

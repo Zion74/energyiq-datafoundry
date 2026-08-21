@@ -4,19 +4,45 @@ import { useCallback, useLayoutEffect, useState, type RefObject } from "react";
 
 import type { OverviewNavigationSection } from "./overview-section-navigation";
 
-const SECTION_SELECTOR = "[data-overview-section]";
+const OUTLINE_SELECTOR = "[data-overview-section], [data-overview-module]";
 const ACTIVE_SECTION_TOP = 176;
 
 export function readRenderedOverviewSections(root: HTMLElement): ReadonlyArray<OverviewNavigationSection> {
   const seen = new Set<string>();
   const sections: OverviewNavigationSection[] = [];
+  const sectionByElement = new Map<HTMLElement, OverviewNavigationSection>();
+  const childCounts = new Map<HTMLElement, number>();
+  let topLevelCount = 0;
 
-  for (const element of root.querySelectorAll<HTMLElement>(SECTION_SELECTOR)) {
+  for (const heading of root.querySelectorAll<HTMLElement>("[data-overview-heading-number]")) {
+    heading.removeAttribute("data-overview-heading-number");
+    if (heading.dataset.overviewNumberedAria === "true") {
+      heading.removeAttribute("aria-label");
+      delete heading.dataset.overviewNumberedAria;
+    }
+  }
+
+  for (const element of root.querySelectorAll<HTMLElement>(OUTLINE_SELECTOR)) {
     const id = element.id.trim();
     const label = navigationLabel(element);
     if (!id || !label || seen.has(id)) continue;
+    const parentElement = closestOutlineParent(element, root);
+    const parent = parentElement ? sectionByElement.get(parentElement) : undefined;
+    const depth = parent ? parent.depth + 1 : 0;
+    let number: string;
+    if (parent && parentElement) {
+      const nextChild = (childCounts.get(parentElement) ?? 0) + 1;
+      childCounts.set(parentElement, nextChild);
+      number = `${parent.number}.${nextChild}`;
+    } else {
+      topLevelCount += 1;
+      number = String(topLevelCount);
+    }
     seen.add(id);
-    sections.push({ id, label });
+    const section = { id, label, number, depth };
+    sections.push(section);
+    sectionByElement.set(element, section);
+    numberVisibleHeading(element, number, label);
   }
 
   return sections;
@@ -86,7 +112,7 @@ export function useOverviewSectionOutline({
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["id", "data-overview-section", "data-overview-navigation-label"],
+      attributeFilter: ["id", "data-overview-section", "data-overview-module", "data-overview-navigation-label"],
     });
     const resizeObserver = typeof ResizeObserver === "undefined"
       ? null
@@ -135,6 +161,30 @@ function navigationLabel(element: HTMLElement): string {
   return element.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6")?.textContent?.trim() ?? "";
 }
 
+function closestOutlineParent(element: HTMLElement, root: HTMLElement): HTMLElement | null {
+  const parent = element.parentElement?.closest<HTMLElement>(OUTLINE_SELECTOR) ?? null;
+  return parent && root.contains(parent) ? parent : null;
+}
+
+function numberVisibleHeading(element: HTMLElement, number: string, label: string): void {
+  const heading = labelledElement(element)
+    ?? element.querySelector<HTMLElement>("[data-overview-heading]")
+    ?? element.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
+  if (!heading) return;
+  heading.dataset.overviewHeadingNumber = number;
+  if (!heading.hasAttribute("aria-label") || heading.dataset.overviewNumberedAria === "true") {
+    heading.setAttribute("aria-label", `${number} ${label}`);
+    heading.dataset.overviewNumberedAria = "true";
+  }
+}
+
+function labelledElement(element: HTMLElement): HTMLElement | null {
+  const labelledBy = element.getAttribute("aria-labelledby")?.trim().split(/\s+/)[0];
+  if (!labelledBy) return null;
+  const labelled = element.ownerDocument.getElementById(labelledBy);
+  return labelled instanceof HTMLElement && element.contains(labelled) ? labelled : null;
+}
+
 function restoreFragmentTarget(root: HTMLElement): void {
   if (!window.location.hash) return;
   let targetId = window.location.hash.slice(1);
@@ -158,6 +208,9 @@ function sameOutline(
   right: ReadonlyArray<OverviewNavigationSection>,
 ): boolean {
   return left.length === right.length && left.every((section, index) => (
-    section.id === right[index]?.id && section.label === right[index]?.label
+    section.id === right[index]?.id
+      && section.label === right[index]?.label
+      && section.number === right[index]?.number
+      && section.depth === right[index]?.depth
   ));
 }
