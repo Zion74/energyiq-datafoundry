@@ -569,18 +569,20 @@ const isEntityCodeToken = (value: string): boolean => /^[0-9]+$/u.test(value)
   || /^[A-Z]{1,3}$/u.test(value);
 
 const narrativeClauseAt = (text: string, index: number): string => {
-  const before = text.slice(0, index);
-  const after = text.slice(index);
-  const start = Math.max(before.lastIndexOf("."), before.lastIndexOf(";"), before.lastIndexOf(","), before.lastIndexOf("?"), before.lastIndexOf("!")) + 1;
-  const relativeEnds = [".", ";", ",", "?", "!"]
-    .map((delimiter) => after.indexOf(delimiter))
-    .filter((candidate) => candidate >= 0);
-  const end = relativeEnds.length > 0 ? index + Math.min(...relativeEnds) : text.length;
+  const boundaries = [...text.matchAll(/[,;?!]|(?<!\d)\.(?!\d)/gu)]
+    .flatMap((match) => match.index === undefined ? [] : [match.index]);
+  const start = Math.max(-1, ...boundaries.filter((boundary) => boundary < index)) + 1;
+  const following = boundaries.filter((boundary) => boundary >= index);
+  const end = following.length > 0 ? Math.min(...following) : text.length;
   return text.slice(start, end);
 };
 
-const numberDescribesBaseline = (text: string, start: number, end: number): boolean =>
-  /\bbaseline\b/iu.test(text.slice(Math.max(0, start - 12), Math.min(text.length, end + 24)));
+const numberDescribesBaseline = (text: string, start: number, end: number): boolean => {
+  const before = text.slice(Math.max(0, start - 28), start);
+  const after = text.slice(end, Math.min(text.length, end + 24));
+  return /\bbaseline(?:\s+(?:was|is|of|at))?\s*$/iu.test(before)
+    || /^\s*(?:kwh|kw|%)?\s*(?:as\s+the\s+)?baseline\b/iu.test(after);
+};
 
 type NgeeAnnDayType = "weekday" | "weekend" | "public_holiday";
 
@@ -662,7 +664,7 @@ const directionalMagnitudeMatches = (
   clause: string,
 ): boolean => sourceValue < 0
   && !token.startsWith("-")
-  && /\b(?:down|fell|fallen|decreased|reduced|declined|dropped|lower)\b/iu.test(clause)
+  && /\b(?:down|fell|fallen|decreased|reduced|declined|dropped|lower|below)\b/iu.test(clause)
   && numericValuesMatch(token, Math.abs(sourceValue));
 
 const projectSectionPackForPrompt = (pack: NgeeAnnSectionPack): Record<string, unknown> => {
@@ -966,7 +968,7 @@ const requirePackIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedPromptRevision = "energyiq-project-section-discovery-v7";
-  if (identity.identityContractRevision !== "ngee-ann-section-v14"
+  if (identity.identityContractRevision !== "ngee-ann-section-v15"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId

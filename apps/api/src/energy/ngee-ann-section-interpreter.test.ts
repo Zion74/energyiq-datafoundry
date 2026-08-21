@@ -367,6 +367,87 @@ describe("materializeNgeeAnnSectionResult", () => {
     expect(result.insights.map(({ id }) => id)).toEqual(["candidate:direction-preserved"]);
   });
 
+  it("keeps supported anomaly actual-versus-baseline wording and a below-baseline decrease", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
+    pack.facts.decisionPriorities = {
+      status: "available",
+      limitation: null,
+      evidencePins: {} as never,
+      items: [{
+        finding: {
+          code: "DAILY_USAGE_ABOVE_BASELINE",
+          actualKwh: 196.7027,
+          baselineKwh: 156.6008,
+          relativePct: 25.6078,
+        },
+        horizons: [{
+          horizon: "latest_complete_day",
+          relativePct: -4.5222,
+        }, {
+          horizon: "rolling_7d",
+          relativePct: 1.3805,
+        }],
+        driver: {
+          status: "available",
+          label: "Level 6",
+          impactKwh: 21.4275,
+        },
+        evidence: {
+          occurrence: {
+            scopeId: "project",
+            scopeName: "Ngee Ann Polytechnic",
+            scopeType: "project",
+            localDate: "2026-08-01",
+          },
+        },
+      } as never],
+    };
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "One daily usage exception is available for review.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:supported-actual-versus-baseline",
+          title: "The daily exception was above its comparison baseline",
+          text: "Daily usage was 25.6% above baseline (196.7 kWh vs 156.6 kWh).",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:supported-below-baseline",
+          title: "Recent usage returned close to baseline",
+          text: "The latest complete day was 4.5% below baseline.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:wrong-direction",
+          title: "Latest usage rose above baseline",
+          text: "The latest complete day was 4.5% above baseline.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:decision-phrasing",
+    });
+
+    expect(result.insights.map(({ id }) => id)).toEqual([
+      "candidate:supported-actual-versus-baseline",
+      "candidate:supported-below-baseline",
+    ]);
+    expect(result.publication.rejectedCandidateIds).toEqual(["candidate:wrong-direction"]);
+  });
+
   it("rejects numeric facts attached to the wrong metric meaning while preserving a supported sibling", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
     pack.facts.decisionPriorities = {

@@ -47,11 +47,11 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(section).toMatchObject({
       artifactKind: "section-interpretation",
       targetId: "time-behaviour",
-      identityContractRevision: "ngee-ann-section-v14",
+      identityContractRevision: "ngee-ann-section-v15",
       analysisPackId: "ngee-ann-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "energyiq-project-section-interpretation-v1",
-      validatorRevision: "energyiq-project-section-acceptance-v12",
+      validatorRevision: "energyiq-project-section-acceptance-v13",
       workflowRevision: "energyiq-project-section-discover-publish-v1",
       investigatorPromptRevision: "energyiq-project-section-discovery-v7",
       capabilityRevision: "pack-only-v1",
