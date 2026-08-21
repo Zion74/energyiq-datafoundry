@@ -4,7 +4,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
-import { createEnergyIqSourceManifest, createMetadataStore } from "./index.js";
+import {
+  createEnergyIqSourceManifest,
+  createMetadataStore,
+  resolveEnergyIqSnapshotFactScope,
+} from "./index.js";
 
 describe("EnergyIqStore", () => {
   it("publishes all prepared manifest batches in one Metadata transaction", () => {
@@ -1010,6 +1014,8 @@ describe("EnergyIqStore", () => {
       });
       expect(rolledBack.snapshot.id).toBe(second.snapshot.id);
       expect(JSON.parse(rolledBack.snapshot.manifest_json)).toEqual(JSON.parse(second.snapshot.manifest_json));
+      expect(resolveEnergyIqSnapshotFactScope(second.snapshot).factWriterContractVersion)
+        .toBe("energy-fact-writer-project-canonical-v2");
       expect(JSON.parse(rolledBack.batch.materialization_json ?? "{}")).toMatchObject({ mappingRevision: 5 });
       const legacyWriterContract = complete({
         batch_id: "batch-2",

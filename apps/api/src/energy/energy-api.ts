@@ -14,6 +14,7 @@ import {
 import {
   assertEnergyCurrentSnapshotFacts,
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS,
   readEnergyFactCoverage,
 } from "@datafoundry/data-gateway";
 import type {
@@ -58,6 +59,7 @@ import { NGEE_ANN_DAILY_ANOMALY_RULE_REVISION_ID } from "./energy-bootstrap.js";
 import {
   ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION,
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+  ENERGY_EXCEL_HISTORICAL_MATERIALIZER_CONTRACT_VERSIONS,
 } from "./energy-import-materializer.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import {
@@ -1944,9 +1946,13 @@ const createProjectDataReadinessAsync = async (
     ...(snapshot ? { snapshot } : {}),
     expectedMaterializerContractVersion: [
       ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+      ...ENERGY_EXCEL_HISTORICAL_MATERIALIZER_CONTRACT_VERSIONS,
       ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION,
     ],
-    expectedFactWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    expectedFactWriterContractVersion: [
+      ENERGY_FACT_WRITER_CONTRACT_VERSION,
+      ...ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS,
+    ],
   });
   if (!readiness.requiresFormalData || !snapshot || snapshot.id !== project.data_snapshot_id) {
     return readiness;

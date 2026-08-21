@@ -13,6 +13,20 @@ import {
   type EnergyFactMaterializationBatchWrite,
 } from "./energy-fact-writer.js";
 
+const readRows = async (databasePath: string, sql: string): Promise<Record<string, unknown>[]> => {
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    return await new Promise<Record<string, unknown>[]>((resolve, reject) => {
+      connection.all(sql, (error, rows) => error ? reject(error) : resolve(rows as Record<string, unknown>[]));
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      connection.close((error) => error ? reject(error) : resolve());
+    });
+  }
+};
+
 describe("writeEnergyFactProjectMaterialization", () => {
   it("treats a pre-integrity v3 state schema as uninitialized for full rematerialization", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-legacy-rematerialization-"));
@@ -509,7 +523,7 @@ describe("writeEnergyFactProjectMaterialization", () => {
     expect(reverse.projectAudit).toEqual(result.projectAudit);
   });
 
-  it("keeps project-wide gaps and resets as non-ok canonical facts", async () => {
+  it("keeps project-wide cumulative gaps aggregate-eligible without making them cadence-eligible", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-quality";
     const sourceA = boundaryBatch({
@@ -545,7 +559,8 @@ describe("writeEnergyFactProjectMaterialization", () => {
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 5,
       intervalFactCount: 4,
-      invalidIntervalDurationCount: 1,
+      invalidIntervalDurationCount: 0,
+      cadenceGapIntervalCount: 1,
       negativeDeltaIntervalCount: 1,
       canonicalMeterSeriesCount: 1,
       adjacentReadingPairCount: 4,
@@ -556,6 +571,26 @@ describe("writeEnergyFactProjectMaterialization", () => {
       .resolves.toMatchObject({ intervalFacts: 1, qualityEvents: 1 });
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "quality-b" }))
       .resolves.toMatchObject({ intervalFacts: 3, qualityEvents: 2 });
+
+    const facts = await readRows(databasePath, `
+      SELECT elapsed_minutes, raw_delta_kwh, usage_kwh, average_kw, quality_status
+      FROM energy_interval_facts
+      WHERE project_id = '${projectId}'
+      ORDER BY interval_start
+    `);
+    expect(facts).toEqual([
+      { elapsed_minutes: 15, raw_delta_kwh: 1, usage_kwh: 1, average_kw: 4, quality_status: "ok" },
+      { elapsed_minutes: 30, raw_delta_kwh: 1, usage_kwh: 1, average_kw: 2, quality_status: "gap" },
+      { elapsed_minutes: 15, raw_delta_kwh: -12, usage_kwh: null, average_kw: null, quality_status: "negative_delta" },
+      { elapsed_minutes: 15, raw_delta_kwh: 1, usage_kwh: 1, average_kw: 4, quality_status: "ok" },
+    ]);
+
+    const daily = await readRows(databasePath, `
+      SELECT usage_kwh, peak_average_kw, valid_interval_count, quality_event_count
+      FROM energy_daily_facts
+      WHERE project_id = '${projectId}'
+    `);
+    expect(daily).toEqual([{ usage_kwh: 3, peak_average_kw: 4, valid_interval_count: 2n, quality_event_count: 2n }]);
   });
 
   it("rebuilds from the later-coverage canonical winner at overlapping cumulative timestamps", async () => {
@@ -870,6 +905,7 @@ describe("writeEnergyFactProjectMaterialization", () => {
       duplicateNormalizedReadingCount: 0,
       duplicateIntervalFactCount: 0,
       invalidIntervalDurationCount: 0,
+      cadenceGapIntervalCount: 0,
       negativeDeltaIntervalCount: 0,
       legacyRawRowCount: 0,
       legacyNormalizedReadingCount: 0,
@@ -1120,6 +1156,7 @@ const testFactScope = (projectId: string, dataSnapshotId: string, sourceSha256: 
   dataSnapshotId,
   manifestFingerprint: `fingerprint-${dataSnapshotId}`,
   sourceSha256,
+  factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
 });
 
 const writeProjectSnapshot = (

@@ -116,6 +116,7 @@ export type EnergyFactProjectAudit = {
   duplicateNormalizedReadingCount: number;
   duplicateIntervalFactCount: number;
   invalidIntervalDurationCount: number;
+  cadenceGapIntervalCount: number;
   negativeDeltaIntervalCount: number;
   legacyRawRowCount: number;
   legacyNormalizedReadingCount: number;
@@ -127,7 +128,10 @@ export type EnergyFactProjectAudit = {
   orphanIntervalFactCount: number;
 };
 
-export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-snapshot-manifest-v3" as const;
+export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-snapshot-manifest-v4" as const;
+export const ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS = [
+  "energy-fact-writer-snapshot-manifest-v3",
+] as const;
 
 export type EnergyFactProjectMaterializationWrite = {
   databasePath: string;
@@ -152,7 +156,7 @@ export type EnergyFactProjectMaterializationTimings = {
 };
 
 export type EnergyFactProjectState = EnergyIqSnapshotFactScope & {
-  factWriterContractVersion: typeof ENERGY_FACT_WRITER_CONTRACT_VERSION;
+  factWriterContractVersion: string;
   canonicalIntervalCount: number;
   canonicalIntervalDigest: string;
 };
@@ -246,7 +250,7 @@ export const readEnergyFactProjectState = async (input: {
       dataSnapshotId: String(row.data_snapshot_id),
       manifestFingerprint: String(row.manifest_fingerprint),
       sourceSha256,
-      factWriterContractVersion: String(row.fact_writer_contract_version) as typeof ENERGY_FACT_WRITER_CONTRACT_VERSION,
+      factWriterContractVersion: String(row.fact_writer_contract_version),
       canonicalIntervalCount: requiredNonNegativeInteger(row.canonical_interval_count),
       canonicalIntervalDigest: requiredSha256(row.canonical_interval_digest),
     };
@@ -420,15 +424,17 @@ const readProjectAudit = async (
         HAVING COUNT(*) > 1
       )) AS duplicate_interval_facts,
       (SELECT COUNT(*) FROM (
-        SELECT elapsed_minutes, median(elapsed_minutes) OVER (
+        SELECT elapsed_minutes, quality_status, median(elapsed_minutes) OVER (
           PARTITION BY resource, meter_node_id
         ) AS typical_elapsed_minutes
         FROM energy_interval_facts
         WHERE project_id = ?
       ) durations
         WHERE elapsed_minutes <= 0
-          OR abs(elapsed_minutes - typical_elapsed_minutes) > greatest(0.1, typical_elapsed_minutes * 0.01)
+          OR quality_status = 'irregular_interval'
       ) AS invalid_interval_durations,
+      (SELECT COUNT(*) FROM energy_interval_facts
+        WHERE project_id = ? AND quality_status = 'gap') AS cadence_gap_intervals,
       (SELECT COUNT(*) FROM energy_interval_facts
         WHERE project_id = ? AND quality_status = 'negative_delta') AS negative_delta_intervals,
       (SELECT COUNT(*) FROM raw_meter_readings
@@ -457,7 +463,7 @@ const readProjectAudit = async (
     ...rawParameters(),
     ...rawParameters(),
     ...rawParameters(),
-    ...Array.from({ length: 6 }, () => projectId),
+    ...Array.from({ length: 7 }, () => projectId),
     ...rawParameters(),
     projectId,
     projectId,
@@ -519,6 +525,7 @@ const readProjectAudit = async (
     duplicateNormalizedReadingCount: Number(row.duplicate_normalized_rows ?? 0),
     duplicateIntervalFactCount: Number(row.duplicate_interval_facts ?? 0),
     invalidIntervalDurationCount: Number(row.invalid_interval_durations ?? 0),
+    cadenceGapIntervalCount: Number(row.cadence_gap_intervals ?? 0),
     negativeDeltaIntervalCount: Number(row.negative_delta_intervals ?? 0),
     legacyRawRowCount: Number(row.legacy_raw_rows ?? 0),
     legacyNormalizedReadingCount,
@@ -635,7 +642,7 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       workspace_id, project_id, resource, meter_node_id, scope_id,
       parent_node_id, level_node_id, device_name, appliance, circuit_name,
       category, meter_role, local_date,
-      SUM(usage_kwh) FILTER (WHERE quality_status = 'ok') AS usage_kwh,
+      SUM(usage_kwh) FILTER (WHERE quality_status IN ('ok', 'gap')) AS usage_kwh,
       MAX(average_kw) FILTER (WHERE quality_status = 'ok') AS peak_average_kw,
       COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
       COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
@@ -1020,8 +1027,8 @@ const rebuildProjectCumulativeIntervals = async (
       'cumulative_energy' AS source_reading_kind,
       previous_event_time AS interval_start, event_time AS interval_end, elapsed_minutes,
       active_energy_kwh, previous_active_energy_kwh, raw_delta_kwh,
-      CASE WHEN quality_status = 'ok' THEN raw_delta_kwh ELSE NULL END AS usage_kwh,
-      CASE WHEN quality_status = 'ok' THEN raw_delta_kwh / (elapsed_minutes / 60.0) ELSE NULL END AS average_kw,
+      CASE WHEN quality_status IN ('ok', 'gap') THEN raw_delta_kwh ELSE NULL END AS usage_kwh,
+      CASE WHEN quality_status IN ('ok', 'gap') THEN raw_delta_kwh / (elapsed_minutes / 60.0) ELSE NULL END AS average_kw,
       quality_status,
       CAST(timezone(?, previous_event_time) AS DATE) AS local_date,
       CAST(date_part('hour', timezone(?, previous_event_time)) AS INTEGER) AS local_hour,

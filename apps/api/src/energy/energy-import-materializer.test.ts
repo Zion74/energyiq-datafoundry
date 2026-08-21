@@ -2,6 +2,7 @@ import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
 import {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
   writeEnergyFactProjectMaterialization,
   type EnergyFactMaterializationBatchWrite,
 } from "@datafoundry/data-gateway";
@@ -108,8 +109,8 @@ describe("buildEnergyExcelMaterialization", () => {
       totalUsageKwh: 1,
       mappingRevision: 4,
       timezone: "Asia/Singapore",
-      materializerContractVersion: "energy-excel-cumulative-v1",
-      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
+      materializerContractVersion: "energy-excel-cumulative-v2",
+      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v4",
       sourceSheetName: "Sheet1",
       sourceRowCount: 3,
       sourceLabels: ["Meter A"],
@@ -134,6 +135,19 @@ describe("buildEnergyExcelMaterialization", () => {
       },
       document: document(),
       timezone: "UTC",
+    })).toBe(false);
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify({
+          ...result.summary,
+          materializerContractVersion: "energy-excel-cumulative-v1",
+          factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
+        }),
+      },
+      document: document(),
+      timezone: "Asia/Singapore",
     })).toBe(false);
     expect(isEnergyImportMaterializationCurrent({
       batch: {
@@ -175,6 +189,53 @@ describe("buildEnergyExcelMaterialization", () => {
       document: changed,
       timezone: "Asia/Singapore",
     })).toBe(false);
+  });
+
+  it("keeps the exact cumulative delta across a cadence gap without inventing a reading", async () => {
+    const workbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter A"), date("2026-05-01T00:15:00Z"), number(101)],
+      [text("Meter A"), date("2026-05-01T00:30:00Z"), number(102)],
+      [text("Meter A"), date("2026-05-01T01:00:00Z"), number(104)],
+    ]).toBuffer();
+
+    const result = await buildEnergyExcelMaterialization({
+      content: workbook,
+      batch: batch("batch-gap", "project-gap", "g".repeat(64)),
+      document: document(),
+      mappingRevision: 4,
+      timezone: "Asia/Singapore",
+    });
+
+    expect(result.write.normalizedReadings).toHaveLength(4);
+    expect(result.write.intervalFacts).toEqual([
+      expect.objectContaining({
+        elapsedMinutes: 15,
+        rawDeltaKwh: 1,
+        usageKwh: 1,
+        averageKw: 4,
+        qualityStatus: "ok",
+      }),
+      expect.objectContaining({
+        elapsedMinutes: 15,
+        rawDeltaKwh: 1,
+        usageKwh: 1,
+        averageKw: 4,
+        qualityStatus: "ok",
+      }),
+      expect.objectContaining({
+        elapsedMinutes: 30,
+        rawDeltaKwh: 2,
+        usageKwh: 2,
+        averageKw: 4,
+        qualityStatus: "gap",
+      }),
+    ]);
+    expect(result.summary).toMatchObject({
+      totalUsageKwh: 4,
+      qualityCounts: { ok: 2, boundary: 1, gap: 1 },
+    });
   });
 
   it("preserves a regular hourly source cadence without fabricating 15-minute readings", async () => {
@@ -240,7 +301,7 @@ describe("buildEnergyExcelMaterialization", () => {
       totalUsageKwh: 6,
       mappingRevision: 5,
       materializerContractVersion: "energy-excel-preschool-interval-matrix-v1",
-      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
+      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v4",
       sourceLabels: ["preschool-centre-a:Aircon 1"],
     });
 
@@ -362,6 +423,7 @@ const writeProjectFacts = async (
       dataSnapshotId,
       manifestFingerprint: `fingerprint-${dataSnapshotId}`,
       sourceSha256,
+      factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
     },
     batches: writes.map((write) => ({
       importBatchId: write.importBatchId,

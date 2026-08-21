@@ -4734,7 +4734,7 @@ const scopeSummarySql = (viewName: string, meterNodeIds: string[]): string => `
     SELECT
       interval_start,
       local_interval_start,
-      SUM(usage_kwh) FILTER (WHERE quality_status = 'ok') AS usage_kwh,
+      SUM(usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql()}) AS usage_kwh,
       SUM(average_kw) FILTER (WHERE quality_status = 'ok') AS average_kw
     FROM ${quoteIdentifier(viewName)} source
     WHERE ${meterNodeFilter(meterNodeIds)}
@@ -4774,7 +4774,7 @@ const dailyTotalsSql = (
     ${sqlLiteral(scope.scopeName)} AS scope_name,
     ${sqlLiteral(scope.scopeType)} AS scope_type,
     STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
-    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+    SUM(source.usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql("source")}) AS usage_kwh,
     COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
     COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
     ${index} AS scope_order
@@ -4793,7 +4793,7 @@ const dailyComponentCategoriesSql = (
     routes.scope_type,
     routes.category,
     STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
-    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+    SUM(source.usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql("source")}) AS usage_kwh,
     COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
     COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
     MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
@@ -4861,7 +4861,7 @@ const dailyUsageAnomalySql = (
       routes.series_id,
       STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
       source.local_hour,
-      SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+      SUM(source.usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql("source")}) AS usage_kwh,
       COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
       COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
       MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
@@ -4926,7 +4926,7 @@ const timeBucketGridSql = (
       routes.scope_type,
       STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
       source.local_hour,
-      SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+      SUM(source.usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql("source")}) AS usage_kwh,
       COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
       COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
       MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
@@ -5333,7 +5333,7 @@ const meterBreakdownSql = (viewName: string): string => `
     MAX(appliance) AS appliance,
     MAX(category) AS category,
     MAX(meter_role) AS meter_role,
-    COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'ok'), 0) AS usage_kwh,
+    COALESCE(SUM(usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql()}), 0) AS usage_kwh,
     COALESCE(MAX(average_kw) FILTER (WHERE quality_status = 'ok'), 0) AS peak_kw,
     COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
     COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
@@ -5345,7 +5345,7 @@ const meterBreakdownSql = (viewName: string): string => `
 const previousMeterUsageSql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT
     meter_node_id,
-    COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'ok'), 0) AS usage_kwh
+    COALESCE(SUM(usage_kwh) FILTER (WHERE ${aggregateEligibleQualitySql()}), 0) AS usage_kwh
   FROM ${quoteIdentifier(viewName)} source
   WHERE ${meterNodeFilter(meterNodeIds)}
   GROUP BY meter_node_id
@@ -5425,6 +5425,9 @@ const meterNodeFilter = (meterNodeIds: string[]): string =>
   meterNodeIds.length > 0
     ? `source.meter_node_id IN (${meterNodeIds.map(sqlLiteral).join(", ")})`
     : "FALSE";
+
+const aggregateEligibleQualitySql = (tableAlias?: string): string =>
+  `${tableAlias ? `${tableAlias}.` : ""}quality_status IN ('ok', 'gap')`;
 
 const numberAt = (row: unknown[], index: number): number => {
   const value = Number(row[index] ?? 0);

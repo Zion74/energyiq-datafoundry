@@ -261,6 +261,31 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     }).blockingReasons).not.toContain("SOURCE_MANIFEST_MISMATCH");
   });
+
+  it("keeps a Snapshot ready while disclosing bounded cumulative cadence gaps", () => {
+    const batches = FORMAL_SOURCE_SHAS.map((sha, index) => batch(
+      `batch-${index}`,
+      sha,
+      index < 2 ? NGEE_ANN_LABELS.slice(0, 9) : NGEE_ANN_LABELS.slice(9),
+    ));
+    const snapshot = dataSnapshot(batches, { cadenceGapIntervalCount: 21 });
+
+    const readiness = resolveEnergyIqProjectDataReadiness({
+      project: project(snapshot.id),
+      batches,
+      document: {
+        ...document(),
+        source_manifest: createEnergyIqSourceManifest(FORMAL_SOURCE_SHAS, true),
+        meter_mapping: meterMapping(),
+      },
+      snapshot,
+      expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
+    });
+
+    expect(readiness).toMatchObject({ status: "ready", ready: true, blockingReasons: [] });
+    expect(readiness.warnings).toEqual(expect.arrayContaining(["CADENCE_GAPS:21"]));
+  });
 });
 
 const document = (): EnergyIqProjectSetupDocument => ({
@@ -343,6 +368,7 @@ const dataSnapshot = (
     duplicateNormalizedReadingCount: 0,
     duplicateIntervalFactCount: 0,
     invalidIntervalDurationCount: 0,
+    cadenceGapIntervalCount: 0,
     negativeDeltaIntervalCount: 0,
     legacyRawRowCount: 0,
     legacyNormalizedReadingCount: 0,

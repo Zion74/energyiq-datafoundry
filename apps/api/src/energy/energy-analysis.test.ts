@@ -2014,6 +2014,78 @@ describe("EnergyScopeAnalysis", () => {
     }
   }, 30_000);
 
+  it("includes a cumulative cadence-gap delta in aggregate totals without promoting it to a peak", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-cadence-gap-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    let gapUsageKwh: number | undefined;
+    let gapLocalDate: string | undefined;
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        transformIntervalFacts: (facts) => facts.map((fact) => {
+          if (gapUsageKwh !== undefined
+            || fact.meterPointId !== "mapping-lvl-7-total-office-load-18"
+            || fact.intervalStart === NGEE_ANN_GOLDEN.period.peakAt
+            || fact.intervalStart < "2026-06-10T00:00:00.000Z") return fact;
+          gapUsageKwh = fact.usageKwh;
+          gapLocalDate = fact.localDate;
+          return {
+            ...fact,
+            intervalEnd: new Date(Date.parse(fact.intervalStart) + 30 * 60_000).toISOString(),
+            elapsedMinutes: 30,
+            averageKw: 9_999,
+            qualityStatus: "gap",
+          };
+        }),
+      });
+      expect(gapUsageKwh).toBeTypeOf("number");
+      expect(gapLocalDate).toBeTypeOf("string");
+
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        includeTimeBehaviour: true,
+      });
+
+      expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
+      expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
+      expect(analysis.summary.peakKw).toBeLessThan(9_999);
+      expect(analysis.designatedTotals.reduce((sum, meter) => sum + meter.usageKwh, 0))
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(analysis.dailyTotals?.scopes.find((scope) => scope.scopeId === "project")
+        ?.rows.reduce((sum, row) => sum + (row.usageKwh ?? 0), 0) ?? 0)
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(analysis.dailyTotals?.scopes.find((scope) => scope.scopeId === "project")
+        ?.rows.find((row) => row.localDate === gapLocalDate)?.dataHealth).toMatchObject({
+          status: "partial",
+          qualityEventCount: 1,
+        });
+      expect(Math.max(...(analysis.hourlyProfile ?? []).map((row) => row.peakKw))).toBeLessThan(9_999);
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
   it("fails Day Profile closed per Scope when accepted fact Day Type conflicts", async () => {
     const analysis = await analyzeNgeeAnnFixture((facts) => facts.map((fact) => (
       fact.intervalStart === "2026-06-10T00:00:00.000Z"

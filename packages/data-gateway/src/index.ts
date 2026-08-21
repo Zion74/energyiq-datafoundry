@@ -92,6 +92,7 @@ export {
 } from "./energy-scoped-datasource.js";
 export {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  ENERGY_FACT_WRITER_HISTORICAL_CONTRACT_VERSIONS,
   probeEnergyFactProjectStateForMaterialization,
   readEnergyFactProjectAudit,
   readEnergyFactProjectState,

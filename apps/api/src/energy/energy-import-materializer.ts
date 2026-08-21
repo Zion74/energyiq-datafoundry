@@ -36,7 +36,10 @@ export type EnergyImportMaterializationSummary = {
   sourceCoverageTo?: string;
 };
 
-export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
+export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v2" as const;
+export const ENERGY_EXCEL_HISTORICAL_MATERIALIZER_CONTRACT_VERSIONS = [
+  "energy-excel-cumulative-v1",
+] as const;
 export const ENERGY_EXCEL_INTERVAL_MATRIX_MATERIALIZER_CONTRACT_VERSION = "energy-excel-preschool-interval-matrix-v1" as const;
 
 export const isEnergyImportMaterializationCurrent = (input: {
@@ -192,7 +195,8 @@ export const buildEnergyExcelMaterialization = async (input: {
           : elapsedMinutes < typicalIntervalMinutes - intervalToleranceMinutes
             ? "irregular_interval"
             : "ok";
-      const usageKwh = qualityStatus === "ok" ? rawDeltaKwh : undefined;
+      const aggregateEligible = qualityStatus === "ok" || qualityStatus === "gap";
+      const usageKwh = aggregateEligible ? rawDeltaKwh : undefined;
       const local = localParts(previous.eventTime, input.timezone);
       intervalFacts.push({
         workspaceId: current.workspaceId,

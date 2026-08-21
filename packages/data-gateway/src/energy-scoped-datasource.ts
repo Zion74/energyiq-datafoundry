@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url";
 import type * as DuckDbModule from "duckdb";
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
 import {
-  ENERGY_FACT_WRITER_CONTRACT_VERSION,
   readEnergyFactProjectState,
 } from "./energy-fact-writer.js";
 import {
@@ -519,7 +518,7 @@ const resolveSnapshotIdentityScope = (input: {
   }
   return {
     ...factScope,
-    factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    factWriterContractVersion: factScope.factWriterContractVersion,
   };
 };
 

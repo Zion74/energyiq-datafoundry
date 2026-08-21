@@ -37,7 +37,7 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   document: EnergyIqProjectSetupDocument;
   snapshot?: EnergyIqDataSnapshotRecord;
   expectedMaterializerContractVersion: string | readonly string[];
-  expectedFactWriterContractVersion: string;
+  expectedFactWriterContractVersion: string | readonly string[];
 }): EnergyIqProjectDataReadiness => {
   const mapping = input.document.meter_mapping;
   const sourceManifest = input.document.source_manifest;
@@ -126,9 +126,14 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     }
     const factWriterContractVersions = new Set(materializedBatches.map((batch) =>
       stringValue(parseRecord(batch.materialization_json).factWriterContractVersion) ?? "<missing>"));
+    const expectedFactWriterContractVersions = new Set(
+      typeof input.expectedFactWriterContractVersion === "string"
+        ? [input.expectedFactWriterContractVersion]
+        : input.expectedFactWriterContractVersion,
+    );
     if (
       factWriterContractVersions.size !== 1
-      || !factWriterContractVersions.has(input.expectedFactWriterContractVersion)
+      || !expectedFactWriterContractVersions.has([...factWriterContractVersions][0]!)
     ) {
       blockingReasons.push("FACT_WRITER_CONTRACT_MISMATCH");
     }
@@ -139,7 +144,8 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     isNonNegativeFiniteNumber(audit[field]));
   if (snapshot && !auditValid) blockingReasons.push("SNAPSHOT_AUDIT_INVALID");
   if (audit && auditValid) {
-    const needsNormalizedReadings = materializerContractVersions.has("energy-excel-cumulative-v1");
+    const needsNormalizedReadings = materializerContractVersions.has("energy-excel-cumulative-v1")
+      || materializerContractVersions.has("energy-excel-cumulative-v2");
     if (numberValue(audit.rawRowCount) <= 0
       || (needsNormalizedReadings && numberValue(audit.normalizedReadingCount) <= 0)) {
       blockingReasons.push("FACT_STORE_EMPTY");
@@ -167,6 +173,8 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     if (overlapCount > 0) {
       warnings.push(`RAW_OVERLAP_CONFLICTS_RESOLVED_BY_LATER_COVERAGE:${overlapCount}`);
     }
+    const cadenceGapCount = numberValue(audit.cadenceGapIntervalCount);
+    if (cadenceGapCount > 0) warnings.push(`CADENCE_GAPS:${cadenceGapCount}`);
   }
 
   const uniqueBlockingReasons = [...new Set(blockingReasons)];

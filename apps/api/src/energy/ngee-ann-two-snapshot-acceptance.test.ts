@@ -31,6 +31,12 @@ import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
 const PROJECT_ID = "ngee-ann-polytechnic";
 const SOURCE_ROOT = join(process.cwd(), "docs", "template", "Net-Zero Product");
 
+type SourceDefinition = {
+  batchId: string;
+  filename: string;
+  sha256: string;
+};
+
 const SOURCES = {
   earlierLevel6: {
     batchId: "ngee-ann-a-level-6",
@@ -53,6 +59,19 @@ const SOURCES = {
     sha256: "3f41f94e229933a97ce8d02a0382d3a8192e3c26065bf0f48a04168ec90dd674",
   },
 } as const;
+
+const EXTENDED_SOURCES = {
+  level6: {
+    batchId: "ngee-ann-extended-level-6",
+    filename: "Level 6 (21 Apr - 20 Aug 2026).xlsx",
+    sha256: "d594040411f2d99b5006cb72cdbee8bb8f53390bdb18e20a8cc6a6e07f57873f",
+  },
+  level7: {
+    batchId: "ngee-ann-extended-level-7",
+    filename: "Level 7 (21 Apr - 20 Aug 2026).xlsx",
+    sha256: "414cf91c6e00218e29b45757be9a2f50430fc0a6aa1791eb25b91196642daafe",
+  },
+} as const satisfies Record<string, SourceDefinition>;
 
 describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -391,16 +410,120 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       }
     }
   }, 360_000);
-});
 
-type SourceDefinition = (typeof SOURCES)[keyof typeof SOURCES];
+  it.runIf(Boolean(process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT?.trim()))(
+    "materializes the supplied April-August cumulative workbooks into an August natural-month Overview",
+    async () => {
+      const sourceRoot = process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT!.trim();
+      const root = mkdtempSync(join(tmpdir(), "ngee-ann-extended-import-"));
+      const databasePath = join(root, "energy.duckdb");
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      const fileAssets = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+      const gateway = new LocalDataGateway(metadata);
+      try {
+        vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
+        ensureEnergyIqBootstrap(metadata);
+        configureNgeeAnnOperationalPolicy(metadata);
+        const user = metadata.users.getById({ user_id: "dev-user" });
+        const project = metadata.energyIq.getProject(PROJECT_ID);
+        metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+          project_id: PROJECT_ID,
+          tier_definition_ids: metadata.energyIq.listTierDefinitions(PROJECT_ID).map((tier) => tier.id),
+          hierarchy_revision_id: project.hierarchy_revision_id,
+          meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({
+            metadataStore: metadata,
+            projectId: PROJECT_ID,
+            hierarchyRevisionId: project.hierarchy_revision_id,
+            scopeId: project.root_scope_id,
+            resource: "electricity",
+          }).meterMappingRevisionId,
+          published_by: user.id,
+          published_at: "2026-08-21T00:00:00.000Z",
+        });
+        const context = {
+          metadataStore: metadata,
+          fileAssetService: fileAssets,
+          dataGateway: gateway,
+          userId: user.id,
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+        } as unknown as Required<ConfigApiContext>;
+
+        const sources = await registerSources(
+          metadata,
+          fileAssets,
+          Object.values(EXTENDED_SOURCES),
+          sourceRoot,
+        );
+        updateSourceManifest(metadata, sources.map((source) => source.sha256));
+        const materialized = await materializeEnergyProjectManifest({
+          context,
+          userId: user.id,
+          projectId: PROJECT_ID,
+          requestedBatchId: EXTENDED_SOURCES.level6.batchId,
+          databasePath,
+        });
+
+        expect(resolveEnergyIqSnapshotFactScope(materialized.snapshot)).toMatchObject({
+          sourceSha256: sortedSha(sources),
+          factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v4",
+        });
+        await expect(readEnergyFactProjectAudit({ databasePath, projectId: PROJECT_ID })).resolves.toMatchObject({
+          rawRowCount: 210_795,
+          invalidRawRowCount: 0,
+          unmappedRawRowCount: 0,
+          normalizedReadingCount: 210_795,
+          intervalFactCount: 210_777,
+          invalidIntervalDurationCount: 0,
+          cadenceGapIntervalCount: 21,
+          negativeDeltaIntervalCount: 0,
+          canonicalMeterSeriesCount: 18,
+          adjacentReadingPairCount: 210_777,
+          missingAdjacentIntervalCount: 0,
+          orphanIntervalFactCount: 0,
+        });
+
+        const analysis = await resolveCurrentOverview({
+          metadata,
+          gateway,
+          user,
+          databasePath,
+          now: new Date("2026-08-21T05:00:00.000Z"),
+        });
+        expect(analysis.snapshot.context).toMatchObject({
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: PROJECT_ID,
+          scopeId: "project",
+          timezone: "Asia/Singapore",
+          from: "2026-07-31T16:00:00.000Z",
+          to: "2026-08-19T16:00:00.000Z",
+          dataSnapshotId: materialized.snapshot.id,
+        });
+        expect(analysis.snapshot.analysis.summary).toMatchObject({
+          usageKwh: expect.any(Number),
+          validIntervalCount: expect.any(Number),
+        });
+        expect(analysis.snapshot.analysis.summary.usageKwh).toBeGreaterThan(0);
+        expect(analysis.snapshot.analysis.comparison.usageKwh).toBeGreaterThan(0);
+        expect(analysis.snapshot.analysis.summary.peakKw).toBeGreaterThan(0);
+        expect(analysis.snapshot.analysis.cost.status).toBe("available");
+        expect(analysis.snapshot.analysis.timeBehaviour?.dayProfiles.length).toBeGreaterThan(0);
+        expectEvidencePins(analysis.snapshot.evidence, materialized.snapshot.id);
+      } finally {
+        metadata.close();
+        removeTemporaryFixture(root);
+      }
+    },
+    600_000,
+  );
+});
 
 const registerSources = async (
   metadata: ReturnType<typeof createMetadataStore>,
   fileAssets: LocalFileAssetService,
   definitions: readonly SourceDefinition[],
+  sourceRoot = SOURCE_ROOT,
 ) => Promise.all(definitions.map(async (definition) => {
-  const content = readFileSync(join(SOURCE_ROOT, definition.filename));
+  const content = readFileSync(join(sourceRoot, definition.filename));
   const sha256 = createHash("sha256").update(content).digest("hex");
   expect(sha256).toBe(definition.sha256);
   const inspection = await inspectEnergyExcelWorkbook(content);
@@ -458,6 +581,7 @@ const resolveCurrentOverview = async (input: {
   gateway: LocalDataGateway;
   user: ReturnType<ReturnType<typeof createMetadataStore>["users"]["getById"]>;
   databasePath: string;
+  now?: Date;
 }) => {
   const result = await resolveProjectAnalysis({
     metadataStore: input.metadata,
@@ -471,7 +595,7 @@ const resolveCurrentOverview = async (input: {
       analysisWindow: "current-month-to-date",
     },
     databasePath: input.databasePath,
-    now: new Date("2026-08-07T00:00:00.000Z"),
+    now: input.now ?? new Date("2026-08-07T00:00:00.000Z"),
   });
   expect(result.status).toBe("ready");
   if (result.status !== "ready") throw new Error("NGEE_ANN_CURRENT_OVERVIEW_NOT_READY");

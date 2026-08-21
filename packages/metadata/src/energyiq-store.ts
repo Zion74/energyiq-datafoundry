@@ -110,6 +110,7 @@ export type EnergyIqSnapshotFactScope = {
   dataSnapshotId: string;
   manifestFingerprint: string;
   sourceSha256: string[];
+  factWriterContractVersion: string;
 };
 
 export type EnergyIqProjectManifestMaterializationPreparation = {
@@ -142,11 +143,26 @@ export const resolveEnergyIqSnapshotFactScope = (
     }
     return candidate.sourceSha256.toLocaleLowerCase();
   }).sort((left, right) => left.localeCompare(right));
+  const factWriterContractVersions = new Set(manifest.batches.map((candidate, index) => {
+    if (!isRecord(candidate)) {
+      throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${snapshot.id}:${index}`);
+    }
+    const materialization = isRecord(candidate.materialization) ? candidate.materialization : undefined;
+    const revision = candidate.factWriterContractVersion ?? materialization?.factWriterContractVersion;
+    if (typeof revision !== "string" || revision.trim().length === 0) {
+      throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${snapshot.id}:${index}`);
+    }
+    return revision;
+  }));
+  if (factWriterContractVersions.size !== 1) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${snapshot.id}:FACT_WRITER_CONTRACT_MIXED`);
+  }
   return createSnapshotFactScope({
     workspaceId: snapshot.workspace_id,
     projectId: snapshot.project_id,
     snapshotId: snapshot.id,
     sourceSha256,
+    factWriterContractVersion: [...factWriterContractVersions][0]!,
   });
 };
 
@@ -901,7 +917,21 @@ const createDataSnapshotCandidate = (
     })),
   };
   const sourceSha256 = batches.map((batch) => batch.source_sha256.toLocaleLowerCase());
-  const factScope = createSnapshotFactScope({ workspaceId, projectId, snapshotId, sourceSha256 });
+  const factWriterContractVersions = new Set(batches.map((batch) =>
+    optionalJsonString(parseJsonRecord(batch.materialization_json).factWriterContractVersion)));
+  if (factWriterContractVersions.has(null)) {
+    throw new Error("ENERGYIQ_PROJECT_MANIFEST_FACT_WRITER_CONTRACT_INVALID");
+  }
+  const factWriterContractVersion = factWriterContractVersions.size === 1
+    ? [...factWriterContractVersions][0]!
+    : "<mixed>";
+  const factScope = createSnapshotFactScope({
+    workspaceId,
+    projectId,
+    snapshotId,
+    sourceSha256,
+    factWriterContractVersion,
+  });
   return {
     snapshotId,
     manifest,
@@ -914,6 +944,7 @@ const createSnapshotFactScope = (input: {
   projectId: string;
   snapshotId: string;
   sourceSha256: string[];
+  factWriterContractVersion: string;
 }): EnergyIqSnapshotFactScope => ({
   workspaceId: input.workspaceId,
   projectId: input.projectId,
@@ -928,6 +959,7 @@ const createSnapshotFactScope = (input: {
     }))
     .digest("hex"),
   sourceSha256: input.sourceSha256,
+  factWriterContractVersion: input.factWriterContractVersion,
 });
 
 const prepareProjectManifestCandidate = (input: {

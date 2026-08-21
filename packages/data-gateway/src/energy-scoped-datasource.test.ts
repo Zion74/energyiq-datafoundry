@@ -108,6 +108,86 @@ describe("Energy scoped datasource Snapshot guard", () => {
     }
   });
 
+  it("reads a historical fact store with the writer revision pinned by its Snapshot", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-scoped-historical-writer-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-1", owner_user_id: "dev-user", name: "Workspace", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "project-1", workspace_id: "workspace-1", name: "Project", status: "draft" });
+      createBatch(metadata, "batch-a", "sha-a");
+      const materializations = [{
+        batch_id: "batch-a",
+        summary: {
+          ...summary("sha-a"),
+          factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
+        },
+      }];
+      const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        source_manifest_sha256: ["sha-a"],
+      });
+      const persisted = await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: prepared.expected_previous_snapshot_id,
+        snapshotFactScope: prepared.fact_scope,
+        batches: [projectBatch(factWrite("batch-a", "sha-a", "2026-05-01T00:00:00.000Z"))],
+      });
+      await runDuckDbSql(databasePath, `
+        UPDATE energy_project_fact_state
+        SET fact_writer_contract_version = 'energy-fact-writer-snapshot-manifest-v3'
+        WHERE project_id = 'project-1'
+      `);
+      metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations,
+        project_audit: persisted.projectAudit,
+        source_manifest_sha256: ["sha-a"],
+        expected_snapshot_id: prepared.expected_snapshot_id,
+        expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+      });
+
+      const scoped = await ensureEnergyScopedDataSource({
+        metadataStore: metadata,
+        userId: "dev-user",
+        databasePath,
+        context: {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          scopeId: "scope-a",
+          meterAttachments: [{ meterPointId: "meter-a", scopeId: "scope-a", officialAggregation: true }],
+          resource: "electricity",
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-05-02T00:00:00.000Z",
+          timezone: "Asia/Singapore",
+          hierarchyRevisionId: "hierarchy-v1",
+          meterMappingRevisionId: "mapping-v1",
+          meterFormulaRevisionId: "formula-v1",
+          dataSnapshotId: prepared.expected_snapshot_id,
+          metricVersion: "metrics-v1",
+        },
+      });
+      const gateway = new LocalDataGateway(metadata);
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scoped.datasourceId,
+        sql: `SELECT COUNT(*) AS fact_count FROM ${scoped.viewName}`,
+      })).resolves.toMatchObject({ rows: [[1]] });
+    } finally {
+      metadata.close();
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch (error) {
+        if (!(process.platform === "win32" && error instanceof Error && "code" in error
+          && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
+      }
+    }
+  });
+
   it("rejects every query from an old datasource and detaches timed-out session cleanup", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-scoped-snapshot-"));
     const databasePath = join(root, "energy.duckdb");
