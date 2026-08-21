@@ -61,7 +61,7 @@ describe("Ngee Ann Overview AI workflow", () => {
     expect(sectionCalls.every(({ dataSnapshotId, rendererKey, identityContractRevision }) =>
       dataSnapshotId === "snapshot-ngee"
       && rendererKey === "ngee-ann-overview"
-      && identityContractRevision === "ngee-ann-section-v15")).toBe(true);
+      && identityContractRevision === "ngee-ann-section-v16")).toBe(true);
     expect(executiveCalls).toHaveLength(1);
     expect(sectionProfileSnapshots).toEqual(Array.from({ length: 4 }, () => trustedSnapshot));
     expect(executiveProfileSnapshots).toEqual([trustedSnapshot]);
@@ -178,6 +178,9 @@ const packs = (): NgeeAnnSectionPacks => Object.fromEntries(NGEE_ANN_SECTION_IDS
       changeKwh: 10,
       changePct: 11.11,
     },
+  } : sectionId === "circuit-concentration" ? {
+    levels: [],
+    circuits: [],
   } : {},
   dataQuality: { status: "complete", coveragePct: 100, importBatchIds: [] },
   limitations: [],

@@ -448,6 +448,104 @@ describe("materializeNgeeAnnSectionResult", () => {
     expect(result.publication.rejectedCandidateIds).toEqual(["candidate:wrong-direction"]);
   });
 
+  it("rejects year-over-year wording when the Pack only supplies a previous-period comparison", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["circuit-concentration"];
+    pack.facts.categories = [{
+      category: "light",
+      usageKwh: 100,
+      sharePct: 20,
+      comparison: { usageKwh: 110, changeKwh: -10, changePct: -10 },
+    } as never];
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "Load and lighting comparisons are available for the selected periods.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:unsupported-yoy",
+          title: "Lighting changed year-over-year",
+          text: "Lighting fell 10% year-over-year.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }, {
+          id: "candidate:supported-previous-period",
+          title: "Lighting changed from the previous comparison period",
+          text: "Lighting fell 10% versus the previous comparison period.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:comparison-time-basis",
+    });
+
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:supported-previous-period"]);
+    expect(result.publication.rejectedCandidateIds).toEqual(["candidate:unsupported-yoy"]);
+  });
+
+  it("removes an unknown Level from Summary while preserving an exact Circuit name", () => {
+    const pack = assembleNgeeAnnSectionPacks(snapshot())["circuit-concentration"];
+    pack.facts.levels = [{
+      nodeId: "level-7",
+      name: "Level 7",
+      usageKwh: 700,
+    }, {
+      nodeId: "level-6",
+      name: "Level 6",
+      usageKwh: 600,
+    }] as never;
+    pack.facts.circuits = [{
+      scopeId: "l7-load-4",
+      parentScopeId: "level-7",
+      name: "Lvl 7 Office Load 4",
+      usageKwh: 400,
+    }, {
+      scopeId: "l7-load-3",
+      parentScopeId: "level-7",
+      name: "Lvl 7 Office Load 3",
+      usageKwh: 300,
+    }] as never;
+    const identity = createNgeeAnnOverviewAiSectionArtifactIdentity({
+      baseIdentity: baseIdentity(),
+      targetId: pack.sectionId,
+    });
+    const evidenceRef = pack.evidence[0]!.id;
+
+    const result = materializeNgeeAnnSectionResult({
+      answer: JSON.stringify({
+        sectionId: pack.sectionId,
+        status: "available",
+        summary: {
+          text: "The load comparison identifies Level 7 as the larger contributor. The top components are Lvl 7 Office Load 4 and Lvl 3 circuits.",
+          evidenceRefs: [evidenceRef],
+        },
+        candidates: [{
+          id: "candidate:exact-circuit-name",
+          title: "Lvl 7 Office Load 3 remains a named circuit",
+          text: "Lvl 7 Office Load 3 is present in the published Circuit list.",
+          epistemicStatus: "observed",
+          evidenceRefs: [evidenceRef],
+        }],
+      }),
+      pack,
+      identity,
+      runId: "run:ngee:level-vocabulary",
+    });
+
+    expect(result.summary?.text).toBe("The load comparison identifies Level 7 as the larger contributor.");
+    expect(result.insights.map(({ id }) => id)).toEqual(["candidate:exact-circuit-name"]);
+  });
+
   it("rejects numeric facts attached to the wrong metric meaning while preserving a supported sibling", () => {
     const pack = assembleNgeeAnnSectionPacks(snapshot())["decision-priorities"];
     pack.facts.decisionPriorities = {
@@ -717,6 +815,7 @@ describe("buildNgeeAnnSectionPrompt", () => {
     expect(prompt).toContain('"displayLabel":"20 May 2026–16 Jun 2026"');
     expect(prompt).toContain('"peakAtLocal":"2026-06-05 14:15"');
     expect(prompt).toContain("Do not call one day type higher or lower than another unless the profile values support that direction.");
+    expect(prompt).toContain("Comparison fields describe the previous comparison period, never year-over-year");
     expect(prompt).toContain('"fromLocalDate":"2026-04-22"');
     expect(prompt).toContain('"toExclusiveLocalDate":"2026-05-20"');
     expect(prompt).not.toContain("2026-06-05T06:15:00.000Z");

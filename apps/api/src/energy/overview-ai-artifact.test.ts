@@ -47,13 +47,13 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(section).toMatchObject({
       artifactKind: "section-interpretation",
       targetId: "time-behaviour",
-      identityContractRevision: "ngee-ann-section-v15",
+      identityContractRevision: "ngee-ann-section-v16",
       analysisPackId: "ngee-ann-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "energyiq-project-section-interpretation-v1",
-      validatorRevision: "energyiq-project-section-acceptance-v13",
+      validatorRevision: "energyiq-project-section-acceptance-v14",
       workflowRevision: "energyiq-project-section-discover-publish-v1",
-      investigatorPromptRevision: "energyiq-project-section-discovery-v7",
+      investigatorPromptRevision: "energyiq-project-section-discovery-v8",
       capabilityRevision: "pack-only-v1",
       publicationRevision: "energyiq-project-section-publication-v1",
     });
@@ -79,7 +79,7 @@ describe("Ngee Ann current Overview AI identities", () => {
     expect(createNgeeAnnOverviewAiSectionArtifactIdentity({
       baseIdentity: base,
       targetId: "trend-and-demand",
-    }).investigatorPromptRevision).toBe("energyiq-project-section-discovery-v7");
+    }).investigatorPromptRevision).toBe("energyiq-project-section-discovery-v8");
 
     const additional = createNgeeAnnAdditionalAiInsightArtifactIdentity({ baseIdentity: base });
     expect(additional).toMatchObject({

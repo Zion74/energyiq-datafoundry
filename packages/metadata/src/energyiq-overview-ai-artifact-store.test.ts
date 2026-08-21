@@ -557,6 +557,20 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       expect(store.energyIq.overviewAiArtifacts.get(priorClauseBoundaryIdentity))
         .toMatchObject({ id: priorClauseBoundaryArtifact.id, status: "available" });
 
+      const priorTemporalEntityIdentity = {
+        ...ngeeAnnSectionIdentity("snapshot-ngee-prior-temporal-entity", "circuit-concentration"),
+        identityContractRevision: "ngee-ann-section-v15",
+        validatorRevision: "energyiq-project-section-acceptance-v13",
+        investigatorPromptRevision: "energyiq-project-section-discovery-v7",
+      };
+      const priorTemporalEntityArtifact = completeSectionV4(
+        store,
+        priorTemporalEntityIdentity,
+        ngeeAnnSectionResult(priorTemporalEntityIdentity, "available"),
+      );
+      expect(store.energyIq.overviewAiArtifacts.get(priorTemporalEntityIdentity))
+        .toMatchObject({ id: priorTemporalEntityArtifact.id, status: "available" });
+
       const readableIdentity = ngeeAnnSectionIdentity("snapshot-ngee-readable", "time-behaviour");
       const readableBase = ngeeAnnSectionResult(readableIdentity, "available");
       const readableResult = {
@@ -1161,13 +1175,13 @@ const ngeeAnnSectionIdentity = (
 ): SectionV4Identity => ({
   ...sectionV3Identity(dataSnapshotId, targetId),
   rendererKey: "ngee-ann-overview",
-  identityContractRevision: "ngee-ann-section-v15",
+  identityContractRevision: "ngee-ann-section-v16",
   analysisPackId: "ngee-ann-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "energyiq-project-section-interpretation-v1",
-  validatorRevision: "energyiq-project-section-acceptance-v13",
+  validatorRevision: "energyiq-project-section-acceptance-v14",
   workflowRevision: "energyiq-project-section-discover-publish-v1",
-  investigatorPromptRevision: "energyiq-project-section-discovery-v7",
+  investigatorPromptRevision: "energyiq-project-section-discovery-v8",
   capabilityRevision: "pack-only-v1",
   publicationRevision: "energyiq-project-section-publication-v1",
 });

@@ -194,6 +194,7 @@ export const buildNgeeAnnSectionPrompt = (
     "The epistemicStatus applies to the whole title and text. If any sentence proposes a cause, possibility or action that is not directly observed, use inferred or speculative rather than observed.",
     "Evidence refs anchor the observation beneath an Insight; they do not claim that a hypothesis has been proven.",
     "Keep every factual number bound to its supplied field meaning and entity. A comparison percentage is not a share of total, a Level total is not off-hours usage, and a baseline value is not an actual value.",
+    "Comparison fields describe the previous comparison period, never year-over-year. Do not write YoY, year-over-year, last year or previous year unless a future Pack explicitly supplies that basis.",
     "A speculative Insight may suggest a relationship, counterexample, question, or low-risk line of inquiry without inventing measurements.",
     "When comparing day types, follow the direction of the supplied Project-scope profiles. Do not call one day type higher or lower than another unless the profile values support that direction.",
     "Each candidate must cite one or more exact Evidence IDs from the Pack. Aim for Summary under 480 characters, titles under 96, text under 480, and deep-dive questions under 220; preserve a useful explanation when it needs a little more room.",
@@ -218,7 +219,10 @@ export const materializeNgeeAnnSectionResult = <SectionId extends NgeeAnnSection
   const proposal = parseProposal(input.answer, input.pack.sectionId);
   const evidenceIds = new Set(input.pack.evidence.map(({ id }) => id));
   const packProjection = projectSectionPackForPrompt(input.pack);
-  const narrativeAuthority = createNarrativeFactAuthority(packProjection);
+  const narrativeAuthority = createNarrativeFactAuthority(
+    packProjection,
+    knownLevelCodesForPack(input.pack),
+  );
   const dayTypeProfileMeans = dayTypeProfileMeansForPack(input.pack);
 
   if (proposal.status === "empty") {
@@ -445,11 +449,16 @@ type NumericFact = {
 type NarrativeFactAuthority = {
   packText: string;
   numericFacts: NumericFact[];
+  knownLevelCodes: ReadonlySet<string>;
 };
 
-const createNarrativeFactAuthority = (projection: Record<string, unknown>): NarrativeFactAuthority => ({
+const createNarrativeFactAuthority = (
+  projection: Record<string, unknown>,
+  knownLevelCodes: ReadonlySet<string>,
+): NarrativeFactAuthority => ({
   packText: JSON.stringify(projection),
   numericFacts: collectNumericFacts(projection),
+  knownLevelCodes,
 });
 
 const numbersSupported = (
@@ -470,8 +479,26 @@ const narrativeFactsSupported = (
   dayTypeProfileMeans: ReadonlyMap<NgeeAnnDayType, number>,
 ): boolean =>
   numbersSupported(text, authority)
+  && !/\b(?:year[- ]over[- ]year|yoy|last\s+year|previous\s+year)\b/iu.test(text)
+  && levelEntitiesSupported(text, authority.knownLevelCodes)
   && [...text.matchAll(CLOCK_TIME_TOKEN)].every(([token]) => authority.packText.includes(token))
   && dayTypeRelationsSupported(text, dayTypeProfileMeans);
+
+const knownLevelCodesForPack = (pack: NgeeAnnSectionPack): ReadonlySet<string> => {
+  if (pack.sectionId !== "circuit-concentration") return new Set();
+  return new Set((pack as NgeeAnnSectionPack<"circuit-concentration">).facts.levels.flatMap((level) => {
+    const nameCode = /\b(?:level|lvl)\s+([0-9]+)\b/iu.exec(level.name)?.[1];
+    const idCode = /^level-([0-9]+)$/iu.exec(level.nodeId)?.[1];
+    return [nameCode, idCode].filter((value): value is string => value !== undefined);
+  }));
+};
+
+const levelEntitiesSupported = (
+  text: string,
+  knownLevelCodes: ReadonlySet<string>,
+): boolean => knownLevelCodes.size === 0
+  || [...text.matchAll(/\b(?:level|lvl)\s+([0-9]+)\b/giu)]
+    .every((match) => match[1] !== undefined && knownLevelCodes.has(match[1]));
 
 const collectNumericFacts = (
   value: unknown,
@@ -967,8 +994,8 @@ const requirePackIdentity = (
   pack: NgeeAnnSectionPack,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
-  const expectedPromptRevision = "energyiq-project-section-discovery-v7";
-  if (identity.identityContractRevision !== "ngee-ann-section-v15"
+  const expectedPromptRevision = "energyiq-project-section-discovery-v8";
+  if (identity.identityContractRevision !== "ngee-ann-section-v16"
     || identity.targetId !== pack.sectionId
     || identity.workspaceId !== pack.binding.workspaceId
     || identity.projectId !== pack.binding.projectId
@@ -978,6 +1005,7 @@ const requirePackIdentity = (
     || identity.analysisPeriodFrom !== pack.binding.analysisPeriod.from
     || identity.analysisPeriodTo !== pack.binding.analysisPeriod.to
     || identity.investigatorPromptRevision !== expectedPromptRevision
+    || identity.validatorRevision !== "energyiq-project-section-acceptance-v14"
     || identity.analysisPackRevision !== "v2") {
     throw new Error("ENERGYIQ_NGEE_ANN_SECTION_PACK_IDENTITY_MISMATCH");
   }
