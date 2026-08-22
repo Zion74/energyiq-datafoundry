@@ -407,11 +407,13 @@ const extractAiState = (
       additionalStatus: additional.status,
       additionalFindingEntries: narrativeFindingsFromUnit(additional),
       additionalFingerprint: sectionSemanticFingerprint(additional),
-      additionalBasisFingerprint: stableSerialize(generation.units?.additionalInsights ?? "unversioned"),
+      additionalBasisFingerprint: stableSerialize(generationContractBasis(
+        generation.units?.additionalInsights ?? "unversioned",
+      )),
       generationBasisFingerprint: stableSerialize({
         modelProfileId: artifact.result.binding.modelProfileId,
         modelProfileRevision: artifact.result.binding.modelProfileRevision,
-        generation,
+        generation: generationContractBasis(generation),
       }),
       generationBasisExact: Boolean(generation.units),
     };
@@ -513,6 +515,14 @@ type NarrativeFinding = {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+function generationContractBasis(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(generationContractBasis);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => key !== "reportTimeContextFingerprint")
+    .map(([key, entry]) => [key, generationContractBasis(entry)]));
+}
 
 const classifySectionChange = (
   previousStatus: string,

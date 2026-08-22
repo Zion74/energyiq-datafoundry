@@ -164,6 +164,45 @@ describe("Overview change summary", () => {
     })?.ai.generationBasisStatus).toBe("changed");
   });
 
+  it("treats a changed Report Time Context fingerprint as new data when generation contracts remain exact", () => {
+    const previous = savedDetail({
+      id: "ngee-report-time-a",
+      sequence: 1,
+      snapshotId: "snapshot-a",
+      rendererKey: "ngee-ann-overview",
+    });
+    previous.aiArtifact = projectAiArtifact("snapshot-a", "release-a", "Previous finding");
+    const current = snapshot({
+      snapshotId: "snapshot-b",
+      releaseId: "release-b",
+      rendererKey: "ngee-ann-overview",
+    });
+    const currentAi = projectAiArtifact("snapshot-b", "release-b", "Current finding");
+
+    for (const [artifact, fingerprint] of [
+      [previous.aiArtifact, "report-time-fingerprint-a"],
+      [currentAi, "report-time-fingerprint-b"],
+    ] as const) {
+      if (!artifact || artifact.contract !== "energyiq-saved-ai-result@3") {
+        throw new Error("TEST_PROJECT_AI_ARTIFACT_REQUIRED");
+      }
+      artifact.result.binding.generation.reportTimeContextFingerprint = fingerprint;
+      const units = artifact.result.binding.generation.units;
+      if (!units) throw new Error("TEST_UNIT_GENERATION_REQUIRED");
+      units.keyFindings.reportTimeContextFingerprint = fingerprint;
+      for (const unit of Object.values(units.sections)) {
+        unit.reportTimeContextFingerprint = fingerprint;
+      }
+      units.additionalInsights.reportTimeContextFingerprint = fingerprint;
+    }
+
+    expect(buildOverviewChangeSummary({
+      previous,
+      current,
+      currentAiArtifact: currentAi,
+    })?.ai.generationBasisStatus).toBe("same");
+  });
+
   it("compares immutable A/B identities, decision metrics, and AI conclusions without inventing semantic matches", () => {
     const previous = savedDetail({
       id: "saved-a",
