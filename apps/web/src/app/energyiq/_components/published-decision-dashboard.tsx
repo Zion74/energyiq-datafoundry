@@ -640,7 +640,7 @@ function PublishedDecisionDashboardView({
               }))}
               className="h-10 rounded-lg border border-primary/30 bg-primary/5 px-4 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
             >
-              Test A/B update
+              Test data update
             </button>
           ) : null}
           {access?.role === "admin" && currentSnapshot ? (

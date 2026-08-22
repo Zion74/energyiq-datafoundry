@@ -16,7 +16,7 @@ const navigation = vi.hoisted(() => ({
 const mockedAccess = vi.hoisted(() => ({
   access: null as EnergyAccessContextDto | null,
   activeProject: null as EnergyProjectDto | null,
-  selectOrganisation: vi.fn<(workspaceId: string) => Promise<void>>(),
+  selectOrganisation: vi.fn<(workspaceId: string) => Promise<EnergyProjectDto | null>>(),
   selectProject: vi.fn<(projectId: string) => void>(),
 }));
 
@@ -45,7 +45,7 @@ describe("EnergyIQ Shell Project navigation", () => {
     mockedAccess.access = accessContext([projectA, projectB]);
     mockedAccess.activeProject = projectA;
     mockedAccess.selectOrganisation.mockReset();
-    mockedAccess.selectOrganisation.mockResolvedValue(undefined);
+    mockedAccess.selectOrganisation.mockResolvedValue(projectA);
     mockedAccess.selectProject.mockReset();
     navigation.pathname = "/energyiq/overview";
     navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1";
@@ -151,7 +151,8 @@ describe("EnergyIQ Shell Project navigation", () => {
     );
   });
 
-  it("clears the stale Overview Project identity after switching Workspace", async () => {
+  it("opens the selected Workspace's published Overview after switching Workspace", async () => {
+    const workspaceTwoProject = project("project-c", "Project C", "workspace-2");
     mockedAccess.access = {
       ...accessContext([project("project-a", "Project A")]),
       workspaces: [
@@ -159,6 +160,7 @@ describe("EnergyIQ Shell Project navigation", () => {
         { id: "workspace-2", name: "Workspace 2", kind: "customer", disabled: false },
       ],
     };
+    mockedAccess.selectOrganisation.mockResolvedValueOnce(workspaceTwoProject);
     await act(async () => {
       root.render(<EnergyIqShell><div>Overview</div></EnergyIqShell>);
     });
@@ -173,11 +175,12 @@ describe("EnergyIQ Shell Project navigation", () => {
     expect(mockedAccess.selectOrganisation).toHaveBeenCalledWith("workspace-2");
     expect(navigation.replace).toHaveBeenCalledOnce();
     expect(navigation.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?scopeId=project&resource=electricity&grain=day",
+      "/energyiq/overview?projectId=project-c&scopeId=project&resource=electricity&grain=day",
     );
   });
 
   it("clears stale AI Analyst Snapshot and Release pins after switching Workspace", async () => {
+    const workspaceTwoProject = project("project-c", "Project C", "workspace-2");
     navigation.pathname = "/energyiq/ai";
     navigation.search = "projectId=project-a&scopeId=project&resource=electricity&period=Custom&from=2026-05-20&to=2026-06-16&dataSnapshotId=snapshot-ngee&projectReleaseId=release-ngee&finding=old-finding&evidence=old-evidence";
     window.history.replaceState({}, "", `/energyiq/ai?${navigation.search}`);
@@ -188,6 +191,7 @@ describe("EnergyIQ Shell Project navigation", () => {
         { id: "workspace-2", name: "Workspace 2", kind: "customer", disabled: false },
       ],
     };
+    mockedAccess.selectOrganisation.mockResolvedValueOnce(workspaceTwoProject);
     await act(async () => {
       root.render(<EnergyIqShell><div>AI Analyst</div></EnergyIqShell>);
     });
@@ -200,13 +204,13 @@ describe("EnergyIQ Shell Project navigation", () => {
 
     expect(mockedAccess.selectOrganisation).toHaveBeenCalledWith("workspace-2");
     expect(navigation.replace).toHaveBeenCalledWith(
-      "/energyiq/ai?scopeId=project&resource=electricity",
+      "/energyiq/ai?projectId=project-c&scopeId=project&resource=electricity",
     );
   });
 });
 
-function project(id: string, name: string): EnergyProjectDto {
-  return { id, name, workspaceId: "workspace-1", status: "published", timezone: "Asia/Singapore" };
+function project(id: string, name: string, workspaceId = "workspace-1"): EnergyProjectDto {
+  return { id, name, workspaceId, status: "published", timezone: "Asia/Singapore" };
 }
 
 function accessContext(projects: EnergyProjectDto[]): EnergyAccessContextDto {

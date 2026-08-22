@@ -39,11 +39,12 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const showProjectSelector = contextProjects.length > 1;
   const showStaticProjectContext = contextProjects.length === 1 && activeProject;
   const selectWorkspaceFromShell = async (workspaceId: string) => {
-    await selectOrganisation(workspaceId);
+    const nextProject = await selectOrganisation(workspaceId);
     if (pathname !== "/energyiq/overview" && pathname !== "/energyiq/ai") return;
 
     const nextSearchParams = new URLSearchParams(window.location.search);
-    nextSearchParams.delete("projectId");
+    if (nextProject) nextSearchParams.set("projectId", nextProject.id);
+    else nextSearchParams.delete("projectId");
     nextSearchParams.set("scopeId", "project");
     nextSearchParams.delete("period");
     nextSearchParams.delete("from");

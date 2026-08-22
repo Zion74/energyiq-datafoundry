@@ -23,7 +23,7 @@ type EnergyIqAccessValue = {
   error: string | null;
   loading: boolean;
   refresh: () => Promise<void>;
-  selectOrganisation: (workspaceId: string) => Promise<void>;
+  selectOrganisation: (workspaceId: string) => Promise<EnergyProjectDto | null>;
   selectProject: (projectId: string) => void;
   selectProjectContext: (workspaceId: string, projectId: string) => Promise<void>;
 };
@@ -70,8 +70,10 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
         : window.localStorage.getItem(projectStorageKey(next.activeWorkspaceId));
       const selected = published.find((project) => project.id === stored) ?? published[0] ?? null;
       setActiveProjectId(selected?.id ?? null);
+      return selected;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Failed to load EnergyIQ access");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -101,15 +103,16 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
   }, [access?.activeWorkspaceId]);
 
   const selectOrganisation = useCallback(async (workspaceId: string) => {
-    if (!workspaceId || workspaceId === access?.activeWorkspaceId) return;
+    if (!workspaceId) return null;
+    if (workspaceId === access?.activeWorkspaceId) return activeProject;
     setConfigApiWorkspaceId(workspaceId);
     try {
       window.localStorage.setItem(ORGANISATION_STORAGE_KEY, workspaceId);
     } catch {
       // Selection remains in memory when localStorage is unavailable.
     }
-    await load(workspaceId);
-  }, [access?.activeWorkspaceId, load]);
+    return load(workspaceId);
+  }, [access?.activeWorkspaceId, activeProject, load]);
 
   const selectProjectContext = useCallback(async (workspaceId: string, projectId: string) => {
     if (!workspaceId || !projectId) return;
@@ -133,7 +136,9 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
       activeProject,
       error,
       loading,
-      refresh: load,
+      refresh: async () => {
+        await load();
+      },
       selectOrganisation,
       selectProject,
       selectProjectContext,
