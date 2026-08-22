@@ -56,6 +56,16 @@ export type EnergyProjectManifestMaterialization = {
 
 export type EnergyProjectManifestMaterializationTimings = {
   parseNormalizeByBatch: Array<{ batchId: string; durationMs: number }>;
+  sourceWriteByBatch: Array<{
+    importBatchId: string;
+    deleteExistingMs: number;
+    historicalMappingMs: number;
+    rawWriteMs: number;
+    normalizedWriteMs: number;
+    intervalWriteMs: number;
+    qualityWriteMs: number;
+    totalMs: number;
+  }>;
   sourceWriteMs: number;
   canonicalRebuildMs: number;
   integrityAndCheckpointMs: number;

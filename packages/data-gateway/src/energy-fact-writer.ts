@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import type * as DuckDbModule from "duckdb";
 import type { EnergyIqSnapshotFactScope } from "@datafoundry/metadata";
 
@@ -149,6 +150,16 @@ export type EnergyFactProjectMaterializationResult = {
 };
 
 export type EnergyFactProjectMaterializationTimings = {
+  sourceWriteByBatch: Array<{
+    importBatchId: string;
+    deleteExistingMs: number;
+    historicalMappingMs: number;
+    rawWriteMs: number;
+    normalizedWriteMs: number;
+    intervalWriteMs: number;
+    qualityWriteMs: number;
+    totalMs: number;
+  }>;
   sourceWriteMs: number;
   canonicalRebuildMs: number;
   integrityAndCheckpointMs: number;
@@ -170,23 +181,53 @@ export const writeEnergyFactProjectMaterialization = async (
   validateProjectMaterializationInput(input);
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
+  const bulkRoot = mkdtempSync(join(tmpdir(), "energy-fact-bulk-"));
+  let bulkFileSequence = 0;
   try {
     await ensureFactSchema(connection);
     await duckDbRun(connection, "BEGIN TRANSACTION");
     await assertExpectedPreviousFactState(connection, input);
     const sourceWriteStartedAt = performance.now();
+    const sourceWriteByBatch: EnergyFactProjectMaterializationTimings["sourceWriteByBatch"] = [];
     for (const batch of input.batches) {
+      const batchStartedAt = performance.now();
       const write: EnergyFactScopedBatchWrite = {
         projectId: input.projectId,
         snapshotFactScope: input.snapshotFactScope,
         ...batch,
       };
+      const deleteExistingStartedAt = performance.now();
       await deleteExistingBatch(connection, write);
+      const deleteExistingMs = elapsedMs(deleteExistingStartedAt);
+      const historicalMappingStartedAt = performance.now();
       await updateHistoricalMappings(connection, write.normalizedReadings);
-      await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, write.rawReadings.map(rawValues));
-      await insertRows(connection, "energy_source_normalized_readings", NORMALIZED_COLUMNS, write.normalizedReadings.map(normalizedValues));
-      await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, write.intervalFacts.map(factValues));
-      await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, write.qualityEvents.map((event) => qualityValues(event, write.sourceSha256)));
+      const historicalMappingMs = elapsedMs(historicalMappingStartedAt);
+      const rawWriteStartedAt = performance.now();
+      await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, write.rawReadings.map(rawValues),
+        join(bulkRoot, `${++bulkFileSequence}-raw.csv`));
+      const rawWriteMs = elapsedMs(rawWriteStartedAt);
+      const normalizedWriteStartedAt = performance.now();
+      await insertRows(connection, "energy_source_normalized_readings", NORMALIZED_COLUMNS, write.normalizedReadings.map(normalizedValues),
+        join(bulkRoot, `${++bulkFileSequence}-normalized.csv`));
+      const normalizedWriteMs = elapsedMs(normalizedWriteStartedAt);
+      const intervalWriteStartedAt = performance.now();
+      await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, write.intervalFacts.map(factValues),
+        join(bulkRoot, `${++bulkFileSequence}-intervals.csv`));
+      const intervalWriteMs = elapsedMs(intervalWriteStartedAt);
+      const qualityWriteStartedAt = performance.now();
+      await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, write.qualityEvents.map((event) => qualityValues(event, write.sourceSha256)),
+        join(bulkRoot, `${++bulkFileSequence}-quality.csv`));
+      const qualityWriteMs = elapsedMs(qualityWriteStartedAt);
+      sourceWriteByBatch.push({
+        importBatchId: batch.importBatchId,
+        deleteExistingMs,
+        historicalMappingMs,
+        rawWriteMs,
+        normalizedWriteMs,
+        intervalWriteMs,
+        qualityWriteMs,
+        totalMs: elapsedMs(batchStartedAt),
+      });
     }
     const sourceWriteMs = elapsedMs(sourceWriteStartedAt);
     const canonicalRebuildMs = await publishCanonicalProjectFacts(
@@ -208,6 +249,7 @@ export const writeEnergyFactProjectMaterialization = async (
       batchStats,
       projectAudit,
       timings: {
+        sourceWriteByBatch,
         sourceWriteMs,
         canonicalRebuildMs,
         integrityAndCheckpointMs,
@@ -218,7 +260,11 @@ export const writeEnergyFactProjectMaterialization = async (
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
-    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+    try {
+      await duckDbClose(connection).catch(ignoreAlreadyClosed);
+    } finally {
+      cleanupBulkRoot(bulkRoot);
+    }
   }
 };
 
@@ -1177,16 +1223,85 @@ const insertRows = async (
   table: string,
   columns: readonly string[],
   rows: unknown[][],
+  csvPath: string,
 ): Promise<void> => {
-  const chunkSize = Math.max(1, Math.min(1_000, Math.floor(30_000 / columns.length)));
-  for (let offset = 0; offset < rows.length; offset += chunkSize) {
-    const chunk = rows.slice(offset, offset + chunkSize);
-    const placeholders = chunk.map(() => `(${columns.map(() => "?").join(",")})`).join(",");
-    await duckDbRun(
-      connection,
-      `INSERT INTO ${table} (${columns.join(",")}) VALUES ${placeholders}`,
-      chunk.flat(),
-    );
+  if (rows.length === 0) return;
+  requireSqlIdentifier(table);
+  for (const column of columns) requireSqlIdentifier(column);
+  const file = openSync(csvPath, "wx", 0o600);
+  try {
+    let buffered = "";
+    for (const row of rows) {
+      if (row.length !== columns.length) throw new Error("ENERGYIQ_FACT_BULK_ROW_WIDTH_INVALID");
+      buffered += `${row.map(serializeCsvValue).join(",")}\n`;
+      if (buffered.length >= 1_048_576) {
+        writeSync(file, buffered, undefined, "utf8");
+        buffered = "";
+      }
+    }
+    if (buffered.length > 0) writeSync(file, buffered, undefined, "utf8");
+  } finally {
+    closeSync(file);
+  }
+  await duckDbRunFinalized(connection, `
+    COPY ${table} (${columns.join(",")})
+    FROM '${sqlStringLiteral(normalizeDuckDbFilePath(csvPath))}'
+    (FORMAT CSV, HEADER FALSE, DELIMITER ',', QUOTE '"', ESCAPE '"',
+     NULL '${ENERGY_FACT_CSV_NULL}', ALLOW_QUOTED_NULLS FALSE)
+  `);
+};
+
+const duckDbRunFinalized = async (
+  connection: DuckDbModule.Connection,
+  sql: string,
+): Promise<void> => await new Promise((resolvePromise, reject) => {
+  let statement: DuckDbModule.Statement;
+  statement = connection.run(sql, (runError) => {
+    statement.finalize((finalizeError) => {
+      if (runError) reject(runError);
+      else if (finalizeError) reject(finalizeError);
+      else resolvePromise();
+    });
+  });
+});
+
+const ENERGY_FACT_CSV_NULL = "__ENERGYIQ_NULL_99C82A35F37C4EA0__";
+
+const serializeCsvValue = (value: unknown): string => {
+  if (value === null) return ENERGY_FACT_CSV_NULL;
+  if (typeof value === "string") {
+    if (value.includes("\0")) throw new Error("ENERGYIQ_FACT_BULK_STRING_INVALID");
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error("ENERGYIQ_FACT_BULK_NUMBER_INVALID");
+    return String(value);
+  }
+  if (typeof value === "boolean") return value ? "true" : "false";
+  throw new Error("ENERGYIQ_FACT_BULK_VALUE_INVALID");
+};
+
+const requireSqlIdentifier = (value: string): void => {
+  if (!/^[a-z][a-z0-9_]*$/.test(value)) throw new Error("ENERGYIQ_FACT_BULK_IDENTIFIER_INVALID");
+};
+
+const normalizeDuckDbFilePath = (value: string): string => resolve(value).replaceAll("\\", "/");
+const sqlStringLiteral = (value: string): string => value.replaceAll("'", "''");
+
+const cleanupBulkRoot = (root: string): void => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? error.code : undefined;
+    if (process.platform !== "win32" || (code !== "EPERM" && code !== "EBUSY")) throw error;
+    const retry = setTimeout(() => {
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      } catch {
+        // DuckDB's cached Windows Database handle can release COPY files after this request returns.
+      }
+    }, 1_000);
+    retry.unref();
   }
 };
 

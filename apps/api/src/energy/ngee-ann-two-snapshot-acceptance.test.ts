@@ -417,7 +417,10 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
     async () => {
       const mark = phaseTimer();
       const sourceRoot = process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT!.trim();
-      const root = mkdtempSync(join(tmpdir(), "ngee-ann-extended-import-"));
+      const retainedRoot = process.env.ENERGYIQ_EXTENDED_TWO_SNAPSHOT_ACCEPTANCE_ROOT?.trim();
+      const root = retainedRoot
+        ? createRetainedFixtureRoot(retainedRoot)
+        : mkdtempSync(join(tmpdir(), "ngee-ann-extended-import-"));
       const databasePath = join(root, "energy.duckdb");
       const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
       const fileAssets = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
@@ -474,6 +477,7 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
           requestedBatchId: previousSources[0]!.batchId,
           databasePath,
         });
+        logMaterializationTimings("previous", materializedPrevious.timings);
         mark("materialize previous Snapshot");
 
         expect(resolveEnergyIqSnapshotFactScope(materializedPrevious.snapshot)).toMatchObject({
@@ -534,6 +538,13 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         if (!savedPrevious) throw new Error("NGEE_ANN_PREVIOUS_DATA_UPDATE_SAVE_MISSING");
         mark("save previous Overview");
 
+        if (process.env.ENERGYIQ_EXTENDED_ACCEPTANCE_STOP_AFTER_PREVIOUS === "1") {
+          if (!retainedRoot) {
+            throw new Error("ENERGYIQ_EXTENDED_ACCEPTANCE_RETAIN_ROOT_REQUIRED_FOR_PREVIOUS_ONLY");
+          }
+          return;
+        }
+
         const registeredCurrent = await registerSourceContents(metadata, fileAssets, fullSources);
         mark("register current sources");
         updateSourceManifest(metadata, registeredCurrent.map((source) => source.sha256));
@@ -544,6 +555,7 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
           requestedBatchId: fullSources[0]!.batchId,
           databasePath,
         });
+        logMaterializationTimings("current", materializedCurrent.timings);
         mark("materialize current Snapshot");
         expect(materializedCurrent.snapshot.id).not.toBe(materializedPrevious.snapshot.id);
         await expect(readEnergyFactProjectAudit({ databasePath, projectId: PROJECT_ID })).resolves.toMatchObject({
@@ -595,7 +607,112 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         });
       } finally {
         metadata.close();
-        removeTemporaryFixture(root);
+        if (retainedRoot) {
+          if (process.env.ENERGYIQ_ACCEPTANCE_TIMINGS === "1") {
+            console.info(`[ngee-ann-two-snapshot] retained extended fixture: ${root}`);
+          }
+        } else {
+          removeTemporaryFixture(root);
+        }
+      }
+    },
+    1_200_000,
+  );
+
+  it.runIf(Boolean(
+    process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT?.trim()
+    && process.env.ENERGYIQ_EXTENDED_UPDATE_EXISTING_ROOT?.trim(),
+  ))(
+    "advances an existing Previous acceptance fixture to Current without rewriting its saved analysis or AI artifacts",
+    async () => {
+      const mark = phaseTimer();
+      const sourceRoot = process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT!.trim();
+      const root = resolve(process.env.ENERGYIQ_EXTENDED_UPDATE_EXISTING_ROOT!.trim());
+      const databasePath = join(root, "energy.duckdb");
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      const fileAssets = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
+      const gateway = new LocalDataGateway(metadata);
+      try {
+        vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
+        const user = metadata.users.getById({ user_id: "dev-user" });
+        const previousSaved = metadata.energyIq.savedAnalyses.listProject(PROJECT_ID)[0];
+        if (!previousSaved) throw new Error("NGEE_ANN_PREVIOUS_DATA_UPDATE_SAVE_MISSING");
+        const frozenSaved = {
+          dataSnapshotId: previousSaved.data_snapshot_id,
+          analysisJson: previousSaved.analysis_json,
+          queryJson: previousSaved.query_json,
+          snapshotJson: previousSaved.snapshot_json,
+        };
+        const previousArtifacts = metadata.energyIq.overviewAiArtifacts.listByProject({
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: PROJECT_ID,
+        });
+        expect(previousArtifacts.filter((artifact) => artifact.status === "available")).toHaveLength(6);
+
+        const context = {
+          metadataStore: metadata,
+          fileAssetService: fileAssets,
+          dataGateway: gateway,
+          userId: user.id,
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+        } as unknown as Required<ConfigApiContext>;
+        const fullSources = Object.values(EXTENDED_SOURCES).map((definition) => ({
+          ...definition,
+          content: readFileSync(join(sourceRoot, definition.filename)),
+        }));
+        const registeredCurrent = await registerSourceContents(metadata, fileAssets, fullSources);
+        mark("register current sources into retained Previous fixture");
+        updateSourceManifest(metadata, registeredCurrent.map((source) => source.sha256));
+        const materializedCurrent = await materializeEnergyProjectManifest({
+          context,
+          userId: user.id,
+          projectId: PROJECT_ID,
+          requestedBatchId: fullSources[0]!.batchId,
+          databasePath,
+        });
+        logMaterializationTimings("current retained", materializedCurrent.timings);
+        mark("materialize current Snapshot from retained Previous fixture");
+
+        expect(materializedCurrent.timings?.sourceWriteMs).toBeLessThan(100_000);
+        expect(materializedCurrent.timings?.totalMs).toBeLessThan(120_000);
+        expect(materializedCurrent.snapshot.id).not.toBe(frozenSaved.dataSnapshotId);
+        await expect(readEnergyFactProjectAudit({ databasePath, projectId: PROJECT_ID })).resolves.toMatchObject({
+          rawRowCount: 419_862,
+          normalizedReadingCount: 210_795,
+          intervalFactCount: 210_777,
+          invalidIntervalDurationCount: 0,
+          cadenceGapIntervalCount: 21,
+          negativeDeltaIntervalCount: 0,
+          canonicalMeterSeriesCount: 18,
+          missingAdjacentIntervalCount: 0,
+          orphanIntervalFactCount: 0,
+        });
+        const current = await resolveCurrentOverview({
+          metadata,
+          gateway,
+          user,
+          databasePath,
+          now: new Date("2026-08-22T05:00:00.000Z"),
+        });
+        mark("resolve current Overview from retained Previous fixture");
+        expect(current.snapshot.context).toMatchObject({
+          from: "2026-07-31T16:00:00.000Z",
+          to: "2026-08-19T16:00:00.000Z",
+          dataSnapshotId: materializedCurrent.snapshot.id,
+        });
+        expect(metadata.energyIq.savedAnalyses.get(previousSaved.id)).toMatchObject({
+          data_snapshot_id: frozenSaved.dataSnapshotId,
+          analysis_json: frozenSaved.analysisJson,
+          query_json: frozenSaved.queryJson,
+          snapshot_json: frozenSaved.snapshotJson,
+        });
+        expect(metadata.energyIq.overviewAiArtifacts.listByProject({
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: PROJECT_ID,
+        }).filter((artifact) => artifact.status === "available").map((artifact) => artifact.id).sort())
+          .toEqual(previousArtifacts.map((artifact) => artifact.id).sort());
+      } finally {
+        metadata.close();
       }
     },
     1_200_000,
@@ -761,6 +878,15 @@ const phaseTimer = () => {
     }
     previous = current;
   };
+};
+
+const logMaterializationTimings = (
+  phase: string,
+  timings: Awaited<ReturnType<typeof materializeEnergyProjectManifest>>["timings"],
+): void => {
+  if (process.env.ENERGYIQ_ACCEPTANCE_TIMINGS === "1") {
+    console.info(`[ngee-ann-two-snapshot] ${phase} materialization timings: ${JSON.stringify(timings)}`);
+  }
 };
 
 const configureNgeeAnnOperationalPolicy = (

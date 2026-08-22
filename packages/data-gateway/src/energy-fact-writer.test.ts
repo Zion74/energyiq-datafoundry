@@ -102,14 +102,104 @@ describe("writeEnergyFactProjectMaterialization", () => {
       missingAdjacentIntervalCount: 0,
     });
     expect(written.timings).toEqual({
+      sourceWriteByBatch: [{
+        importBatchId: "hourly-a",
+        deleteExistingMs: expect.any(Number),
+        historicalMappingMs: expect.any(Number),
+        rawWriteMs: expect.any(Number),
+        normalizedWriteMs: expect.any(Number),
+        intervalWriteMs: expect.any(Number),
+        qualityWriteMs: expect.any(Number),
+        totalMs: expect.any(Number),
+      }],
       sourceWriteMs: expect.any(Number),
       canonicalRebuildMs: expect.any(Number),
       integrityAndCheckpointMs: expect.any(Number),
       totalMs: expect.any(Number),
     });
-    expect(Object.values(written.timings).every((durationMs) => Number.isFinite(durationMs) && durationMs >= 0)).toBe(true);
+    expect(Object.values(written.timings).filter((value) => typeof value === "number")
+      .every((durationMs) => Number.isFinite(durationMs) && durationMs >= 0)).toBe(true);
     await expect(readEnergyFactMaterializationStats({ databasePath: ":memory:", importBatchId: "hourly-a" }))
       .resolves.toMatchObject({ normalizedRows: 3, intervalFacts: 2, qualityEvents: 1 });
+  });
+
+  it("bulk-loads nullable and quoted source values without changing their meaning", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-bulk-value-roundtrip-"));
+    const databasePath = join(root, "facts.duckdb");
+    const projectId = "project-bulk-value-roundtrip";
+    const source = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "quoted-a",
+      sourceSha256: "quoted-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    });
+    const sourceLabel = "Meter, \"North\"\n__ENERGYIQ_NULL_99C82A35F37C4EA0__";
+    const batch: EnergyFactMaterializationBatchWrite = {
+      ...projectBatch(source),
+      normalizedReadings: source.normalizedReadings.map((row) => ({ ...row, sourceLabel })),
+      intervalFacts: source.intervalFacts.map((row) => ({ ...row, sourceLabel })),
+      rawReadings: [{
+        workspaceId: "workspace-1",
+        projectId,
+        importBatchId: source.importBatchId,
+        resource: "electricity",
+        sourceLabel,
+        meterPointId: "meter-a",
+        scopeId: "scope-a",
+        eventTime: "2026-05-01T00:00:00.000Z",
+        activeEnergyKwh: 100,
+        sourceFile: "quoted,a.xlsx",
+        sourceSha256: source.sourceSha256,
+        sourceRowNumber: 2,
+        isValid: true,
+        validationError: "",
+        isOverlapConflict: false,
+      }],
+      qualityEvents: [{
+        workspaceId: "workspace-1",
+        projectId,
+        importBatchId: source.importBatchId,
+        meterPointId: "meter-a",
+        sourceLabel,
+        eventTime: "2026-05-01T00:00:00.000Z",
+        code: "quoted_value",
+        severity: "warning",
+        details: { note: "comma, quote \" and newline\nremain exact" },
+        sourceReadingKind: "cumulative_energy",
+      }],
+    };
+    try {
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId,
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: "unavailable",
+        snapshotFactScope: testFactScope(projectId, "snapshot-quoted", [source.sourceSha256]),
+        batches: [batch],
+      });
+      await expect(readRows(databasePath, `
+        SELECT device_name, validation_error, source_file
+        FROM raw_meter_readings WHERE project_id = '${projectId}'
+      `)).resolves.toEqual([{ device_name: sourceLabel, validation_error: "", source_file: "quoted,a.xlsx" }]);
+      await expect(readRows(databasePath, `
+        SELECT device_name FROM energy_source_normalized_readings WHERE project_id = '${projectId}' LIMIT 1
+      `)).resolves.toEqual([{ device_name: sourceLabel }]);
+      await expect(readRows(databasePath, `
+        SELECT source_label, details_json::VARCHAR AS details_json
+        FROM energy_source_quality_events WHERE project_id = '${projectId}'
+      `)).resolves.toEqual([{
+        source_label: sourceLabel,
+        details_json: JSON.stringify({ note: "comma, quote \" and newline\nremain exact" }),
+      }]);
+    } finally {
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (error) {
+        if (process.platform !== "win32" || !(error instanceof Error) || !("code" in error)
+          || (error.code !== "EPERM" && error.code !== "EBUSY")) throw error;
+      }
+    }
   });
 
   it.each([
