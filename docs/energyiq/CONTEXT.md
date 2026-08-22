@@ -242,8 +242,11 @@ Analysis Run 的只读客户视图。标题和备注可以调整，但冻结的 
 **Blinded Review Pack**
 从独立 Evaluation Attempts 生成、隐藏 Run 顺序与 Provider identity 的人工评分包；服务端私有 audit 保留盲评 token 到 exact attempt 的映射。人工评分分别记录 Summary usefulness、各 Insight usefulness，以及新角度、相关性、清晰直白、是否值得深挖、事实与猜想是否诚实和用户价值。
 
-**Snapshot Transition Evaluation**
-在 exact Snapshot A 与重新生成的 exact Snapshot B 之间，以双方 Finding 和 Evidence lineage 为依据记录 `New / Changed / Still supported / Resolved / No material change` 的不可变评估。它不以文本相似度代替事实判断，也不会自动发布 current Overview Artifact。
+**Snapshot Diff Evaluation**
+在 exact Previous Snapshot 与重新生成的 exact Current Snapshot 之间，以双方 Finding 和 Evidence lineage 为依据记录 `New / Changed / Still supported / Resolved / No material change` 的不可变评估。它不以文本相似度代替事实判断，也不会自动发布 current Overview Artifact。
+
+**Change Review / 变化回顾**
+面向用户呈现 Previous Overview 与 Current Overview 在指标、Key Findings、Section Interpretation、Additional Insights 和 Evidence 上的变化。客户入口使用 `What changed?`，页面使用 `Previous / Current`；技术实现按对象分别称为 `Snapshot Diff` 和 `Template Revision Diff`。禁止把该能力称为 `A/B` 或 `A→B`，以免与实验分流意义上的 A/B Test 混淆。历史代码变量或旧运行记录中的 A/B 标签仅作为兼容身份保留。
 
 ## 用户与后台
 

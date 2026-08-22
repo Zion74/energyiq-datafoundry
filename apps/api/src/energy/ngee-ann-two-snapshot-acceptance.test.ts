@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
+import writeXlsxFile from "write-excel-file/node";
 
 import {
   LocalDataGateway,
@@ -23,7 +24,7 @@ import {
   NGEE_ANN_WORKSPACE_ID,
 } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { inspectEnergyExcelWorkbook, readEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
@@ -412,8 +413,9 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
   }, 360_000);
 
   it.runIf(Boolean(process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT?.trim()))(
-    "materializes the supplied April-August cumulative workbooks into an August natural-month Overview",
+    "advances the August natural-month Overview when one more day of real cumulative data arrives",
     async () => {
+      const mark = phaseTimer();
       const sourceRoot = process.env.ENERGYIQ_EXTENDED_NGEE_SOURCE_ROOT!.trim();
       const root = mkdtempSync(join(tmpdir(), "ngee-ann-extended-import-"));
       const databasePath = join(root, "energy.duckdb");
@@ -448,27 +450,104 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
           workspaceId: NGEE_ANN_WORKSPACE_ID,
         } as unknown as Required<ConfigApiContext>;
 
-        const sources = await registerSources(
+        const fullSources = Object.values(EXTENDED_SOURCES).map((definition) => ({
+          ...definition,
+          content: readFileSync(join(sourceRoot, definition.filename)),
+        }));
+        const previousSources = await Promise.all(fullSources.map(async (source) => ({
+          batchId: `${source.batchId}-through-aug-19`,
+          filename: source.filename.replace(".xlsx", " through 19 Aug.xlsx"),
+          content: await cumulativeWorkbookBefore(source.content, "2026-08-20T00:00:00"),
+        })));
+        mark("build through-19-Aug workbooks");
+        const registeredPrevious = await registerSourceContents(
           metadata,
           fileAssets,
-          Object.values(EXTENDED_SOURCES),
-          sourceRoot,
+          previousSources,
         );
-        updateSourceManifest(metadata, sources.map((source) => source.sha256));
-        const materialized = await materializeEnergyProjectManifest({
+        mark("register previous sources");
+        updateSourceManifest(metadata, registeredPrevious.map((source) => source.sha256));
+        const materializedPrevious = await materializeEnergyProjectManifest({
           context,
           userId: user.id,
           projectId: PROJECT_ID,
-          requestedBatchId: EXTENDED_SOURCES.level6.batchId,
+          requestedBatchId: previousSources[0]!.batchId,
           databasePath,
         });
+        mark("materialize previous Snapshot");
 
-        expect(resolveEnergyIqSnapshotFactScope(materialized.snapshot)).toMatchObject({
-          sourceSha256: sortedSha(sources),
+        expect(resolveEnergyIqSnapshotFactScope(materializedPrevious.snapshot)).toMatchObject({
+          sourceSha256: sortedSha(registeredPrevious),
           factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v4",
         });
         await expect(readEnergyFactProjectAudit({ databasePath, projectId: PROJECT_ID })).resolves.toMatchObject({
-          rawRowCount: 210_795,
+          rawRowCount: 209_067,
+          invalidRawRowCount: 0,
+          unmappedRawRowCount: 0,
+          normalizedReadingCount: 209_067,
+          intervalFactCount: 209_049,
+          invalidIntervalDurationCount: 0,
+          cadenceGapIntervalCount: 21,
+          negativeDeltaIntervalCount: 0,
+          canonicalMeterSeriesCount: 18,
+          adjacentReadingPairCount: 209_049,
+          missingAdjacentIntervalCount: 0,
+          orphanIntervalFactCount: 0,
+        });
+
+        const previous = await resolveCurrentOverview({
+          metadata,
+          gateway,
+          user,
+          databasePath,
+          now: new Date("2026-08-21T05:00:00.000Z"),
+        });
+        mark("resolve previous Overview");
+        expect(previous.snapshot.context).toMatchObject({
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          projectId: PROJECT_ID,
+          scopeId: "project",
+          timezone: "Asia/Singapore",
+          from: "2026-07-31T16:00:00.000Z",
+          to: "2026-08-18T16:00:00.000Z",
+          dataSnapshotId: materializedPrevious.snapshot.id,
+        });
+        expect(previous.snapshot.analysis.summary).toMatchObject({
+          usageKwh: expect.any(Number),
+          validIntervalCount: expect.any(Number),
+        });
+        expectEvidencePins(previous.snapshot.evidence, materializedPrevious.snapshot.id);
+
+        const savedResponse = await handleEnergyApiRequest(
+          jsonPost({
+            projectId: PROJECT_ID,
+            scopeId: "project",
+            resource: "electricity",
+            analysisWindow: "current-month-to-date",
+            title: "Ngee Ann before 20 August update",
+          }),
+          ["projects", PROJECT_ID, "saved-analyses"],
+          context,
+        );
+        expect(savedResponse.status, JSON.stringify(savedResponse.body)).toBe(201);
+        const savedPrevious = metadata.energyIq.savedAnalyses.listProject(PROJECT_ID)[0];
+        if (!savedPrevious) throw new Error("NGEE_ANN_PREVIOUS_DATA_UPDATE_SAVE_MISSING");
+        mark("save previous Overview");
+
+        const registeredCurrent = await registerSourceContents(metadata, fileAssets, fullSources);
+        mark("register current sources");
+        updateSourceManifest(metadata, registeredCurrent.map((source) => source.sha256));
+        const materializedCurrent = await materializeEnergyProjectManifest({
+          context,
+          userId: user.id,
+          projectId: PROJECT_ID,
+          requestedBatchId: fullSources[0]!.batchId,
+          databasePath,
+        });
+        mark("materialize current Snapshot");
+        expect(materializedCurrent.snapshot.id).not.toBe(materializedPrevious.snapshot.id);
+        await expect(readEnergyFactProjectAudit({ databasePath, projectId: PROJECT_ID })).resolves.toMatchObject({
+          rawRowCount: 419_862,
           invalidRawRowCount: 0,
           unmappedRawRowCount: 0,
           normalizedReadingCount: 210_795,
@@ -482,38 +561,44 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
           orphanIntervalFactCount: 0,
         });
 
-        const analysis = await resolveCurrentOverview({
+        const current = await resolveCurrentOverview({
           metadata,
           gateway,
           user,
           databasePath,
-          now: new Date("2026-08-21T05:00:00.000Z"),
+          now: new Date("2026-08-22T05:00:00.000Z"),
         });
-        expect(analysis.snapshot.context).toMatchObject({
+        mark("resolve current Overview");
+        expect(current.snapshot.context).toMatchObject({
           workspaceId: NGEE_ANN_WORKSPACE_ID,
           projectId: PROJECT_ID,
           scopeId: "project",
           timezone: "Asia/Singapore",
           from: "2026-07-31T16:00:00.000Z",
           to: "2026-08-19T16:00:00.000Z",
-          dataSnapshotId: materialized.snapshot.id,
+          dataSnapshotId: materializedCurrent.snapshot.id,
         });
-        expect(analysis.snapshot.analysis.summary).toMatchObject({
-          usageKwh: expect.any(Number),
-          validIntervalCount: expect.any(Number),
+        expect(current.snapshot.analysis.summary.usageKwh).toBeGreaterThan(
+          previous.snapshot.analysis.summary.usageKwh,
+        );
+        expect(current.snapshot.analysis.comparison.usageKwh).toBeGreaterThan(0);
+        expect(current.snapshot.analysis.summary.peakKw).toBeGreaterThan(0);
+        expect(current.snapshot.analysis.cost.status).toBe("available");
+        expect(current.snapshot.analysis.timeBehaviour?.dayProfiles.length).toBeGreaterThan(0);
+        expectEvidencePins(current.snapshot.evidence, materializedCurrent.snapshot.id);
+        expect(releaseIdentity(current.snapshot)).toEqual(releaseIdentity(previous.snapshot));
+
+        expect(metadata.energyIq.savedAnalyses.get(savedPrevious.id)).toMatchObject({
+          data_snapshot_id: materializedPrevious.snapshot.id,
+          template_revision_id: savedPrevious.template_revision_id,
+          snapshot_json: savedPrevious.snapshot_json,
         });
-        expect(analysis.snapshot.analysis.summary.usageKwh).toBeGreaterThan(0);
-        expect(analysis.snapshot.analysis.comparison.usageKwh).toBeGreaterThan(0);
-        expect(analysis.snapshot.analysis.summary.peakKw).toBeGreaterThan(0);
-        expect(analysis.snapshot.analysis.cost.status).toBe("available");
-        expect(analysis.snapshot.analysis.timeBehaviour?.dayProfiles.length).toBeGreaterThan(0);
-        expectEvidencePins(analysis.snapshot.evidence, materialized.snapshot.id);
       } finally {
         metadata.close();
         removeTemporaryFixture(root);
       }
     },
-    600_000,
+    1_200_000,
   );
 });
 
@@ -522,10 +607,23 @@ const registerSources = async (
   fileAssets: LocalFileAssetService,
   definitions: readonly SourceDefinition[],
   sourceRoot = SOURCE_ROOT,
+) => registerSourceContents(
+  metadata,
+  fileAssets,
+  definitions.map((definition) => ({
+    ...definition,
+    content: readFileSync(join(sourceRoot, definition.filename)),
+  })),
+);
+
+const registerSourceContents = async (
+  metadata: ReturnType<typeof createMetadataStore>,
+  fileAssets: LocalFileAssetService,
+  definitions: ReadonlyArray<{ batchId: string; filename: string; content: Buffer; sha256?: string }>,
 ) => Promise.all(definitions.map(async (definition) => {
-  const content = readFileSync(join(sourceRoot, definition.filename));
+  const { content } = definition;
   const sha256 = createHash("sha256").update(content).digest("hex");
-  expect(sha256).toBe(definition.sha256);
+  if (definition.sha256) expect(sha256).toBe(definition.sha256);
   const inspection = await inspectEnergyExcelWorkbook(content);
   expect(inspection).toMatchObject({
     sheetName: "Sheet1",
@@ -556,6 +654,35 @@ const registerSources = async (
   });
   return { ...definition, sha256 };
 }));
+
+const cumulativeWorkbookBefore = async (
+  content: Buffer,
+  localEndExclusive: string,
+): Promise<Buffer> => {
+  const workbook = await readEnergyExcelWorkbook(content);
+  const rows = workbook.rows.filter((row) => (
+    row.validationError === undefined
+    && row.localTimestamp !== undefined
+    && row.activeEnergyKwh !== undefined
+    && row.localTimestamp < localEndExclusive
+  ));
+  return (await writeXlsxFile([
+    [
+      { value: "Device Name", type: String },
+      { value: "Time", type: String },
+      { value: "Active Energy", type: String },
+    ],
+    ...rows.map((row) => [
+      { value: row.sourceLabel, type: String },
+      {
+        value: new Date(`${row.localTimestamp}Z`),
+        type: Date,
+        format: "yyyy-mm-dd hh:mm:ss",
+      },
+      { value: row.activeEnergyKwh!, type: Number },
+    ]),
+  ])).toBuffer();
+};
 
 const updateSourceManifest = (
   metadata: ReturnType<typeof createMetadataStore>,
